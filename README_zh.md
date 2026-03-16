@@ -1,3 +1,4 @@
+[![English](https://img.shields.io/badge/Lang-English-blue)](./README.md)![中文](https://img.shields.io/badge/语言-中文-red)
 # 华为 Ascend NPU 上的 SGLang MXFP8 量化适配研究
 
 本仓库 (`sglang_quant_eval`) 致力于研究和实现在 **华为 Ascend NPU** 硬件上为 **SGLang** 适配 MXFP8/MXFP4 量化功能。
@@ -12,9 +13,10 @@
 
 - `sglang/` - 核心 SGLang 源码仓库 (submodule/clone)，适配代码将在此处修改。
 - `MindIE-SD/` - 华为 MindIE-SD 源码 (submodule/clone)，作为 Ascend NPU MXFP8/FP8 操作的主要参考实现。
-- `sglang_mxfp8_ascend_research.md` - MXFP8 适配的详细研究报告、分析及实现方案。
-- `CLAUDE.md` - AI 助手的指令配置及技术摘要。
-- `.agent/skills/` - 为 AI Agent 定制的技能，用于执行诸如查找 SGLang 量化实现、检查 NPU API 使用情况以及生成 gitmoji 提交信息等任务。
+- `sglang_mxfp8_ascend_research.md` / `_zh.md` - MXFP8 适配的详细研究报告、分析及实现方案（提供中英文双语）。
+- `README.md` / `README_zh.md` - 项目自述文档（提供中英文双语）。
+- `CLAUDE.md` - AI 助手的系统指令配置及项目上下文摘要。
+- `.agent/` & `.claude/` - AI Agent 自定义技能及配置，包含查找代码实现与 Gitmoji 自动提交等辅助开发工具。
 
 ## 🚀 实现路径
 

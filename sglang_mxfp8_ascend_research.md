@@ -1,3 +1,4 @@
+![English](https://img.shields.io/badge/Lang-English-blue) [![中文](https://img.shields.io/badge/语言-中文-red)](./sglang_mxfp8_ascend_research_zh.md)
 # SGLang MXFP8 Quantization Adaptation Research on Huawei Ascend NPU
 
 > Date: 2026-03-16

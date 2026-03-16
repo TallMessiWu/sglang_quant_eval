@@ -1,3 +1,4 @@
+[![English](https://img.shields.io/badge/Lang-English-blue)](./sglang_mxfp8_ascend_research.md) ![中文](https://img.shields.io/badge/语言-中文-red)
 # SGLang MXFP8 量化在华为 Ascend NPU 上的适配研究报告
 
 > 日期: 2026-03-16

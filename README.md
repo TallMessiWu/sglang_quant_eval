@@ -1,3 +1,4 @@
+![English](https://img.shields.io/badge/Lang-English-blue) [![中文](https://img.shields.io/badge/语言-中文-red)](./README_zh.md)
 # SGLang MXFP8 on Ascend NPU Research
 
 This repository (`sglang_quant_eval`) is dedicated to researching and implementing MXFP8/MXFP4 quantization adaptation for **SGLang** on **Huawei Ascend NPU** hardware.
@@ -12,9 +13,10 @@ This repository (`sglang_quant_eval`) is dedicated to researching and implementi
 
 - `sglang/` - The core SGLang source code repository (submodule/clone) where the modifications will be made.
 - `MindIE-SD/` - Huawei's MindIE-SD source code (submodule/clone), serving as a primary reference implementation for Ascend NPU MXFP8/FP8 operations.
-- `sglang_mxfp8_ascend_research.md` - Comprehensive research report, analysis, and implementation plan for the MXFP8 adaptation.
-- `CLAUDE.md` - Claude/Agent instructions and technical summaries for the AI assistant.
-- `.agent/skills/` - Custom agent skills for tasks like looking up SGLang quant implementations, checking NPU API usage, and generating gitmoji commits.
+- `sglang_mxfp8_ascend_research.md` / `_zh.md` - Comprehensive research report, analysis, and implementation plan for the MXFP8 adaptation in English and Chinese.
+- `README.md` / `README_zh.md` - Project description and guide in English and Chinese.
+- `CLAUDE.md` - AI assistant system instructions and project context.
+- `.agent/` & `.claude/` - Custom agent skills and configurations for AI assistants to help with codebase reading and Gitmoji commits.
 
 ## 🚀 Implementation Paths
 

@@ -1,0 +1,6 @@
+[submodule "sglang"]
+	path = sglang
+	url = https://github.com/sgl-project/sglang.git
+[submodule "MindIE-SD"]
+	path = MindIE-SD
+	url = https://gitcode.com/Ascend/MindIE-SD.git

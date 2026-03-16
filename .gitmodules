@@ -4,3 +4,6 @@
 [submodule "MindIE-SD"]
 	path = MindIE-SD
 	url = https://gitcode.com/Ascend/MindIE-SD.git
+[submodule "msmodelslim"]
+	path = msmodelslim
+	url = https://gitcode.com/Ascend/msmodelslim.git

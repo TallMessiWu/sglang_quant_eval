@@ -135,10 +135,10 @@ python3 -m sglang.launch_server \
 文件: `srt/layers/quantization/__init__.py`
 
 ```python
-QUANTIZATION_METHODS = {
+# BASE_QUANTIZATION_METHODS (始终注册)
+BASE_QUANTIZATION_METHODS = {
     "fp8": Fp8Config,
     "mxfp8": Fp8Config,          # use_mxfp8=True
-    "mxfp4": Mxfp4Config,
     "blockwise_int8": BlockInt8Config,
     "w8a8_int8": W8A8Int8Config,
     "w8a8_fp8": W8A8Fp8Config,
@@ -151,6 +151,10 @@ QUANTIZATION_METHODS = {
     "modelslim": ModelSlimConfig,  # NPU 专用
     # ... 20+ 种
 }
+
+# mxfp4 仅在 CUDA 或支持 MXFP 的 HIP 平台上注册
+if is_cuda() or (_is_mxfp_supported and is_hip()):
+    BASE_QUANTIZATION_METHODS["mxfp4"] = Mxfp4Config
 ```
 
 ---
@@ -161,28 +165,39 @@ QUANTIZATION_METHODS = {
 
 ```
 srt/hardware_backend/npu/
+├── allocator_npu.py              # NPU 内存分配器
+├── cmo.py                        # CMO 相关
+├── memory_pool_npu.py            # NPU 内存池
+├── utils.py
+├── attention/
+│   ├── ascend_backend.py         # Ascend 注意力后端
+│   ├── ascend_torch_native_backend.py
+│   └── mla_preprocess.py         # MLA 预处理
 ├── quantization/
-│   ├── linear_method_npu.py      # W8A8 INT8 NPU Linear
-│   └── fused_moe_method_npu.py   # W4A4 MoE NPU
+│   ├── linear_method_npu.py      # W8A8/W4A4 Linear NPU
+│   └── fused_moe_method_npu.py   # W4A4/W4A8/W4A16/W8A8 MoE NPU
 ├── graph_runner/
 │   ├── npu_graph_runner.py       # NPU 图执行器
 │   ├── eagle_draft_npu_graph_runner.py
+│   ├── eagle_draft_extend_npu_graph_runner.py
 │   └── vit_npu_graph_runner.py
 ├── modules/
 │   ├── deepseek_v2_attention_mla_npu.py
-│   └── ...
-├── moe/topk.py
-└── utils.py
+│   └── qwen_vl_processor.py
+└── moe/topk.py
 ```
 
 ### 3.2 NPU 已支持的量化方法
 
 | 方法 | 状态 | 实现位置 |
 |------|------|----------|
-| W8A8 INT8 (静态) | ✅ 已完成 | `linear_method_npu.py` → `NPUW8A8Int8LinearMethod` |
-| W8A8 INT8 (动态) | ✅ 已完成 | `linear_method_npu.py` → `NPUW8A8Int8DynamicLinearMethod` |
-| W4A4 MoE | ✅ 已完成 | `fused_moe_method_npu.py` |
-| W4A8 (带激活裁剪) | ✅ 已完成 | 通过 ModelSlim |
+| W8A8 INT8 (静态, Linear) | ✅ 已完成 | `linear_method_npu.py` → `NPUW8A8Int8LinearMethod`；通过 ModelSlim `ModelSlimW8A8Int8` 使用 |
+| W8A8 INT8 (动态, Linear) | ✅ 已完成 | `linear_method_npu.py` → `NPUW8A8Int8DynamicLinearMethod`；通过 ModelSlim `ModelSlimW8A8Int8` 使用 |
+| W4A4 INT4 (动态, Linear) | ✅ 已完成 | `linear_method_npu.py` → `NPU_W4A4DynamicLinearMethod`；通过 ModelSlim `ModelSlimW4A4Int4` 使用 |
+| W8A8 INT8 (动态, MoE) | ✅ 已完成 | `fused_moe_method_npu.py` → `NPUW8A8Int8DynamicMoEMethod`；通过 ModelSlim `ModelSlimW8A8Int8MoE` 使用 |
+| W4A4 INT4 (动态, MoE) | ✅ 已完成 | `fused_moe_method_npu.py` → `NPUW4A4Int4DynamicMoEMethod`；通过 ModelSlim `ModelSlimW4A4Int4MoE` 使用 |
+| W4A8 INT8 (动态, MoE) | ✅ 已完成 | `fused_moe_method_npu.py` → `NPUW4A8Int8DynamicMoEMethod`；通过 ModelSlim `ModelSlimW4A8Int8MoE` 使用 |
+| W4A16 INT4 (动态, MoE) | ✅ 已完成 | `fused_moe_method_npu.py` → `NPUW4A16Int4DynamicMoEMethod`；通过 `compressed_tensors` 使用 |
 | **MXFP8** | ❌ **未实现** | **需要新增** |
 | **MXFP4** | ❌ 未实现 | 需要新增 |
 | KV Cache 量化 | 🔄 进行中 | -- |
@@ -226,25 +241,44 @@ MindIE-SD 是华为的 Stable Diffusion 推理加速引擎，专为 Ascend NPU �
 
 ### 4.3 MindIE-SD 的 MXFP8 实现 (核心参考)
 
-文件: `MindIE-SD/mindiesd/quantization/layer.py` → `W8A8MXFP8QuantLinear`
+文件: `MindIE-SD/mindiesd/quantization/layer.py` → `W8A8MXFP8QuantLinear` (继承自 `W8A8QuantBaseLinear`)
 
 ```python
-class W8A8MXFP8QuantLinear(nn.Module):
-    def forward(self, x):
-        # 1. 动态 MXFP8 量化激活
-        qx, x_scale = torch_npu.npu_dynamic_mx_quant(
-            x, dst_type=torch_npu.float8_e4m3fn
-        )
+class W8A8MXFP8QuantLinear(W8A8QuantBaseLinear):
+    # forward() 继承自 W8A8QuantBaseLinear，对 3D+ 输入会先 flatten
+    # 核心计算逻辑在 quant_matmul() 中:
+    def quant_matmul(self, x):
+        if x.dtype != self.dtype:
+            x = x.to(self.dtype)
 
-        # 2. MXFP8 矩阵乘法
+        # 1. 可选的 mul_scale 预缩放 (smooth quant 场景)
+        if self.mul_scale is not None:
+            x1, input_scale = torch_npu.npu_dynamic_mx_quant(
+                x * self.mul_scale, dst_type=torch_npu.float8_e4m3fn)
+        else:
+            x1, input_scale = torch_npu.npu_dynamic_mx_quant(
+                x, dst_type=torch_npu.float8_e4m3fn)
+
+        if self.bias.dtype != torch.float32:
+            self.bias = self.bias.to(torch.float32)
+
+        # 2. 权重 dtype 转换 + 转置
+        x2 = self.weight
+        if x2.dtype != torch.float8_e4m3fn:
+            x2 = torch_npu.npu_dtype_cast(x2, torch_npu.float8_e4m3fn)
+        x2 = x2.transpose(0, 1)
+
+        # 3. MXFP8 矩阵乘法
         output = torch_npu.npu_quant_matmul(
-            qx,
-            self.weight,           # float8_e4m3fn
-            self.weight_scale,     # float8_e8m0fnu
-            pertoken_scale=x_scale,
+            x1,
+            x2,
+            self.weight_scale.transpose(0, 1),  # weight_scale 也需转置
             scale_dtype=torch_npu.float8_e8m0fnu,
+            pertoken_scale=input_scale,
             pertoken_scale_dtype=torch_npu.float8_e8m0fnu,
-            group_sizes=[1, 1, 32]  # MXFP8 block size = 32
+            bias=self.bias,                      # 必须为 float32
+            output_dtype=self.dtype,             # 输出恢复为原精度
+            group_sizes=[1, 1, 32],              # MXFP8 block size = 32
         )
         return output
 ```
@@ -292,20 +326,22 @@ SGLang 已通过 `multimodal_gen` 子系统支持 Wan2.2:
 
 ### 5.2 Wan2.2 架构特点
 
-- **双 Transformer 架构**: `transformer` 和 `transformer_2` 分别处理高噪声和低噪声步骤
-- **DiT (Diffusion Transformer)**: 基于 Transformer 的扩散模型
+- **DiT (Diffusion Transformer)**: 基于 Transformer 的扩散模型，包含多层 Transformer blocks
 - **Pipeline**: TextEncode → Denoise (多步去噪) → VAE Decode
 - 支持 TP (张量并行) 和 SP (序列并行)
 
 ### 5.3 现有 Diffusion 量化
 
-SGLang Diffusion 目前仅支持 **SVDQuant/Nunchaku** (W4A4):
-```
-multimodal_gen/configs/quantization.py → NunchakuSVDQuantArgs
-```
-- 仅限 NVIDIA GPU
-- 不支持 FP8/MXFP8
-- 不支持 Ascend NPU
+SGLang Diffusion 目前支持以下量化方法:
+
+| 方法 | 配置位置 | 平台 |
+|------|----------|------|
+| **SVDQuant/Nunchaku** (W4A4) | `multimodal_gen/configs/quantization.py` → `NunchakuSVDQuantArgs` | NVIDIA GPU |
+| **FP8** | `multimodal_gen/runtime/layers/quantization/fp8.py` | NVIDIA GPU |
+| **ModelSlim** | `multimodal_gen/runtime/layers/quantization/modelslim.py` | Ascend NPU |
+
+- MXFP8 尚未支持
+- Nunchaku 仅限 NVIDIA GPU
 
 ### 5.4 使用方式
 
@@ -314,7 +350,7 @@ multimodal_gen/configs/quantization.py → NunchakuSVDQuantArgs
 sglang serve --model-path Wan-AI/Wan2.2-T2V-A14B-Diffusers --num-gpus 4
 
 # Python API
-from sglang import DiffGenerator
+from sglang.multimodal_gen import DiffGenerator
 gen = DiffGenerator.from_pretrained("Wan-AI/Wan2.2-T2V-A14B-Diffusers")
 ```
 

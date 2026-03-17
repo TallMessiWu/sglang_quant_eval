@@ -135,10 +135,10 @@ python3 -m sglang.launch_server \
 File: `srt/layers/quantization/__init__.py`
 
 ```python
-QUANTIZATION_METHODS = {
+# BASE_QUANTIZATION_METHODS (always registered)
+BASE_QUANTIZATION_METHODS = {
     "fp8": Fp8Config,
     "mxfp8": Fp8Config,          # use_mxfp8=True
-    "mxfp4": Mxfp4Config,
     "blockwise_int8": BlockInt8Config,
     "w8a8_int8": W8A8Int8Config,
     "w8a8_fp8": W8A8Fp8Config,
@@ -151,6 +151,10 @@ QUANTIZATION_METHODS = {
     "modelslim": ModelSlimConfig,  # NPU-specific
     # ... 20+ methods
 }
+
+# mxfp4 is conditionally registered only on CUDA or MXFP-supported HIP platforms
+if is_cuda() or (_is_mxfp_supported and is_hip()):
+    BASE_QUANTIZATION_METHODS["mxfp4"] = Mxfp4Config
 ```
 
 ---
@@ -161,28 +165,39 @@ QUANTIZATION_METHODS = {
 
 ```
 srt/hardware_backend/npu/
+├── allocator_npu.py              # NPU memory allocator
+├── cmo.py                        # CMO related
+├── memory_pool_npu.py            # NPU memory pool
+├── utils.py
+├── attention/
+│   ├── ascend_backend.py         # Ascend attention backend
+│   ├── ascend_torch_native_backend.py
+│   └── mla_preprocess.py         # MLA preprocessing
 ├── quantization/
-│   ├── linear_method_npu.py      # W8A8 INT8 NPU Linear
-│   └── fused_moe_method_npu.py   # W4A4 MoE NPU
+│   ├── linear_method_npu.py      # W8A8/W4A4 Linear NPU
+│   └── fused_moe_method_npu.py   # W4A4/W4A8/W4A16/W8A8 MoE NPU
 ├── graph_runner/
 │   ├── npu_graph_runner.py       # NPU graph executor
 │   ├── eagle_draft_npu_graph_runner.py
+│   ├── eagle_draft_extend_npu_graph_runner.py
 │   └── vit_npu_graph_runner.py
 ├── modules/
 │   ├── deepseek_v2_attention_mla_npu.py
-│   └── ...
-├── moe/topk.py
-└── utils.py
+│   └── qwen_vl_processor.py
+└── moe/topk.py
 ```
 
 ### 3.2 NPU-Supported Quantization Methods
 
 | Method | Status | Implementation Location |
 |--------|--------|------------------------|
-| W8A8 INT8 (static) | ✅ Done | `linear_method_npu.py` → `NPUW8A8Int8LinearMethod` |
-| W8A8 INT8 (dynamic) | ✅ Done | `linear_method_npu.py` → `NPUW8A8Int8DynamicLinearMethod` |
-| W4A4 MoE | ✅ Done | `fused_moe_method_npu.py` |
-| W4A8 (with activation clipping) | ✅ Done | Via ModelSlim |
+| W8A8 INT8 (static, Linear) | ✅ Done | `linear_method_npu.py` → `NPUW8A8Int8LinearMethod`; used via ModelSlim `ModelSlimW8A8Int8` |
+| W8A8 INT8 (dynamic, Linear) | ✅ Done | `linear_method_npu.py` → `NPUW8A8Int8DynamicLinearMethod`; used via ModelSlim `ModelSlimW8A8Int8` |
+| W4A4 INT4 (dynamic, Linear) | ✅ Done | `linear_method_npu.py` → `NPU_W4A4DynamicLinearMethod`; used via ModelSlim `ModelSlimW4A4Int4` |
+| W8A8 INT8 (dynamic, MoE) | ✅ Done | `fused_moe_method_npu.py` → `NPUW8A8Int8DynamicMoEMethod`; used via ModelSlim `ModelSlimW8A8Int8MoE` |
+| W4A4 INT4 (dynamic, MoE) | ✅ Done | `fused_moe_method_npu.py` → `NPUW4A4Int4DynamicMoEMethod`; used via ModelSlim `ModelSlimW4A4Int4MoE` |
+| W4A8 INT8 (dynamic, MoE) | ✅ Done | `fused_moe_method_npu.py` → `NPUW4A8Int8DynamicMoEMethod`; used via ModelSlim `ModelSlimW4A8Int8MoE` |
+| W4A16 INT4 (dynamic, MoE) | ✅ Done | `fused_moe_method_npu.py` → `NPUW4A16Int4DynamicMoEMethod`; used via `compressed_tensors` |
 | **MXFP8** | ❌ **Not implemented** | **Needs to be added** |
 | **MXFP4** | ❌ Not implemented | Needs to be added |
 | KV Cache quantization | 🔄 In progress | -- |
@@ -226,25 +241,44 @@ MindIE-SD is Huawei's Stable Diffusion inference acceleration engine, designed s
 
 ### 4.3 MindIE-SD MXFP8 Implementation (Core Reference)
 
-File: `MindIE-SD/mindiesd/quantization/layer.py` → `W8A8MXFP8QuantLinear`
+File: `MindIE-SD/mindiesd/quantization/layer.py` → `W8A8MXFP8QuantLinear` (inherits from `W8A8QuantBaseLinear`)
 
 ```python
-class W8A8MXFP8QuantLinear(nn.Module):
-    def forward(self, x):
-        # 1. Dynamic MXFP8 activation quantization
-        qx, x_scale = torch_npu.npu_dynamic_mx_quant(
-            x, dst_type=torch_npu.float8_e4m3fn
-        )
+class W8A8MXFP8QuantLinear(W8A8QuantBaseLinear):
+    # forward() inherited from W8A8QuantBaseLinear, flattens 3D+ inputs first
+    # Core computation logic is in quant_matmul():
+    def quant_matmul(self, x):
+        if x.dtype != self.dtype:
+            x = x.to(self.dtype)
 
-        # 2. MXFP8 matrix multiplication
+        # 1. Optional mul_scale pre-scaling (smooth quant scenario)
+        if self.mul_scale is not None:
+            x1, input_scale = torch_npu.npu_dynamic_mx_quant(
+                x * self.mul_scale, dst_type=torch_npu.float8_e4m3fn)
+        else:
+            x1, input_scale = torch_npu.npu_dynamic_mx_quant(
+                x, dst_type=torch_npu.float8_e4m3fn)
+
+        if self.bias.dtype != torch.float32:
+            self.bias = self.bias.to(torch.float32)
+
+        # 2. Weight dtype conversion + transpose
+        x2 = self.weight
+        if x2.dtype != torch.float8_e4m3fn:
+            x2 = torch_npu.npu_dtype_cast(x2, torch_npu.float8_e4m3fn)
+        x2 = x2.transpose(0, 1)
+
+        # 3. MXFP8 matrix multiplication
         output = torch_npu.npu_quant_matmul(
-            qx,
-            self.weight,           # float8_e4m3fn
-            self.weight_scale,     # float8_e8m0fnu
-            pertoken_scale=x_scale,
+            x1,
+            x2,
+            self.weight_scale.transpose(0, 1),  # weight_scale also needs transpose
             scale_dtype=torch_npu.float8_e8m0fnu,
+            pertoken_scale=input_scale,
             pertoken_scale_dtype=torch_npu.float8_e8m0fnu,
-            group_sizes=[1, 1, 32]  # MXFP8 block size = 32
+            bias=self.bias,                      # must be float32
+            output_dtype=self.dtype,             # output restored to original precision
+            group_sizes=[1, 1, 32],              # MXFP8 block size = 32
         )
         return output
 ```
@@ -292,20 +326,22 @@ SGLang already supports Wan2.2 through the `multimodal_gen` subsystem:
 
 ### 5.2 Wan2.2 Architecture Characteristics
 
-- **Dual Transformer architecture**: `transformer` and `transformer_2` handle high-noise and low-noise denoising steps respectively
-- **DiT (Diffusion Transformer)**: Transformer-based diffusion model
+- **DiT (Diffusion Transformer)**: Transformer-based diffusion model with multiple Transformer blocks
 - **Pipeline**: TextEncode → Denoise (multi-step denoising) → VAE Decode
 - Supports TP (tensor parallelism) and SP (sequence parallelism)
 
 ### 5.3 Existing Diffusion Quantization
 
-SGLang Diffusion currently only supports **SVDQuant/Nunchaku** (W4A4):
-```
-multimodal_gen/configs/quantization.py → NunchakuSVDQuantArgs
-```
-- NVIDIA GPU only
-- Does not support FP8/MXFP8
-- Does not support Ascend NPU
+SGLang Diffusion currently supports the following quantization methods:
+
+| Method | Configuration Location | Platform |
+|--------|----------------------|----------|
+| **SVDQuant/Nunchaku** (W4A4) | `multimodal_gen/configs/quantization.py` → `NunchakuSVDQuantArgs` | NVIDIA GPU |
+| **FP8** | `multimodal_gen/runtime/layers/quantization/fp8.py` | NVIDIA GPU |
+| **ModelSlim** | `multimodal_gen/runtime/layers/quantization/modelslim.py` | Ascend NPU |
+
+- MXFP8 is not yet supported
+- Nunchaku is NVIDIA GPU only
 
 ### 5.4 Usage
 
@@ -314,7 +350,7 @@ multimodal_gen/configs/quantization.py → NunchakuSVDQuantArgs
 sglang serve --model-path Wan-AI/Wan2.2-T2V-A14B-Diffusers --num-gpus 4
 
 # Python API
-from sglang import DiffGenerator
+from sglang.multimodal_gen import DiffGenerator
 gen = DiffGenerator.from_pretrained("Wan-AI/Wan2.2-T2V-A14B-Diffusers")
 ```
 

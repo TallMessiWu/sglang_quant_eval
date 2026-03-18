@@ -56,7 +56,7 @@ def main():
     )
 
     # 确保输出目录存在
-    output_dir = args.output_dir
+    output_dir = "./outputs"
     os.makedirs(output_dir, exist_ok=True)
 
     # 确认图片存在

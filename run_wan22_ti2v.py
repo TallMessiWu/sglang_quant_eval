@@ -52,9 +52,9 @@ def main():
         "雨滴动态下落，镜头缓慢轻微推近，动作丝滑，画面稳定无抖动，24帧"
     )
 
-    output_dir = "./outputs"
 
     # 确保输出目录存在
+    output_dir = "./outputs"
     os.makedirs(output_dir, exist_ok=True)
 
     # 确认图片存在

@@ -1,7 +1,6 @@
 ---
 name: trace-quant-path
 description: Trace the full code path for a quantization method in SGLang - from CLI args through model loading to inference
-user_invocable: true
 ---
 
 # Trace Quantization Code Path

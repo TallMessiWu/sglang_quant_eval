@@ -1,7 +1,6 @@
 ---
 name: compare-impl
 description: Compare implementation patterns between SGLang and MindIE-SD for a specific feature (quantization, attention, etc.)
-user_invocable: true
 ---
 
 # Compare SGLang vs MindIE-SD Implementation

@@ -1,7 +1,6 @@
 ---
 name: npu-api-check
 description: Check torch_npu API usage patterns in the codebase - find how specific NPU operators are called and what parameters they expect
-user_invocable: true
 ---
 
 # NPU API Usage Check

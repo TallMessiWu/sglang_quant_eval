@@ -1,7 +1,6 @@
 ---
 name: check-issue
 description: Check the latest status of SGLang GitHub issues and PRs related to our MXFP8/Ascend work
-user_invocable: true
 ---
 
 # Check SGLang Issue Status

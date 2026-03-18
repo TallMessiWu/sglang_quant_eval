@@ -1,7 +1,6 @@
 ---
 name: sglang-quant-lookup
 description: Look up SGLang quantization implementation details - find how a specific quantization method is implemented, registered, and used
-user_invocable: true
 ---
 
 # SGLang Quantization Lookup

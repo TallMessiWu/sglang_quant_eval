@@ -56,7 +56,8 @@ def main():
     )
 
     # 确保输出目录存在
-    os.makedirs("./outputs", exist_ok=True)
+    output_dir = args.output_dir
+    os.makedirs(output_dir, exist_ok=True)
 
     # 确认图片存在
     image_path = str(Path(args.image_path).resolve())
@@ -92,6 +93,7 @@ def main():
     gen = DiffGenerator.from_pretrained(
         model_path=args.model_path,
         num_gpus=args.num_gpus,
+        output_path=output_dir,
         component_paths={"transformer": args.quant_model_path},
     )
 

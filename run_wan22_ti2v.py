@@ -52,8 +52,10 @@ def main():
         "雨滴动态下落，镜头缓慢轻微推近，动作丝滑，画面稳定无抖动，24帧"
     )
 
+    output_dir = "./outputs"
+
     # 确保输出目录存在
-    os.makedirs("./outputs" , exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
 
     # 确认图片存在
     image_path = str(Path(args.image_path).resolve())
@@ -77,6 +79,7 @@ def main():
     gen = DiffGenerator.from_pretrained(
         model_path=args.model_path,
         num_gpus=args.num_gpus,
+        output_path=output_dir,
     )
 
     # 生成视频

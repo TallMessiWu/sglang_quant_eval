@@ -23,8 +23,6 @@ def main():
                         help="模型路径或 HuggingFace 模型 ID")
     parser.add_argument("--image-path", type=str, default="gyro.jpg",
                         help="输入图片路径")
-    parser.add_argument("--output-dir", type=str, default="./outputs",
-                        help="输出目录")
     parser.add_argument("--num-gpus", type=int, default=1,
                         help="使用的 GPU 数量")
     parser.add_argument("--num-frames", type=int, default=81,
@@ -55,7 +53,7 @@ def main():
     )
 
     # 确保输出目录存在
-    os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs("./outputs" , exist_ok=True)
 
     # 确认图片存在
     image_path = str(Path(args.image_path).resolve())
@@ -93,12 +91,9 @@ def main():
             "width": args.width,
             "num_inference_steps": args.num_inference_steps,
             "guidance_scale": args.guidance_scale,
-            "seed": args.seed,
-            "output_dir": args.output_dir,
+            "seed": args.seed
         }
     )
-
-    print(f"视频已保存到: {args.output_dir}")
 
     # 清理
     gen.shutdown()

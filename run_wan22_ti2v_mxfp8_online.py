@@ -48,7 +48,7 @@ def main():
                         help="输出视频帧率")
     parser.add_argument("--seed", type=int, default=42,
                         help="随机种子")
-    parser.add_argument("--output-dir", type=str, default="./outputs",
+    parser.add_argument("--output-dir", type=str, default="./outputs_mxfp8_online",
                         help="输出目录")
     args = parser.parse_args()
 

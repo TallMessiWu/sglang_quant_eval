@@ -42,6 +42,8 @@ def main():
                         help="输出视频帧率")
     parser.add_argument("--seed", type=int, default=42,
                         help="随机种子")
+    parser.add_argument("--output-dir", type=str, default="./outputs_int8",
+                        help="输出目录")
     args = parser.parse_args()
 
     # 提示词
@@ -56,8 +58,7 @@ def main():
     )
 
     # 确保输出目录存在
-    output_dir = "./outputs"
-    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(args.output_dir, exist_ok=True)
 
     # 确认图片存在
     image_path = str(Path(args.image_path).resolve())
@@ -93,7 +94,7 @@ def main():
     gen = DiffGenerator.from_pretrained(
         model_path=args.model_path,
         num_gpus=args.num_gpus,
-        output_path=output_dir,
+        output_path=args.output_dir,
         component_paths={"transformer": args.quant_model_path},
     )
 

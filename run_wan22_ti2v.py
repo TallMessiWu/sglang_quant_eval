@@ -8,10 +8,18 @@ import os
 import argparse
 from pathlib import Path
 
+import torch
+import torch_npu
+from torch_npu.contrib import transfer_to_npu
+torch_npu.npu.set_compile_mode(jit_compile=False)
+if bool(os.environ.get("USE_NZ", 0)):
+    torch.npu.config.allow_internal_format=True
+else:
+    torch.npu.config.allow_internal_format=False
 
 def main():
     parser = argparse.ArgumentParser(description="Wan2.2 TI2V 视频生成")
-    parser.add_argument("--model-path", type=str, default="Wan-AI/Wan2.2-TI2V-5B-Diffusers",
+    parser.add_argument("--model-path", type=str, default="/home/weights/Wan2.2-TI2V-5B-Diffusers",
                         help="模型路径或 HuggingFace 模型 ID")
     parser.add_argument("--image-path", type=str, default="gyro.jpg",
                         help="输入图片路径")
@@ -64,18 +72,18 @@ def main():
     print(f"种子: {args.seed}")
     print()
 
-    from sglang import DiffGenerator
+    from sglang.multimodal_gen.runtime.entrypoints.diffusion_generator import DiffGenerator
 
     # 初始化生成器
     print("正在加载模型...")
     gen = DiffGenerator.from_pretrained(
-        args.model_path,
+        model_path=args.model_path,
         num_gpus=args.num_gpus,
     )
 
     # 生成视频
     print("正在生成视频...")
-    result = gen.generate(
+    gen.generate(
         sampling_params_kwargs={
             "prompt": prompt,
             "image_path": image_path,
@@ -86,13 +94,11 @@ def main():
             "num_inference_steps": args.num_inference_steps,
             "guidance_scale": args.guidance_scale,
             "seed": args.seed,
+            "output_dir": args.output_dir,
         }
     )
 
-    # 保存结果
-    output_path = os.path.join(args.output_dir, "gyro_ti2v_output.mp4")
-    result.save(output_path)
-    print(f"视频已保存到: {output_path}")
+    print(f"视频已保存到: {args.output_dir}")
 
     # 清理
     gen.shutdown()

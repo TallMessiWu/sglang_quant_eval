@@ -32,6 +32,15 @@ def main():
                         help="原始 FP16/BF16 模型路径（无需预量化）")
     parser.add_argument("--image-path", type=str, default="gyro.jpg",
                         help="输入图片路径")
+    parser.add_argument("--prompt", type=str, default=(
+            "杰作，最高画质，8K，超高细节，官方原画，荒木飞吕彦画风，JOJO的奇妙冒险画风，"
+            "单人男性，杰洛·齐贝林，JOJO的奇妙冒险第七部飙马野郎，帅气男性，银色长发，"
+            "紫色眼眸，绿色嘴唇，标志性宽边牛仔帽，帽子带有紫色铁球装饰，双手扶着帽檐，"
+            "紫蓝色骑马制服，胸前银色蜻蜓胸针，帽子和衣服上覆盖积雪与霜冻，户外雨夹雪场景，"
+            "下落的雨滴与动态雨丝，模糊的绿色自然背景，柔和电影级打光，冷色调，厚涂质感，"
+            "自然的微动态，缓慢眨眼，呼吸带来的胸腔轻微起伏，头发和衣服被风轻轻吹动，"
+            "雨滴动态下落，镜头缓慢轻微推近，动作丝滑，画面稳定无抖动，24帧"
+        ), help="提示词")
     parser.add_argument("--num-gpus", type=int, default=1,
                         help="使用的 NPU 数量")
     parser.add_argument("--num-frames", type=int, default=81,
@@ -51,17 +60,6 @@ def main():
     parser.add_argument("--output-dir", type=str, default="./outputs_mxfp8_online",
                         help="输出目录")
     args = parser.parse_args()
-
-    # 提示词
-    prompt = (
-        "杰作，最高画质，8K，超高细节，官方原画，荒木飞吕彦画风，JOJO的奇妙冒险画风，"
-        "单人男性，杰洛·齐贝林，JOJO的奇妙冒险第七部飙马野郎，帅气男性，银色长发，"
-        "紫色眼眸，绿色嘴唇，标志性宽边牛仔帽，帽子带有紫色铁球装饰，双手扶着帽檐，"
-        "紫蓝色骑马制服，胸前银色蜻蜓胸针，帽子和衣服上覆盖积雪与霜冻，户外雨夹雪场景，"
-        "下落的雨滴与动态雨丝，模糊的绿色自然背景，柔和电影级打光，冷色调，厚涂质感，"
-        "自然的微动态，缓慢眨眼，呼吸带来的胸腔轻微起伏，头发和衣服被风轻轻吹动，"
-        "雨滴动态下落，镜头缓慢轻微推近，动作丝滑，画面稳定无抖动，24帧"
-    )
 
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -101,7 +99,7 @@ def main():
     print("正在生成视频...")
     gen.generate(
         sampling_params_kwargs={
-            "prompt": prompt,
+            "prompt": args.prompt,
             "image_path": image_path,
             "num_frames": args.num_frames,
             "fps": args.fps,

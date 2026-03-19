@@ -12,7 +12,9 @@ Wan2.2 TI2V (Text-Image-to-Video) Online MXFP8 量化推理脚本
 """
 
 import os
+import sys
 import argparse
+import subprocess
 from pathlib import Path
 
 import torch
@@ -24,6 +26,19 @@ if bool(os.environ.get("USE_NZ", 0)):
     torch.npu.config.allow_internal_format = True
 else:
     torch.npu.config.allow_internal_format = False
+
+
+def cleanup_scheduler_processes():
+    """强制清理任何遗留的 scheduler 工作进程（解决 graceful shutdown 延迟问题）"""
+    try:
+        # 查找并杀死所有 sglang-diffusionWorker 进程
+        result = subprocess.run(
+            ["taskkill", "/F", "/IM", "python.exe", "/FI", "WINDOWTITLE eq *sglang*diffusion*"],
+            capture_output=True,
+            timeout=3
+        )
+    except Exception:
+        pass
 
 
 def main():
@@ -112,6 +127,10 @@ def main():
     )
 
     gen.shutdown()
+
+    # 强制清理遗留的 scheduler 进程（修复 graceful shutdown 延迟问题）
+    cleanup_scheduler_processes()
+
     print("完成!")
 
 

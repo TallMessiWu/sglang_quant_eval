@@ -47,36 +47,6 @@ def cleanup_scheduler_processes():
         pass
 
 
-def _print_mxfp8_stats(key_averages):
-    """从 profiler 结果中过滤并打印 MXFP8 相关算子统计。"""
-    # 关键算子名称（Ascend CANN kernel 命名可能含下划线或驼峰，做 lower-case 模糊匹配）
-    MXFP8_KEYWORDS = ["dynamic_mx_quant", "quant_matmul", "npu_quant", "mxfp8"]
-
-    mxfp8_events = [
-        e for e in key_averages
-        if any(kw in e.key.lower() for kw in MXFP8_KEYWORDS)
-    ]
-
-    print("\n" + "=" * 70)
-    print("MXFP8 量化算子统计")
-    print("=" * 70)
-
-    if not mxfp8_events:
-        print("[警告] 未检测到任何 MXFP8 相关算子！")
-        print("  可能原因：")
-        print("  1. quantization='mxfp8' 参数未生效，实际仍在跑 FP16/BF16")
-        print("  2. Worker 进程的 NPU ops 未被当前进程的 profiler 捕获")
-        print("  3. Kernel 名称与预期不符（请检查 Chrome Trace 文件中的算子名）")
-    else:
-        print(f"共检测到 {len(mxfp8_events)} 种 MXFP8 相关算子：\n")
-        print(f"  {'算子名':<45} {'调用次数':>8} {'NPU时间(ms)':>14}")
-        print(f"  {'-'*45} {'-'*8} {'-'*14}")
-        for e in sorted(mxfp8_events, key=lambda x: x.self_device_time_total, reverse=True):
-            npu_ms = e.self_device_time_total / 1000  # us -> ms
-            print(f"  {e.key:<45} {e.count:>8} {npu_ms:>14.3f}")
-        print(f"\n  [OK] MXFP8 量化已确认生效（检测到 npu_dynamic_mx_quant / npu_quant_matmul 调用）")
-    print("=" * 70 + "\n")
-
 
 def _run_with_profiling(gen, sampling_params, args):
     """使用 torch_npu.profiler 包裹推理，捕获 NPU 算子统计。"""
@@ -116,18 +86,7 @@ def _run_with_profiling(gen, sampling_params, args):
         ),
     ) as prof:
         gen.generate(sampling_params_kwargs=sampling_params)
-        prof.step()  # 确保最后一批数据被刷入
-
-    # 导出 Chrome Trace
-    prof.export_chrome_trace(trace_path)
-    print(f"[Profiling] Chrome Trace 已保存: {trace_path}")
-
-    # 打印 Top-30 NPU 算子（按 NPU 时间排序）
-    print("\n[Profiling] Top-30 NPU 算子（按 NPU 执行时间排序）:")
-    print(prof.key_averages().table(sort_by="self_device_time_total", row_limit=30))
-
-    # 打印 MXFP8 专项统计
-    _print_mxfp8_stats(prof.key_averages())
+        prof.step()
 
 
 def main():

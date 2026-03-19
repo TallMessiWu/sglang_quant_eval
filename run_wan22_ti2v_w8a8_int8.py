@@ -5,7 +5,9 @@ Wan2.2 TI2V (Text-Image-to-Video) W8A8 INT8 量化推理脚本
 """
 
 import os
+import sys
 import argparse
+import subprocess
 from pathlib import Path
 
 import torch
@@ -17,6 +19,20 @@ if bool(os.environ.get("USE_NZ", 0)):
 else:
     torch.npu.config.allow_internal_format=False
 
+
+def cleanup_scheduler_processes():
+    """强制清理任何遗留的 scheduler 工作进程（解决 graceful shutdown 延迟问题）"""
+    try:
+        # 查找并杀死所有 sglang-diffusionWorker 进程
+        result = subprocess.run(
+            ["taskkill", "/F", "/IM", "python.exe", "/FI", "WINDOWTITLE eq *sglang*diffusion*"],
+            capture_output=True,
+            timeout=3
+        )
+    except Exception:
+        pass
+
+
 def main():
     parser = argparse.ArgumentParser(description="Wan2.2 TI2V W8A8 INT8 量化视频生成")
     parser.add_argument("--model-path", type=str, default="/home/weights/Wan2.2-TI2V-5B-Diffusers",
@@ -26,6 +42,15 @@ def main():
                         help="msmodelslim 预量化的 transformer 权重目录（含 quant_model_description.json）")
     parser.add_argument("--image-path", type=str, default="gyro.jpg",
                         help="输入图片路径")
+    parser.add_argument("--prompt", type=str, default=(
+            "杰作，最高画质，8K，超高细节，官方原画，荒木飞吕彦画风，JOJO的奇妙冒险画风，"
+            "单人男性，杰洛·齐贝林，JOJO的奇妙冒险第七部飙马野郎，帅气男性，银色长发，"
+            "紫色眼眸，绿色嘴唇，标志性宽边牛仔帽，帽子带有紫色铁球装饰，双手扶着帽檐，"
+            "紫蓝色骑马制服，胸前银色蜻蜓胸针，帽子和衣服上覆盖积雪与霜冻，户外雨夹雪场景，"
+            "下落的雨滴与动态雨丝，模糊的绿色自然背景，柔和电影级打光，冷色调，厚涂质感，"
+            "自然的微动态，缓慢眨眼，呼吸带来的胸腔轻微起伏，头发和衣服被风轻轻吹动，"
+            "雨滴动态下落，镜头缓慢轻微推近，动作丝滑，画面稳定无抖动，24帧"
+        ), help="提示词")
     parser.add_argument("--num-gpus", type=int, default=1,
                         help="使用的 GPU 数量")
     parser.add_argument("--num-frames", type=int, default=81,
@@ -45,17 +70,6 @@ def main():
     parser.add_argument("--output-dir", type=str, default="./outputs_int8",
                         help="输出目录")
     args = parser.parse_args()
-
-    # 提示词
-    prompt = (
-        "杰作，最高画质，8K，超高细节，官方原画，荒木飞吕彦画风，JOJO的奇妙冒险画风，"
-        "单人男性，杰洛·齐贝林，JOJO的奇妙冒险第七部飙马野郎，帅气男性，银色长发，"
-        "紫色眼眸，绿色嘴唇，标志性宽边牛仔帽，帽子带有紫色铁球装饰，双手扶着帽檐，"
-        "紫蓝色骑马制服，胸前银色蜻蜓胸针，帽子和衣服上覆盖积雪与霜冻，户外雨夹雪场景，"
-        "下落的雨滴与动态雨丝，模糊的绿色自然背景，柔和电影级打光，冷色调，厚涂质感，"
-        "自然的微动态，缓慢眨眼，呼吸带来的胸腔轻微起伏，头发和衣服被风轻轻吹动，"
-        "雨滴动态下落，镜头缓慢轻微推近，动作丝滑，画面稳定无抖动，24帧"
-    )
 
     # 确保输出目录存在
     os.makedirs(args.output_dir, exist_ok=True)
@@ -83,6 +97,7 @@ def main():
     print(f"推理步数: {args.num_inference_steps}")
     print(f"GPU 数量: {args.num_gpus}")
     print(f"种子: {args.seed}")
+    print(f"提示词: {args.prompt[:50]}...")
     print()
 
     from sglang.multimodal_gen.runtime.entrypoints.diffusion_generator import DiffGenerator
@@ -102,7 +117,7 @@ def main():
     print("正在生成视频...")
     gen.generate(
         sampling_params_kwargs={
-            "prompt": prompt,
+            "prompt": args.prompt,
             "image_path": image_path,
             "num_frames": args.num_frames,
             "fps": args.fps,
@@ -114,8 +129,11 @@ def main():
         }
     )
 
-    # 清理
     gen.shutdown()
+
+    # 强制清理遗留的 scheduler 进程（修复 graceful shutdown 延迟问题）
+    cleanup_scheduler_processes()
+
     print("完成!")
 
 

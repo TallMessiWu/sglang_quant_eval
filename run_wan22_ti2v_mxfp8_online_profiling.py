@@ -50,43 +50,28 @@ def cleanup_scheduler_processes():
 
 def _run_with_profiling(gen, sampling_params, args):
     """使用 torch_npu.profiler 包裹推理，捕获 NPU 算子统计。"""
-    profile_dir = os.path.join(args.output_dir, "profiling")
-    os.makedirs(profile_dir, exist_ok=True)
-    trace_path = os.path.join(profile_dir, "mxfp8_trace.json")
-
-    print(f"[Profiling] 开启 NPU profiling（前 {args.profile_steps} 步）...")
-    print(f"[Profiling] Chrome Trace 将保存至: {trace_path}")
-    print("正在生成视频（Profiling 模式）...")
-
-    # 注意：若推理在子进程中执行，profiler 在主进程中仅能捕获主进程提交的 NPU ops。
-    # torch_npu.profiler 在 CANN 层面通过设备级时间线捕获，通常可覆盖跨进程的 NPU 调度。
-    activities = [
-        torch_npu.profiler.ProfilerActivity.CPU,
-        torch_npu.profiler.ProfilerActivity.NPU,
-    ]
-
-    # schedule: wait=0, warmup=1, active=profile_steps, repeat=1
-    # warmup=1 跳过第一步的冷启动开销，active=profile_steps 只收集指定步数
-    schedule = torch_npu.profiler.schedule(
-        wait=0,
-        warmup=1,
-        active=max(1, args.profile_steps),
-        repeat=1,
+    profiling_path = os.path.join(args.output_dir, "profiling")
+    experimental_config = torch_npu.profiler._ExperimentalConfig(
+        aic_metrics=torch_npu.profiler.AiCMetrics.PipeUtilization,
+        profiler_level="Level1",
+        l2_cache=False,
+        data_simplification=False
     )
-
+    torch.npu.synchronize()
     with torch_npu.profiler.profile(
-        activities=activities,
-        schedule=schedule,
+        activities=[
+            torch_npu.profiler.ProfilerActivity.CPU,
+            torch_npu.profiler.ProfilerActivity.NPU
+        ],
+        on_trace_ready=torch_npu.profiler.tensorboard_trace_handler(profiling_path),
         record_shapes=True,
-        profile_memory=False,
+        profile_memory=True,
         with_stack=False,
-        experimental_config=torch_npu.profiler._ExperimentalConfig(
-            aic_metrics=torch_npu.profiler.AiCMetrics.PipeUtilization,
-            profiler_level=torch_npu.profiler.ProfilerLevel.Level1,
-        ),
-    ) as prof:
+        with_flops=False,
+        with_modules=False,
+        experimental_config=experimental_config
+    ):
         gen.generate(sampling_params_kwargs=sampling_params)
-        prof.step()
 
 
 def main():
@@ -112,8 +97,6 @@ def main():
                         help="视频高度")
     parser.add_argument("--width", type=int, default=1280,
                         help="视频宽度")
-    parser.add_argument("--num-inference-steps", type=int, default=50,
-                        help="推理步数")
     parser.add_argument("--guidance-scale", type=float, default=5.0,
                         help="引导强度")
     parser.add_argument("--fps", type=int, default=24,
@@ -122,8 +105,6 @@ def main():
                         help="随机种子")
     parser.add_argument("--output-dir", type=str, default="./outputs_mxfp8_online",
                         help="输出目录")
-    parser.add_argument("--profile-steps", type=int, default=3,
-                        help="只对前 N 个推理步骤做 profiling（-1 表示全部步骤）")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -143,7 +124,7 @@ def main():
     print(f"输入图片: {image_path}")
     print(f"分辨率: {args.width}x{args.height}")
     print(f"帧数: {args.num_frames}, FPS: {args.fps}")
-    print(f"推理步数: {args.num_inference_steps}")
+    print(f"推理步数: 3")
     print(f"NPU 数量: {args.num_gpus}")
     print(f"种子: {args.seed}")
     print()
@@ -167,7 +148,7 @@ def main():
         "fps": args.fps,
         "height": args.height,
         "width": args.width,
-        "num_inference_steps": args.num_inference_steps,
+        "num_inference_steps": 3,
         "guidance_scale": args.guidance_scale,
         "seed": args.seed,
     }

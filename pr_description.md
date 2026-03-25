@@ -1,7 +1,7 @@
 # PR 标题
 
 ```
-:sparkles: [NPU][MXFP8] Add MXFP8 quantization support for Wan2.2 Diffusion on Ascend NPU
+:sparkles: [diffusion][npu][quant] Add MXFP8 quantization support for Wan2.2 Diffusion on Ascend NPU
 ```
 
 ---
@@ -11,6 +11,8 @@
 # Summary
 
 This PR adds MXFP8 (Microscaling FP8) quantization support for Wan2.2 diffusion models on Ascend NPU. It closes part of the NPU MXFP8 gap tracked in issue #14424.
+
+**Hardware requirement:** Ascend A5 series or newer. `npu_dynamic_mx_quant` is not available on A2/A3.
 
 Two modes are supported:
 

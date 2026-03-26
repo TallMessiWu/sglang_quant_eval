@@ -55,14 +55,14 @@ sglang_quant_eval/
 |------|------|
 | `sglang/.../multimodal_gen/runtime/layers/quantization/modelslim_mxfp8_scheme.py` | **新增** `ModelSlimMXFP8Scheme`（加载 msmodelslim 预量化 MXFP8 权重）|
 
-### ❌ 待实现：Diffusion MXFP4 在线量化（`junlin_mxfp4` 分支，策略 A）
+### ✅ 已完成：Diffusion MXFP4 在线量化（`junlin_mxfp4` 分支，策略 A）
 
-加载原始 FP16/BF16 权重，推理时在线量化到 MXFP4（W4A4 MXFP4）。
+加载原始 FP16/BF16 权重，推理时在线量化到 MXFP4（W4A4 MXFP4 双级量化）。
 
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `sglang/.../multimodal_gen/runtime/layers/quantization/mxfp4_npu.py` | **新增** | `MXFP4Config` + `NPUMXFP4DiffusionLinearMethod` |
-| `sglang/.../multimodal_gen/runtime/layers/quantization/__init__.py` | **修改** | 注册 `"mxfp4"` |
+| 文件 | 变更 |
+|------|------|
+| `sglang/.../multimodal_gen/runtime/layers/quantization/mxfp4_npu.py` | **新增** `MXFP4Config` + `NPUMXFP4DiffusionLinearMethod`（使用 `npu_dynamic_dual_level_mx_quant` + `npu_dual_level_quant_matmul`）|
+| `sglang/.../multimodal_gen/runtime/layers/quantization/__init__.py` | **修改** 注册 `"mxfp4"` |
 
 ### ✅ 已完成：Diffusion MXFP4 离线预量化加载（`junlin_mxfp4_offline` 分支，策略 B）
 
@@ -90,7 +90,7 @@ LLM Serving (`srt`) 侧的适配，供未来参考或合并：
   - 基类: `configs/base_config.py` → `QuantizationConfig`, `QuantizeMethodBase`
   - Linear 基类: `../linear.py` → `LinearBase`, `LinearMethodBase`
   - **MXFP8 在线 (✅)**: `mxfp8_npu.py` → `MXFP8Config`, `NPUMXFP8DiffusionLinearMethod`
-  - **MXFP4 在线 (✅)**: (待实现，见计划)
+  - **MXFP4 在线 (✅)**: `mxfp4_npu.py` → `MXFP4Config`, `NPUMXFP4DiffusionLinearMethod`（双级量化）
   - **ModelSlim MXFP8 离线 (✅)**: `modelslim_mxfp8_scheme.py` → `ModelSlimMXFP8Scheme`
   - **ModelSlim MXFP4 离线 (✅)**: `modelslim_mxfp4_scheme.py` → `ModelSlimMXFP4Scheme` — 双级量化
   - ModelSlim 分发: `modelslim.py` → `ModelSlimConfig`, `_get_scheme_from_parts()` (W8A8_MXFP8, W4A4_MXFP4)
@@ -160,7 +160,7 @@ output = torch_npu.npu_dual_level_quant_matmul(
 | `torch_npu.npu_dual_level_quant_matmul(x1, w, l0_scale, w_dual_scale, l1_scale, w_scale, ...)` | MXFP4 双级量化矩阵乘法 | ✅ 已在 MindIE-SD 中确认 |
 | `torch_npu.npu_dtype_cast(w, torch_npu.float4_e2m1fn_x2)` | 权重 cast 为 FP4 打包格式（2个E2M1打包为1字节） | ✅ 已在 MindIE-SD 中确认 |
 | `torch_npu.float4_e2m1fn_x2` | FP4 E2M1 打包数据类型（2x） | ✅ 已确认类型名称 |
-| MXFP4 权重在线量化 API | 从 FP16/BF16 权重直接量化到 MXFP4 | ❓ 待确认（MindIE-SD 只有离线加载路径）|
+| MXFP4 权重在线量化 API | `npu_dynamic_dual_level_mx_quant(weight)` 用于在线权重量化 | ✅ 已实现（在 `mxfp4_npu.py` 中应用）|
 
 ## MXFP4 权重格式（msmodelslim 导出）
 
@@ -175,29 +175,47 @@ output = torch_npu.npu_dual_level_quant_matmul(
 
 > **注意**：weight_scale 偏移原因：e8m0 范围 [-127, 128] 偏移后正好覆盖 uint8 [0, 255]。还原公式：`actual_scale = weight_scale.to(int16) - 127`
 
-## MXFP4 在线量化实现模式（参考 MXFP8）
+## MXFP4 在线量化实现模式（✅ 已实现，见 `mxfp4_npu.py`）
+
+双级量化模式：
 
 ```python
 # process_weights_after_loading（在线量化，加载原始权重后执行）
 weight_fp = layer.weight.data.to(torch.bfloat16)
 if not weight_fp.is_npu:
     weight_fp = weight_fp.to(f"npu:{torch.npu.current_device()}")
-qw, w_scale = torch_npu.npu_dynamic_mx_quant(weight_fp, dst_type=<FP4_DTYPE>)
+
+# 双级量化权重：返回 (quantized_weight, l0_scale, l1_scale)
+qw, w_dual_scale, w_scale = torch_npu.npu_dynamic_dual_level_mx_quant(weight_fp, smooth_scale=None)
 layer.weight = Parameter(qw, requires_grad=False)
-layer.weight_scale_inv = Parameter(w_scale, requires_grad=False)
+layer.weight_dual_scale = Parameter(w_dual_scale, requires_grad=False)
+layer.weight_scale = Parameter(w_scale, requires_grad=False)
 
 # apply（推理）
-qx, input_scale = torch_npu.npu_dynamic_mx_quant(x_2d, dst_type=<FP4_DTYPE>)
-output = torch_npu.npu_quant_matmul(
-    qx, layer.weight.T, layer.weight_scale_inv.T,
-    scale_dtype=<E8M0_DTYPE>,
-    pertoken_scale=input_scale,
-    pertoken_scale_dtype=<E8M0_DTYPE>,
+# 1. 3D→2D reshape（diffusion 输入可能是 [batch, seq, hidden]）
+x_2d = x.reshape(-1, x.shape[-1])
+
+# 2. 双级激活量化
+qx, act_l0_scale, act_l1_scale = torch_npu.npu_dynamic_dual_level_mx_quant(x_2d, smooth_scale=None)
+
+# 3. 双级矩阵乘法（注意：不 transpose 权重）
+output = torch_npu.npu_dual_level_quant_matmul(
+    qx, layer.weight,
+    act_l0_scale, layer.weight_dual_scale,
+    act_l1_scale, layer.weight_scale,
     bias=bias.to(torch.float32) if bias is not None else None,
     output_dtype=original_dtype,
-    group_sizes=[1, 1, 32],
 )
+
+# 4. 恢复 3D 形状
+output = output.reshape(output_shape)
 ```
+
+**关键区别**（vs MXFP8）：
+- 权重和激活量化都使用 `npu_dynamic_dual_level_mx_quant`（返回 2 个 scale）
+- 矩阵乘使用 `npu_dual_level_quant_matmul`（接受 4 个 scale 参数）
+- 权重 dtype: `float4_e2m1fn_x2`（2 个 FP4 打包为 1 字节）
+- **不 transpose 权重**（与 MXFP8 的 `npu_quant_matmul` 不同）
 
 ## ModelSlim Scheme 开发模式（策略 B 离线加载）
 

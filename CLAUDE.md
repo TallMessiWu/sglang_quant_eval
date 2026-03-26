@@ -64,14 +64,16 @@ sglang_quant_eval/
 | `sglang/.../multimodal_gen/runtime/layers/quantization/mxfp4_npu.py` | **新增** | `MXFP4Config` + `NPUMXFP4DiffusionLinearMethod` |
 | `sglang/.../multimodal_gen/runtime/layers/quantization/__init__.py` | **修改** | 注册 `"mxfp4"` |
 
-### ❌ 待实现：Diffusion MXFP4 离线预量化加载（`junlin_mxfp4` 分支，策略 B）
+### ✅ 已完成：Diffusion MXFP4 离线预量化加载（`junlin_mxfp4_offline` 分支，策略 B）
 
-加载 msmodelslim 导出的 MXFP4 权重（FP4 packed + uint8 scale）。
+加载 msmodelslim 导出的 MXFP4 权重（FP4 packed + uint8 scale）。使用 `npu_dynamic_dual_level_mx_quant` 和 `npu_dual_level_quant_matmul` 进行双级量化推理。
 
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `sglang/.../multimodal_gen/runtime/layers/quantization/modelslim_mxfp4_scheme.py` | **新增** | `ModelSlimMXFP4Scheme` |
-| `sglang/.../multimodal_gen/runtime/layers/quantization/modelslim.py` | **修改** | `_get_scheme_from_parts()` 添加 `W4A4_MXFP4` 分支 |
+| 文件 | 变更 |
+|------|------|
+| `sglang/.../multimodal_gen/runtime/layers/quantization/modelslim_mxfp4_scheme.py` | **新增** `ModelSlimMXFP4Scheme`（加载 msmodelslim 预量化 MXFP4 权重）|
+| `sglang/.../multimodal_gen/runtime/layers/quantization/modelslim.py` | **修改** `_get_scheme_from_parts()` 添加 `W4A4_MXFP4` 分支 |
+| `run_wan22_ti2v_mxfp4_offline.py` | **新增** | 离线 MXFP4 推理脚本（用法见 `MXFP4_OFFLINE_GUIDE.md`） |
+| `MXFP4_OFFLINE_GUIDE.md` | **新增** | MXFP4 离线加载详细指南 |
 
 ### 📋 参考：LLM 侧 MXFP4/MXFP8 实现（`junlin_llm` 分支，已完成，暂不合并）
 
@@ -209,11 +211,12 @@ output = torch_npu.npu_quant_matmul(
 
 ## 注意事项
 
-- **分支规则**：所有代码改动只提交到 `junlin_mxfp4`，不动 `junlin`
-- **CANN 版本**: ≥ 8.0.RC3 才支持 `npu_dynamic_mx_quant`（MXFP8）；MXFP4 支持的最低 CANN 版本待确认
+- **分支规则**：所有代码改动只提交到 `junlin_mxfp4` 或特性分支（如 `junlin_mxfp4_offline`），不动 `junlin`
+- **CANN 版本**: ≥ 8.0.RC3 才支持 `npu_dynamic_mx_quant`（MXFP8）和 `npu_dynamic_dual_level_mx_quant`（MXFP4）
 - **硬件**: 开发测试需要 Atlas 800I A2/A3
-- **bias 精度**: `npu_quant_matmul` 要求 bias 为 `float32`
-- **tensor reshape**：diffusion 输入可能是 3D `[batch, seq, hidden]`，`npu_dynamic_mx_quant` 需要 2D 输入，apply 中需先 reshape 再 restore
-- **CPU offload**：`dit_cpu_offload` 默认 True，`process_weights_after_loading` 中需手动将权重移到 NPU 后再调用 `npu_dynamic_mx_quant`
-- **MXFP4 FP4 打包**：2 个 E2M1 FP4 值打包为 1 个字节，传给 `npu_quant_matmul` 时需确认 Ascend 内核期望的打包格式
+- **bias 精度**: `npu_quant_matmul` 和 `npu_dual_level_quant_matmul` 都要求 bias 为 `float32`
+- **tensor reshape**：diffusion 输入可能是 3D `[batch, seq, hidden]`，量化 API 需要 2D 输入，apply 中需先 reshape 再 restore
+- **CPU offload**：`dit_cpu_offload` 默认 True，`process_weights_after_loading` 中需手动将权重移到 NPU 后再调用量化或 dtype_cast
+- **MXFP4 weight_scale 还原**：msmodelslim 导出的 weight_scale 为 uint8，需要减去 127 还原为实际的 e8m0 scale 值
+- **MXFP4 双级 scale**：weight_scale 在 apply 中被 reshape 为 [out, in/64, 2] 结构用于双级量化 API
 - 与社区 YChange01 协调 MXFP8/MXFP4 工作分工（已在 Issue #14424 认领）

@@ -91,10 +91,14 @@ def main():
         return
 
     # 检查是否存在 quant_model_description.json（标志预量化模型）
-    quant_desc_path = os.path.join(args.model_path, "quant_model_description.json")
-    if not os.path.exists(quant_desc_path):
+    # repack 后 description 在 transformer/ 子目录中
+    quant_desc_candidates = [
+        os.path.join(args.model_path, "transformer", "quant_model_description.json"),
+        os.path.join(args.model_path, "quant_model_description.json"),
+    ]
+    if not any(os.path.exists(p) for p in quant_desc_candidates):
         print(f"警告: 未找到 quant_model_description.json，模型可能不是预量化版本")
-        print(f"    路径: {quant_desc_path}")
+        print(f"    已检查: {quant_desc_candidates}")
 
     print(f"模型路径: {args.model_path}")
     print(f"量化方式: Offline MXFP4 (策略 B，预量化权重加载)")

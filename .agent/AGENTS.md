@@ -1,9 +1,8 @@
 # CLAUDE.md
 
-## Project Overview
-
 本仓库用于研究和实现 SGLang **Diffusion 侧**在华为 Ascend NPU 上的 MXFP8/MXFP4 量化适配（Wan2.2 等 Diffusion 模型）。
 **如果涉及 LLM serving (`srt`) 侧的功能开发（如 MXFP8/MXFP4），请务必参考 `vllm-ascend` 的实现模式。**
+*注：Qwen3 和 Qwen3.5 模型在 SGLang 内部共用底层 Linear/MoE 算子，因此量化实现代码完全一致。*
 
 - **关联 Issue**: [sgl-project/sglang#14424](https://github.com/sgl-project/sglang/issues/14424) (Diffusion), [sgl-project/sglang#21584](https://github.com/sgl-project/sglang/issues/21584) (LLM Qwen3)
 - **Fork**: https://github.com/TallMessiWu/sglang
@@ -15,7 +14,7 @@
 | `junlin` | 主线，**不动** |
 | `junlin_mxfp4` | Diffusion MXFP8 + MXFP4 在线量化 |
 | `junlin_mxfp4_offline` | Diffusion 在 `junlin_mxfp4` 基础上增加 MXFP4 离线加载 |
-| `junlin_qwen3_dense` | **当前工作分支**，LLM 侧，Qwen3 dense 模型 MXFP8 适配<br>👉 **当前紧要任务：实现 Dense W4A8 和 Dense W4A4 (MXFP4)** |
+| `junlin_qwen3_dense` | **当前工作分支**，LLM 侧，Qwen3 / 3.5 dense 模型 MXFP 量化适配<br>👉 **当前紧要任务：实现 Dense W4A8 和 Dense W4A4 (MXFP4)** |
 
 ## 在线/离线量化模式
 
@@ -28,12 +27,12 @@
 |------|------|--------------|--------------|
 | Diffusion MXFP8 | `junlin` | ✅ | ✅ |
 | Diffusion MXFP4 | `junlin_mxfp4` | ✅ | ✅ |
-| LLM (Qwen3) Dense W8A8 (MXFP8) | `junlin_qwen3_dense` | ✅ (已对齐 vllm-ascend) | ✅ (已对齐 vllm-ascend) |
-| LLM (Qwen3) Dense W4A8 (MXFP4/8) | 待定 | ❌ 待实现 | ❌ 待实现 |
-| LLM (Qwen3) Dense W4A4 (MXFP4) | 待定 | ❌ 待实现 | ❌ 待实现 |
-| LLM (Qwen3) MoE W8A8 (MXFP8) | 待定 | ❌ 待实现 | ❌ 待实现 |
-| LLM (Qwen3) MoE W4A8 (MXFP4/8) | 待定 | ❌ 待实现 | ❌ 待实现 |
-| LLM (Qwen3) MoE W4A4 (MXFP4) | 待定 | ❌ 待实现 | ❌ 待实现 |
+| LLM (Qwen3 & 3.5) Dense W8A8 (MXFP8) | `junlin_qwen3_dense` | ✅ (已对齐 vllm-ascend) | ✅ (已对齐 vllm-ascend) |
+| LLM (Qwen3 & 3.5) Dense W4A8 (MXFP4/8) | 待定 | ❌ 待实现 | ❌ 待实现 |
+| LLM (Qwen3 & 3.5) Dense W4A4 (MXFP4) | 待定 | ❌ 待实现 | ❌ 待实现 |
+| LLM (Qwen3 & 3.5) MoE W8A8 (MXFP8) | 待定 | ❌ 待实现 | ❌ 待实现 |
+| LLM (Qwen3 & 3.5) MoE W4A8 (MXFP4/8) | 待定 | ❌ 待实现 | ❌ 待实现 |
+| LLM (Qwen3 & 3.5) MoE W4A4 (MXFP4) | 待定 | ❌ 待实现 | ❌ 待实现 |
 
 ## 关键代码路径
 

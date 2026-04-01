@@ -5,14 +5,15 @@
 
 ## 🎯 项目目标
 
-- **目标**: 适配 SGLang 的量化系统，支持在华为 Ascend NPU 上使用 MXFP8（以及可能的 MXFP4）数据格式。
-- **支持模型**: 支持通过 `srt` 运行的标准 LLM (例如 Llama, Qwen, DeepSeek) 以及通过 `multimodal_gen` 子系统运行的 Diffusion 模型 (例如 Wan2.2)。
-- **关联 Issue**: [sgl-project/sglang#14424](https://github.com/sgl-project/sglang/issues/14424)
+- **目标**: 适配 SGLang 的量化系统，支持在华为 Ascend NPU 上使用 MXFP8 和 MXFP4 数据格式。
+- **支持模型**: 支持通过 `srt` 运行的标准 LLM (例如 Qwen3, Qwen3.5, Llama, DeepSeek) 以及通过 `multimodal_gen` 子系统运行的 Diffusion 模型 (例如 Wan2.2)。
+- **关联 Issue**: [sgl-project/sglang#14424](https://github.com/sgl-project/sglang/issues/14424) (Diffusion), [sgl-project/sglang#21584](https://github.com/sgl-project/sglang/issues/21584) (LLMs)
 
 ## 📁 仓库结构
 
 - `sglang/` - 核心 SGLang 源码仓库 (submodule/clone)，适配代码将在此处修改。
-- `MindIE-SD/` - 华为 MindIE-SD 源码 (submodule/clone)，作为 Ascend NPU MXFP8/FP8 操作的主要参考实现。
+- `MindIE-SD/` - 华为 MindIE-SD 源码 (submodule/clone)，作为 Diffusion 侧 Ascend NPU MXFP8/FP8 操作的主要参考实现。
+- `vllm-ascend/` - vllm-ascend 源码 (submodule/clone)，作为 LLM 侧 MXFP 量化实现的主要参考标准。
 - `sglang_mxfp8_ascend_research.md` / `_zh.md` - MXFP8 适配的详细研究报告、分析及实现方案（提供中英文双语）。
 - `README.md` / `README_zh.md` - 项目自述文档（提供中英文双语）。
 - `CLAUDE.md` - AI 助手的系统指令配置及项目上下文摘要。

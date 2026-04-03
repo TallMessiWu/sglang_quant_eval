@@ -1,5 +1,5 @@
 sglang serve \
-    --model-path /home/weights/Qwen3-8B-mxfp8 \
+    --model-path /home/weights/Qwen3-8B-w8a8-full \
     --host 0.0.0.0 \
     --port 6969 \
     --quantization modelslim \

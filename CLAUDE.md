@@ -36,6 +36,8 @@
 
 ## 关键代码路径
 
+### Diffusion 侧（multimodal_gen）
+
 量化层目录：`sglang/python/sglang/multimodal_gen/runtime/layers/quantization/`
 
 | 文件                          | 作用                                          |
@@ -47,12 +49,27 @@
 | `modelslim_mxfp8_scheme.py` | ModelSlim MXFP8 离线                          |
 | `modelslim_mxfp4_scheme.py` | ModelSlim MXFP4 离线（双级）                  |
 
+### LLM 侧（srt）
+
+量化层目录：`sglang/python/sglang/srt/layers/quantization/modelslim/`
+
+| 文件                                  | 作用                                                   |
+| ------------------------------------- | ------------------------------------------------------ |
+| `modelslim.py`                      | `ModelSlimConfig`：`get_quant_method` 分发、注册       |
+| `schemes/modelslim_mxfp8.py`        | ModelSlim MXFP8 离线 scheme（W8A8）                    |
+| `schemes/modelslim_w8a8_int8.py`    | ModelSlim W8A8 Int8 离线 scheme                        |
+
+在线量化（`--quantization mxfp8`）：
+`sglang/python/sglang/srt/hardware_backend/npu/quantization/linear_method_npu.py` → `NPUMXFP8LinearMethod`
+
 其他关键文件：
 
-- `server_args.py` — `quantization` 字段
-- `loader/.../transformer_loader.py` — 显式 quantization 优先于自动检测
+- `srt/models/qwen3.py` — Qwen3 / 3.5 模型定义，`EntryClass = Qwen3ForCausalLM`
+- `srt/models/registry.py` — `ModelRegistry`，扫描 `sglang.srt.models` 注册所有 `EntryClass`
+- `srt/layers/rotary_embedding/base.py` — RoPE 实现，NPU 路径 import `sgl_kernel_npu`
+- `srt/model_loader/loader.py` — `DefaultModelLoader`：`_get_quantization_config` → `_initialize_model`
 - `MindIE-SD/mindiesd/quantization/layer.py` — NPU 量化参考实现 (Diffusion)
-- `vllm-ascend/vllm_ascend/quantization/` — NPU 量化参考实现 (LLM, 如 `w8a8_mxfp8.py` 的加载预转置模式)
+- `vllm-ascend/vllm_ascend/quantization/methods/w8a8_mxfp8.py` — NPU 量化参考实现 (LLM)
 - `msmodelslim/.../save/ascendv1.py` — MXFP4 权重导出格式
 
 ## 注意事项
@@ -63,5 +80,16 @@
 - **bias 精度**：量化 matmul 要求 bias 为 `float32`
 - **tensor reshape**：diffusion 输入可能是 3D `[batch, seq, hidden]`，NPU 量化 API 需 2D，apply 中先 reshape 后 restore
 - 与社区 YChange01 协调 MXFP8/MXFP4 工作分工（已在 Issue #14424 认领）
+
+## 已知陷阱
+
+- **量化不生效/乱码输出**：先验证模型是否注册成功。若 `sgl_kernel_npu` 某 kernel 不存在会导致模型模块 import 失败，`ModelRegistry` 静默跳过，fallback 到 HF Transformers（无量化感知），FP8 权重被当 BF16 解读 → 乱码。
+  ```bash
+  python3 -c "from sglang.srt.models.registry import ModelRegistry; print(list(ModelRegistry.models.keys()))"
+  python3 -c "from sglang.srt.models.qwen3 import Qwen3ForCausalLM; print('OK')"
+  ```
+  修复：`sgl_kernel_npu` 非核心 kernel 的 import 改为 try/except + `None` fallback（见 `rotary_embedding/base.py`）。
+
+- **`process_weights_after_loading` 中 transpose 不加 `.contiguous()`**：`npu_quant_matmul` 通过 strides 感知内存布局，`.contiguous()` 会物理重排数据破坏 block-scale 映射 → 乱码。用 `.data` 原地赋值保留 non-contiguous view（与 vllm-ascend 一致）。
 
 > 详细 API 参考和实现模式见 `/mxfp4-impl-ref` skill。

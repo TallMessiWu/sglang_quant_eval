@@ -14,7 +14,9 @@
 | `junlin`               | 主线，**不动**                                                                                                                         |
 | `junlin_mxfp4`         | Diffusion MXFP8 + MXFP4 在线量化                                                                                                             |
 | `junlin_mxfp4_offline` | Diffusion 在 `junlin_mxfp4` 基础上增加 MXFP4 离线加载                                                                                      |
-| `junlin_qwen3_dense`   | **当前工作分支**，LLM 侧，Qwen3 / 3.5 dense 模型 MXFP 量化适配`<br>`👉 **当前紧要任务：实现 Dense W4A8 和 Dense W4A4 (MXFP4)** |
+| `junlin_qwen3_dense`   | LLM 侧，Qwen3 / 3.5 dense 模型 MXFP8 量化适配                                                                                      |
+| `junlin_qwen3_dense_w4a8` | LLM 侧，Dense W4A8 在线量化（MXFP4 双级，`--quantization mxfp4_npu`）；离线 W4A8 占位符存在但待修复 |
+| `junlin_qwen3_dense_w4a4` | **当前工作分支**，LLM 侧，在 w4a8 基础上新增 W4A4 在线量化（单级 MXFP4，`--quantization mxfp4w4a4_npu`）+ 离线 W4A4（INT4 ModelSlim） |
 
 ## 在线/离线量化模式
 
@@ -28,8 +30,8 @@
 | Diffusion MXFP8                        | `junlin`             | ✅                      | ✅                      |
 | Diffusion MXFP4                        | `junlin_mxfp4`       | ✅                      | ✅                      |
 | LLM (Qwen3 & 3.5) Dense W8A8 (MXFP8)   | `junlin_qwen3_dense` | ✅ (已对齐 vllm-ascend) | ✅ (已对齐 vllm-ascend) |
-| LLM (Qwen3 & 3.5) Dense W4A8 (MXFP4/8) | 待定                   | ❌ 待实现               | ❌ 待实现               |
-| LLM (Qwen3 & 3.5) Dense W4A4 (MXFP4)   | 待定                   | ❌ 待实现               | ❌ 待实现               |
+| LLM (Qwen3 & 3.5) Dense W4A8 (MXFP4/8) | `junlin_qwen3_dense_w4a8` | ✅ 在线已实现（`mxfp4_npu`，双级） | ❌ 待修复（`W4A8_MXFP` 占位符误用 `ModelSlimMXFP8Scheme`） |
+| LLM (Qwen3 & 3.5) Dense W4A4 (MXFP4)   | `junlin_qwen3_dense_w4a4` | ✅ 在线已实现（`mxfp4w4a4_npu`，单级 MXFP4） | ✅ 离线已实现（`W4A4_DYNAMIC` → `ModelSlimW4A4Int4` + `NPU_W4A4DynamicLinearMethod`，**INT4 非 MXFP4**） |
 | LLM (Qwen3 & 3.5) MoE W8A8 (MXFP8)     | 待定                   | ❌ 待实现               | ❌ 待实现               |
 | LLM (Qwen3 & 3.5) MoE W4A8 (MXFP4/8)   | 待定                   | ❌ 待实现               | ❌ 待实现               |
 | LLM (Qwen3 & 3.5) MoE W4A4 (MXFP4)     | 待定                   | ❌ 待实现               | ❌ 待实现               |
@@ -59,8 +61,10 @@
 | `schemes/modelslim_mxfp8.py`        | ModelSlim MXFP8 离线 scheme（W8A8）                    |
 | `schemes/modelslim_w8a8_int8.py`    | ModelSlim W8A8 Int8 离线 scheme                        |
 
-在线量化（`--quantization mxfp8`）：
-`sglang/python/sglang/srt/hardware_backend/npu/quantization/linear_method_npu.py` → `NPUMXFP8LinearMethod`
+在线量化：
+- `--quantization mxfp8` → `linear_method_npu.py` → `NPUMXFP8LinearMethod`
+- `--quantization mxfp4_npu` → `layers/quantization/npu_mxfp4.py` → `NPUMxfp4Config` → `NPUMXFP4W4A8LinearMethod`（双级 W4A8）
+- `--quantization mxfp4w4a4_npu` → `layers/quantization/npu_mxfp4_w4a4.py` → `NPUMxfp4W4A4Config` → `NPUSingleLevelMXFP4LinearMethod`（单级 W4A4）
 
 其他关键文件：
 

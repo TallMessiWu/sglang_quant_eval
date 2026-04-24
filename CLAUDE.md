@@ -97,3 +97,6 @@
 - **`process_weights_after_loading` 中 transpose 不加 `.contiguous()`**：`npu_quant_matmul` 通过 strides 感知内存布局，`.contiguous()` 会物理重排数据破坏 block-scale 映射 → 乱码。用 `.data` 原地赋值保留 non-contiguous view（与 vllm-ascend 一致）。
 
 > 详细 API 参考和实现模式见 `/mxfp4-impl-ref` skill。
+
+## 代码提交
+代码提交时必须使用gitmoji-commit这个skill。

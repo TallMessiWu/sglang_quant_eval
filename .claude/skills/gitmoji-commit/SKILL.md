@@ -1,5 +1,5 @@
 ---
-name: gitmoji_commit
+name: gitmoji-commit
 description: Analyzes staged code changes and conversation context to generate a Gitmoji-compliant commit message in English, then executes the commit locally (without pushing).
 ---
 

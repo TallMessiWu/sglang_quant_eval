@@ -13,4 +13,4 @@
 [submodule "vllm-ascend"]
 	path = vllm-ascend
 	url = https://github.com/vllm-project/vllm-ascend.git
-	branch = releases/v0.18.0
+	branch = main

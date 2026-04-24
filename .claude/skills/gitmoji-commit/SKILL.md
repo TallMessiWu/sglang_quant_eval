@@ -10,8 +10,9 @@ This Skill automates the Git commit process. You will analyze code changes and c
 ## Core Principles
 1.  **Always use ENGLISH** for the commit Subject and Body.
 2.  **STRICTLY NO PUSHING (`git push`)**, only execute local commits (`git commit`).
-3.  **Formatting Standard**: `<emoji> <type>(<scope>): <subject>`
-    * **Emoji**: Use the Gitmoji code (e.g., `:sparkles:`) for better terminal compatibility, rather than the raw Unicode character.
+3.  **ALWAYS use Gitmoji CODE, NEVER raw emoji characters**: You MUST write `:sparkles:` — **NEVER** `✨`. Raw Unicode emoji characters are strictly forbidden in commit messages. This applies everywhere: the subject, body, and proposed message shown to the user.
+4.  **Formatting Standard**: `<emoji-code> <type>(<scope>): <subject>`
+    * **Emoji**: Always use the Gitmoji text code (e.g., `:sparkles:`, `:bug:`, `:recycle:`). Raw Unicode characters (e.g., `✨`, `🐛`, `♻️`) are **FORBIDDEN**.
     * **Subject**: A concise English description, starting with an imperative verb (e.g., Add, Fix, Update), limited to 50 characters. This acts as the first `-m` title.
     * **Body (Optional)**: **Strongly recommend using a single `-m` parameter** unless the commit involves massive, multi-layered changes where the title alone cannot convey the core intent. If the `Subject` sufficiently summarizes the intent, keep it simple.
     * *Example (Default/Concise)*: `git commit -m ":sparkles: feat(auth): add user login functionality"`

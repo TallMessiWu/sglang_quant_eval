@@ -15,7 +15,7 @@
 | `junlin_mxfp4`         | Diffusion MXFP8 + MXFP4 在线量化                                                                                                             |
 | `junlin_mxfp4_offline` | Diffusion 在 `junlin_mxfp4` 基础上增加 MXFP4 离线加载                                                                                      |
 | `junlin_qwen3_dense`   | LLM 侧，Qwen3 / 3.5 dense 模型 MXFP8 量化适配                                                                                      |
-| `junlin_qwen3_dense_w4a8` | LLM 侧，Dense W4A8 在线量化（MXFP4 双级，`--quantization mxfp4_npu`）；离线 W4A8 占位符存在但待修复 |
+| `junlin_qwen3_dense_w4a8` | LLM 侧，Dense W4A8 在线量化（MXFP4 双级，`--quantization mxfp4_npu`）；离线 W4A8 已实现（`W4A8_MXFP` → `ModelSlimMXFP4W4A8Scheme`） |
 | `junlin_qwen3_dense_w4a4` | **当前工作分支**，LLM 侧，在 w4a8 基础上新增 W4A4 在线量化（单级 MXFP4，`--quantization mxfp4w4a4_npu`）+ 离线 W4A4（INT4 ModelSlim） |
 
 ## 在线/离线量化模式
@@ -30,7 +30,7 @@
 | Diffusion MXFP8                        | `junlin`             | ✅                      | ✅                      |
 | Diffusion MXFP4                        | `junlin_mxfp4`       | ✅                      | ✅                      |
 | LLM (Qwen3 & 3.5) Dense W8A8 (MXFP8)   | `junlin_qwen3_dense` | ✅ (已对齐 vllm-ascend) | ✅ (已对齐 vllm-ascend) |
-| LLM (Qwen3 & 3.5) Dense W4A8 (MXFP4/8) | `junlin_qwen3_dense_w4a8` | ✅ 在线已实现（`mxfp4_npu`，双级） | ❌ 待修复（`W4A8_MXFP` 占位符误用 `ModelSlimMXFP8Scheme`） |
+| LLM (Qwen3 & 3.5) Dense W4A8 (MXFP4/8) | `junlin_qwen3_dense_w4a8` | ✅ 在线已实现（`mxfp4_npu`，双级） | ✅ 离线已实现（`W4A8_MXFP` → `ModelSlimMXFP4W4A8Scheme`，权重格式同 MXFP8：`float8_e4m3fn`） |
 | LLM (Qwen3 & 3.5) Dense W4A4 (MXFP4)   | `junlin_qwen3_dense_w4a4` | ✅ 在线已实现（`mxfp4w4a4_npu`，单级 MXFP4） | ✅ 离线已实现（`W4A4_DYNAMIC` → `ModelSlimW4A4Int4` + `NPU_W4A4DynamicLinearMethod`，**INT4 非 MXFP4**） |
 | LLM (Qwen3 & 3.5) MoE W8A8 (MXFP8)     | 待定                   | ❌ 待实现               | ❌ 待实现               |
 | LLM (Qwen3 & 3.5) MoE W4A8 (MXFP4/8)   | 待定                   | ❌ 待实现               | ❌ 待实现               |
@@ -59,6 +59,7 @@
 | ------------------------------------- | ------------------------------------------------------ |
 | `modelslim.py`                      | `ModelSlimConfig`：`get_quant_method` 分发、注册       |
 | `schemes/modelslim_mxfp8.py`        | ModelSlim MXFP8 离线 scheme（W8A8）                    |
+| `schemes/modelslim_mxfp4_w4a8.py`  | ModelSlim W4A8_MXFP 离线 scheme（权重 `float8_e4m3fn`，激活 FP8 动态量化） |
 | `schemes/modelslim_w8a8_int8.py`    | ModelSlim W8A8 Int8 离线 scheme                        |
 
 在线量化：
@@ -95,6 +96,8 @@
   修复：`sgl_kernel_npu` 非核心 kernel 的 import 改为 try/except + `None` fallback（见 `rotary_embedding/base.py`）。
 
 - **`process_weights_after_loading` 中 transpose 不加 `.contiguous()`**：`npu_quant_matmul` 通过 strides 感知内存布局，`.contiguous()` 会物理重排数据破坏 block-scale 映射 → 乱码。用 `.data` 原地赋值保留 non-contiguous view（与 vllm-ascend 一致）。
+
+- **W4A8_MXFP checkpoint 权重格式**：`qwen3-8b-dense-w4a8` 检查点的权重存储为 `float8_e4m3fn`（非 packed FP4 uint8），shape 为 `[out, in]`，与 MXFP8 完全相同。这是 msmodelslim 旧版本导出格式（新版 `ascendv1.py` 会 `pack_fp4_to_uint8` → `uint8` shape `[out, in//2]`）。因此 `ModelSlimMXFP4W4A8Scheme` 的 `create_weights` 与 `ModelSlimMXFP8Scheme` 实现一致。
 
 > 详细 API 参考和实现模式见 `/mxfp4-impl-ref` skill。
 

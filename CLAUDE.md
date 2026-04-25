@@ -102,4 +102,4 @@
 > 详细 API 参考和实现模式见 `/mxfp4-impl-ref` skill。
 
 ## 代码提交
-代码提交时必须使用gitmoji-commit这个skill。
+代码提交时必须使用gitmoji-commit这个skill。每次提交代码后，调用claude-md-improver这个skill来更新CLAUDE.md。

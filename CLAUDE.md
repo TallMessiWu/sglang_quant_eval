@@ -101,5 +101,13 @@
 
 > 详细 API 参考和实现模式见 `/mxfp4-impl-ref` skill。
 
+## 开发工具
+
+- **pre-commit**：`sglang/` 是独立 git 仓库，pre-commit 必须在 `sglang/` 目录内运行：
+  ```bash
+  pre-commit run --all-files  # 在 sglang/ 目录下执行
+  ```
+  Windows 上 CI 脚本已修复编码和路径分隔符兼容性问题（`check_workflow_job_names.py`、`check_registered_tests.py`）。
+
 ## 代码提交
 代码提交时必须使用gitmoji-commit这个skill。每次提交代码后，调用claude-md-improver这个skill来更新CLAUDE.md。

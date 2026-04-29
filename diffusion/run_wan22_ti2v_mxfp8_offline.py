@@ -27,6 +27,7 @@ if bool(os.environ.get("USE_NZ", 0)):
     torch.npu.config.allow_internal_format = True
 else:
     torch.npu.config.allow_internal_format = False
+torch.npu.set_device(int(os.environ.get("ASCEND_DEVICE_ID", 0)))
 
 
 def cleanup_scheduler_processes():

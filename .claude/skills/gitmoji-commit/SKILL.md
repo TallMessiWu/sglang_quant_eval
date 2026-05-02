@@ -116,6 +116,7 @@ Select the **most accurate** Emoji and Type from the reference table based on yo
 | 🦺 | `:safety_vest:` | Add or update code related to validation. |
 | ✈️ | `:airplane:` | Improve offline support. |
 | 🦖 | `:t-rex:` | Code that adds backwards compatibility. |
+| 🤖 | `:robot:` | Agent/automation related changes. |
 
 *(Agent Note: Prioritize the most specific context when choosing. E.g., if updating version in `package.json`, `:arrow_up:` or `:heavy_plus_sign:` is better than the generic `:package:` or `:wrench:`. If purely tweaking CSS, you must use `:lipstick:`)*
 

@@ -118,5 +118,14 @@
   ```
   Windows 上 CI 脚本已修复编码和路径分隔符兼容性问题（`check_workflow_job_names.py`、`check_registered_tests.py`）。
 
+## 调试 CI 失败
+
+**GitHub Actions 日志需要登录才能查看。** 遇到 CI 失败链接时，如果通过powershell gh访问获取不到信息，必须第一时间告知用户情况。不得自行猜测或绕弯子抓取。
+
 ## 代码提交
 代码提交时必须使用gitmoji-commit这个skill。每次提交代码后，调用claude-md-improver这个skill来更新CLAUDE.md。
+
+### 子模块提交流程
+1. 在子模块（`sglang/`）内完成代码修改后，提交并更新子模块内的 CLAUDE.md
+2. 回到主仓，更新主仓 CLAUDE.md（记录子模块变更摘要）
+3. 最后提交主仓（含 CLAUDE.md 更新 + 子模块指针更新）

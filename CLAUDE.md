@@ -129,3 +129,13 @@
 1. 在子模块（`sglang/`）内完成代码修改后，提交并更新子模块内的 CLAUDE.md
 2. 回到主仓，更新主仓 CLAUDE.md（记录子模块变更摘要）
 3. 最后提交主仓（含 CLAUDE.md 更新 + 子模块指针更新）
+
+## Agent Team 协作模式（本分支：**禁用**）
+
+本分支 **不** 启用 agent team 模式。新会话默认 **单 agent**，**不要** 主动调用 `TeamCreate` / 不要 spawn 命名子 agent / 不要走 planner-generator-evaluator 三角色流水线。即使用户说「开 team」之类的关键词，也请先确认是否要切到 `agent-team` 分支再启用。
+
+如需 agent team 协作（planner → generator → evaluator，带「重生成」与「重规划」回环），请：
+1. `git checkout agent-team`
+2. 参见该分支 CLAUDE.md 末尾「Agent Team 协作模式（`pge-team`）」节
+
+> 分支即模式，互不打扰。

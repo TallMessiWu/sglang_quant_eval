@@ -4,5 +4,6 @@ sglang serve \
     --port 6969 \
     --quantization mxfp8 \
     --device npu \
-    --tp 8 \
-    --trust-remote-code
+    --tp 1 \
+    --trust-remote-code \
+    --disable-cuda-graph

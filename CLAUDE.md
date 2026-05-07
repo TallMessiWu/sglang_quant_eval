@@ -108,6 +108,8 @@
 
 - **W4A8_MXFP checkpoint 权重格式**：`qwen3-8b-dense-w4a8` 检查点的权重存储为 `float8_e4m3fn`（非 packed FP4 uint8），shape 为 `[out, in]`，与 MXFP8 完全相同。这是 msmodelslim 旧版本导出格式（新版 `ascendv1.py` 会 `pack_fp4_to_uint8` → `uint8` shape `[out, in//2]`）。因此 `ModelSlimMXFP4W4A8Scheme` 的 `create_weights` 与 `ModelSlimMXFP8Scheme` 实现一致。
 
+- **MoE MXFP8 的 `npu_grouped_matmul` scale 必须是 4D pair-split layout**：dense linear 用 `npu_quant_matmul(..., group_sizes=[1,1,32])` 显式传 block_size，但 `npu_grouped_matmul` **不接受** `group_sizes`。kernel 通过 scale 张量的 4D layout `(E, K_blk//2, N, 2)` 隐式拿 block 信息——必须在 `process_weights_after_loading` 里把 scale `(E, N, K_blk)` 先 reshape 成 `(E, N, K_blk//2, 2)` 再 transpose(1,2)，才能匹配 vllm-ascend `AscendW8A8MXFP8DynamicFusedMoEMethod`（`w8a8_mxfp8.py:332-339`）和 `AscendW4A4MXFP4DynamicFusedMoEMethod`（`w4a4_mxfp4.py:244-250`）的 kernel 约定。reshape **必须**在 transpose 前——transpose 后 storage 不连续，再 reshape 会报错。
+
 > 详细 API 参考和实现模式见 `/mxfp4-impl-ref` skill。
 
 ## 开发工具

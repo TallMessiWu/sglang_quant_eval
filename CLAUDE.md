@@ -108,7 +108,7 @@
 
 - **W4A8_MXFP checkpoint 权重格式**：`qwen3-8b-dense-w4a8` 检查点的权重存储为 `float8_e4m3fn`（非 packed FP4 uint8），shape 为 `[out, in]`，与 MXFP8 完全相同。这是 msmodelslim 旧版本导出格式（新版 `ascendv1.py` 会 `pack_fp4_to_uint8` → `uint8` shape `[out, in//2]`）。因此 `ModelSlimMXFP4W4A8Scheme` 的 `create_weights` 与 `ModelSlimMXFP8Scheme` 实现一致。
 
-- **MoE MXFP8 的 `npu_grouped_matmul` scale 必须是 4D pair-split layout**：dense linear 用 `npu_quant_matmul(..., group_sizes=[1,1,32])` 显式传 block_size，但 `npu_grouped_matmul` **不接受** `group_sizes`。kernel 通过 scale 张量的 4D layout `(E, K_blk//2, N, 2)` 隐式拿 block 信息——必须在 `process_weights_after_loading` 里把 scale `(E, N, K_blk)` 先 reshape 成 `(E, N, K_blk//2, 2)` 再 transpose(1,2)，才能匹配 vllm-ascend `AscendW8A8MXFP8DynamicFusedMoEMethod`（`w8a8_mxfp8.py:332-339`）和 `AscendW4A4MXFP4DynamicFusedMoEMethod`（`w4a4_mxfp4.py:244-250`）的 kernel 约定。reshape **必须**在 transpose 前——transpose 后 storage 不连续，再 reshape 会报错。
+- **MoE MXFP8 的 `npu_grouped_matmul` scale 必须是 4D pair-split layout，但不要手动 reshape**：dense linear 用 `npu_quant_matmul(..., group_sizes=[1,1,32])` 显式传 block_size，但 `npu_grouped_matmul` **不接受** `group_sizes`，kernel 通过 scale 张量的 4D layout `(E, K_blk//2, N, 2)` 隐式拿 block 信息。**关键事实**：`npu_dynamic_mx_quant` 自己就以 pair-split 形式吐 scale——2D 输入 `[N, K]` 返回 **3D** scale `[N, K_blk//2, 2]`（参考 `mxfp8_npu.py:144` 项目自身注释）。所以在线量化 MoE 的流程是：per-expert quant → scale 已是 3D → `torch.stack` 拼出 4D `[E, N, K_blk//2, 2]` → `transpose(1, 2)` → `[E, K_blk//2, N, 2]`，**不要再加一次 reshape**（vllm-ascend 离线场景的 reshape 是因为 disk 上的 scale 是 flat 3D `[E, N, K_blk]`，与在线 kernel 直出的 3D 含义不同）。误加 reshape 会把已经 4D 的张量当 3D 拆，process_weights_after_loading 直接报 `too many values to unpack`。
 
 > 详细 API 参考和实现模式见 `/mxfp4-impl-ref` skill。
 

@@ -108,10 +108,13 @@
 
 - **W4A8_MXFP checkpoint 权重格式**：`qwen3-8b-dense-w4a8` 检查点的权重存储为 `float8_e4m3fn`（非 packed FP4 uint8），shape 为 `[out, in]`，与 MXFP8 完全相同。这是 msmodelslim 旧版本导出格式（新版 `ascendv1.py` 会 `pack_fp4_to_uint8` → `uint8` shape `[out, in//2]`）。因此 `ModelSlimMXFP4W4A8Scheme` 的 `create_weights` 与 `ModelSlimMXFP8Scheme` 实现一致。
 
-- **MoE MXFP8 的 weight + scale 是非对称 layout**：`npu_grouped_matmul` 在 Ascend 上对 MX 量化的真实约定通过 kernel 报错锁定（`The n dim of weight[N] and n dim of scale[K_blk//2] should be equal`）：
-  - **weight 保持 `[E, N=out, K=in]`，禁止 transpose**：与 BF16 baseline `UnquantizedFusedMoEMethod.forward_npu`（`unquant.py:632`）一致，kernel 读 dim 1 当 N。若擅自 `.transpose(1, 2)` 把 K 与 N 调换，shape 校验通过但 kernel 把 K 当 N 读 → 生成 `delegate(delegate(...` 这种**重复无意义 token**（纯语义错位，无 traceback）。vllm-ascend 离线路径 transpose 是他们的包装层 layout 契约，**别盲目对齐**。
-  - **scale 必须 `transpose(1, 2)`，让 N 落在 dim 2**：kernel 读 scale 的 dim 2 当 N 来跟 weight 的 dim 1 对齐。`npu_dynamic_mx_quant` 对 2D 输入 `[N, K]` 直接吐 **3D** scale `[N, K_blk//2, 2]`（参考 `mxfp8_npu.py:144`），`torch.stack` 后是 4D `[E, N, K_blk//2, 2]`，**最后必须 `transpose(1, 2)`**→ `[E, K_blk//2, N, 2]`，否则 kernel 报 n dim 不等。**不要手动 reshape**——已经 4D，再 reshape 会触发 `too many values to unpack`。
-  - 三种"对称"组合都不对：① 两边都 transpose（vllm-ascend 风格）→ 跑通但乱码；② 两边都不 transpose → kernel n-dim shape 报错；③ **只 transpose scale 不 transpose weight** → 正解。
+- **MoE MXFP8 的 weight + scale 必须 `.transpose(1, 2).contiguous()` 双方对称走完**：`npu_grouped_matmul` (mx case) 在 Ascend 上有两个连环约束：
+  - **shape check**：`The n dim of weight[N] and n dim of scale[K_blk//2] should be equal`——weight 和 scale 的 N 维大小要相等。
+  - **transposition check**：`transposition of scale/weight should be equal`——两者的 stride 转置状态要一致（同为 contig 或同为非 contig view）。
+  
+  唯一同时满足的组合：**weight 和 scale 都 `.transpose(1, 2).contiguous()`**（与 dense linear 路径 `NPUMXFP8LinearMethod.process_weights_after_loading` 同款）。`npu_dynamic_mx_quant` 对 2D 输入 `[N, K]` 直接吐 **3D** scale `[N, K_blk//2, 2]`（参考 `mxfp8_npu.py:144`，**不要手动 reshape**——已经 4D，再 reshape 会 `too many values to unpack`）；`torch.stack` 拼出 weight 4D `[E, N, K]` + scale `[E, N, K_blk//2, 2]`；然后 `transpose(1, 2).contiguous()` 把两者的 N 都搬到 dim 2，最终：weight `[E, K, N]` + scale `[E, K_blk//2, N, 2]`，两者都 contig。
+  
+  错误踩坑历史：① 两边都 transpose 但都 **不** contig → kernel 跑通但乱码（block-scale 映射错位）；② 两边都不 transpose → kernel n-dim 不等报错；③ 只 transpose scale 不 transpose weight → kernel transposition 不一致报错。早先 CLAUDE.md "禁止 contiguous" 是基于"只对 weight contig 没对 scale" 的非对称 case 过度泛化——双方对称 contig 时 block-scale 映射保持对齐。
 
 > 详细 API 参考和实现模式见 `/mxfp4-impl-ref` skill。
 

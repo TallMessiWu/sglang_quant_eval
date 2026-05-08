@@ -3,5 +3,5 @@ sglang serve \
     --host 0.0.0.0 \
     --port 6969 \
     --device npu \
-    --tp 8 \
+    --tp 1 \
     --trust-remote-code

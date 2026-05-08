@@ -108,13 +108,20 @@
 
 - **W4A8_MXFP checkpoint 权重格式**：`qwen3-8b-dense-w4a8` 检查点的权重存储为 `float8_e4m3fn`（非 packed FP4 uint8），shape 为 `[out, in]`，与 MXFP8 完全相同。这是 msmodelslim 旧版本导出格式（新版 `ascendv1.py` 会 `pack_fp4_to_uint8` → `uint8` shape `[out, in//2]`）。因此 `ModelSlimMXFP4W4A8Scheme` 的 `create_weights` 与 `ModelSlimMXFP8Scheme` 实现一致。
 
-- **MoE MXFP8 的 weight + scale 必须 `.transpose(1, 2).contiguous()` 双方对称走完**：`npu_grouped_matmul` (mx case) 在 Ascend 上有两个连环约束：
-  - **shape check**：`The n dim of weight[N] and n dim of scale[K_blk//2] should be equal`——weight 和 scale 的 N 维大小要相等。
-  - **transposition check**：`transposition of scale/weight should be equal`——两者的 stride 转置状态要一致（同为 contig 或同为非 contig view）。
+- **MoE MXFP8 的 weight + scale 必须 `.transpose(1, 2)` 但 _不要_ `.contiguous()`**：`npu_grouped_matmul` (mx case) 通过 strides 感知 block-scale 布局；`.contiguous()` 会物理重排内存，但 kernel 仍按 strided-view 假设索引 → block-scale 映射错位 → 输出乱码。
   
-  唯一同时满足的组合：**weight 和 scale 都 `.transpose(1, 2).contiguous()`**（与 dense linear 路径 `NPUMXFP8LinearMethod.process_weights_after_loading` 同款）。`npu_dynamic_mx_quant` 对 2D 输入 `[N, K]` 直接吐 **3D** scale `[N, K_blk//2, 2]`（参考 `mxfp8_npu.py:144`，**不要手动 reshape**——已经 4D，再 reshape 会 `too many values to unpack`）；`torch.stack` 拼出 weight 4D `[E, N, K]` + scale `[E, N, K_blk//2, 2]`；然后 `transpose(1, 2).contiguous()` 把两者的 N 都搬到 dim 2，最终：weight `[E, K, N]` + scale `[E, K_blk//2, N, 2]`，两者都 contig。
+  正确做法（对齐 vllm-ascend `AscendW8A8MXFP8DynamicFusedMoEMethod.process_weights_after_loading`，`w8a8_mxfp8.py:332-339`）：
+  ```python
+  layer.w13_weight = Parameter(qw13.transpose(1, 2), requires_grad=False)         # [E, H, 2I] strided view
+  layer.w13_weight_scale = Parameter(s13.transpose(1, 2), requires_grad=False)    # [E, H//64, 2I, 2] strided view
+  ```
+  内存仍是 `[E, N, K]` / `[E, N, K_blk//2, 2]` 物理布局，但逻辑 shape 已变为 `[E, K, N]` / `[E, K_blk//2, N, 2]`——同时满足 kernel 的「n-dim 相等」和「transposition 一致」两个约束。
+
+  `npu_dynamic_mx_quant` 对 2D 输入 `[N, K]` 直接吐 **3D** scale `[N, K_blk//2, 2]`（参考 `mxfp8_npu.py:144`，**不要手动 reshape**——已经 3D，stack 后是 4D，再 reshape 会 `too many values to unpack`）；`torch.stack` 拼出 weight 3D `[E, N, K]` + scale 4D `[E, N, K_blk//2, 2]`；transpose(1, 2) 后即为正确布局。
   
-  错误踩坑历史：① 两边都 transpose 但都 **不** contig → kernel 跑通但乱码（block-scale 映射错位）；② 两边都不 transpose → kernel n-dim 不等报错；③ 只 transpose scale 不 transpose weight → kernel transposition 不一致报错。早先 CLAUDE.md "禁止 contiguous" 是基于"只对 weight contig 没对 scale" 的非对称 case 过度泛化——双方对称 contig 时 block-scale 映射保持对齐。
+  注意：dense linear 路径 (`NPUMXFP8LinearMethod`) 用 `.transpose(0, 1).contiguous()` 是 OK 的，因为 `npu_quant_matmul` 接受 contig 布局；MoE 的 `npu_grouped_matmul` 不接受。
+  
+  踩坑历史：早先版本错误地加了 `.contiguous()`，跑通但输出乱码——纠正回 vllm-ascend 的 strided-view 布局后修复。
 
 > 详细 API 参考和实现模式见 `/mxfp4-impl-ref` skill。
 

@@ -1,4 +1,4 @@
-# CLAUDE.md
+# AGENTS.md
 
 本仓库用于研究和实现 SGLang **Diffusion 侧**在华为 Ascend NPU 上的 MXFP8/MXFP4 量化适配（Wan2.2 等 Diffusion 模型）。
 **如果涉及 LLM serving (`srt`) 侧的功能开发（如 MXFP8/MXFP4），请务必参考 `vllm-ascend` 的实现模式。**
@@ -169,12 +169,12 @@ SGLang 子仓库使用 `git worktree` 同时维护多个分支。**需要修改�
 **GitHub Actions 日志需要登录才能查看。** 遇到 CI 失败链接时，如果通过powershell gh访问获取不到信息，必须第一时间告知用户情况。不得自行猜测或绕弯子抓取。
 
 ## 代码提交
-代码提交时必须使用gitmoji-commit这个skill。每次提交代码后，调用claude-md-improver这个skill来更新CLAUDE.md。
+代码提交时必须使用gitmoji-commit这个skill。每次提交代码后，更新 AGENTS.md 或相关 agent 指导文档。
 
 ### 子模块提交流程
-1. 在子模块（`sglang/`）内完成代码修改后，提交并更新子模块内的 CLAUDE.md
-2. 回到主仓，更新主仓 CLAUDE.md（记录子模块变更摘要）
-3. 最后提交主仓（含 CLAUDE.md 更新 + 子模块指针更新）
+1. 在子模块（`sglang/`）内完成代码修改后，提交并更新子模块内的 agent 指导文档
+2. 回到主仓，更新主仓 AGENTS.md（记录子模块变更摘要）
+3. 最后提交主仓（含 AGENTS.md 更新 + 子模块指针更新）
 
 ## Agent Team 协作模式（本分支：**禁用**）
 
@@ -182,6 +182,6 @@ SGLang 子仓库使用 `git worktree` 同时维护多个分支。**需要修改�
 
 如需 agent team 协作（planner → generator → evaluator，带「重生成」与「重规划」回环），请：
 1. `git checkout agent-team`
-2. 参见该分支 CLAUDE.md 末尾「Agent Team 协作模式（`pge-team`）」节
+2. 参见该分支 agent 指导文档末尾「Agent Team 协作模式（`pge-team`）」节
 
 > 分支即模式，互不打扰。

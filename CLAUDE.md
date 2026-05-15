@@ -19,6 +19,26 @@
 | `junlin_qwen3_dense_w4a4` | LLM 侧，在 w4a8 基础上新增 W4A4 在线量化（单级 MXFP4，`--quantization mxfp4w4a4_npu`）+ 离线 W4A4（INT4 ModelSlim） |
 | `junlin_qwen3_moe_w8a8`   | **当前工作分支**，LLM 侧，Qwen3/3.5 MoE W8A8 MXFP8 在线量化（FusedMoE/TP，`--quantization mxfp8`）；EPMoE 待实现 |
 
+## SGLang worktree 目录规则
+
+SGLang 子仓库使用 `git worktree` 同时维护多个分支。**需要修改哪个分支，就直接进入对应目录修改；不要在现有目录里用 `git checkout` 切分支。**
+
+| 路径 | 对应分支 | 用途 |
+| ---- | -------- | ---- |
+| `sglang/` | `junlin_mxfp4` | Diffusion MXFP4 主工作树。没有单独为 `junlin` 建 worktree，因为 `junlin` 已合入，且 `junlin_mxfp4` 基于 `junlin`，已经包含 `junlin` 内容。 |
+| `sglang-worktrees/qwen3_dense_w8a8/` | `junlin_qwen3_dense` | LLM Qwen3/Qwen3.5 Dense W8A8 MXFP8 分支。 |
+| `sglang-worktrees/qwen3_dense_w4a8/` | `junlin_qwen3_dense_w4a8` | LLM Dense W4A8 分支。 |
+| `sglang-worktrees/qwen3_dense_w4a4/` | `junlin_qwen3_dense_w4a4` | LLM Dense W4A4 分支。 |
+| `sglang-worktrees/qwen3_moe_w8a8/` | `junlin_qwen3_moe_w8a8` | LLM MoE W8A8 MXFP8 分支。 |
+
+开发约定：
+- 改 Dense W8A8：进入 `sglang-worktrees/qwen3_dense_w8a8/`
+- 改 Dense W4A8：进入 `sglang-worktrees/qwen3_dense_w4a8/`
+- 改 Dense W4A4：进入 `sglang-worktrees/qwen3_dense_w4a4/`
+- 改 MoE W8A8：进入 `sglang-worktrees/qwen3_moe_w8a8/`
+- 改 Diffusion MXFP4 / `junlin` 基线相关内容：进入 `sglang/`
+- 若未来要维护 `junlin_mxfp4_offline` 等没有固定目录的分支，先新建独立 worktree，再在该目录开发，不要复用已有 worktree checkout。
+
 ## 在线/离线量化模式
 
 - **在线量化（Online）**：加载 FP16/BF16 权重，`process_weights_after_loading` 中实时量化，用 `--quantization mxfp8/mxfp4` 触发

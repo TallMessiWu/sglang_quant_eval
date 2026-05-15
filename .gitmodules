@@ -1,7 +1,7 @@
 [submodule "sglang"]
 	path = sglang
 	url = https://github.com/TallMessiWu/sglang.git
-	branch = junlin
+	branch = junlin_mxfp4
 [submodule "MindIE-SD"]
 	path = MindIE-SD
 	url = https://gitcode.com/Ascend/MindIE-SD.git

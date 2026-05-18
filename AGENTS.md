@@ -185,3 +185,17 @@ SGLang 子仓库使用 `git worktree` 同时维护多个分支。**需要修改�
 2. 参见该分支 agent 指导文档末尾「Agent Team 协作模式（`pge-team`）」节
 
 > 分支即模式，互不打扰。
+
+## Agent skills
+
+### Issue tracker
+
+本仓库使用 **Local markdown** issue tracker：issue 作为 `.scratch/<feature>/` 下的 markdown 文件存在。详见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+5 个 canonical triage 角色采用中文字符串：待评估 / 待补充信息 / 可交付 agent / 需人工实现 / 不予处理。详见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+单上下文布局：根 `CONTEXT.md` + `docs/adr/`。详见 `docs/agents/domain.md`。

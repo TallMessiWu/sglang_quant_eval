@@ -11,7 +11,7 @@
 
 ## 📁 仓库结构
 
-- `sglang/` - 本地 `git worktree` 容器（已 gitignore，**非子模块**），将 SGLang fork 在多个分支上同时 checkout（`diffusion_w8a8`、`diffusion_w4a4`、`qwen3_dense_*`、`qwen3_moe_w8a8`），适配代码在此处修改。worktree 与分支的对应关系见 `AGENTS.md`。
+- `sglang/` - 本地 `git worktree` 容器，将 SGLang fork 在多个分支上同时 checkout。**`sglang/diffusion_w8a8/` 是子模块**（GitHub 上可点击跳转至 fork）；其余 5 个目录是从它派生的 worktree（`diffusion_w4a4`、`qwen3_dense_*`、`qwen3_moe_w8a8`）。worktree 与分支的对应关系见 `AGENTS.md`。
 - `MindIE-SD/` - 华为 MindIE-SD 源码（子模块，跟踪 `dev`），作为 Diffusion 侧 Ascend NPU MXFP8/FP8 操作的主要参考实现。
 - `msmodelslim/` - 华为 msmodelslim 源码（子模块，跟踪 `master`），离线 MXFP4/MXFP8 权重导出格式的参考。
 - `vllm-ascend/` - vllm-ascend 源码（子模块，跟踪 `main`），作为 LLM 侧 MXFP 量化实现的主要参考标准。

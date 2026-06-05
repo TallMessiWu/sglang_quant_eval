@@ -21,7 +21,7 @@
 
 ## SGLang worktree 目录规则
 
-SGLang 代码以 `git worktree` 容器形式放在 `sglang/` 下（本地目录，已 gitignore，**不再是主仓子模块**）。主 clone 为 `sglang/diffusion_w8a8/`，其余分支都是从它派生的 worktree（共享同一个 `.git`）。**需要修改哪个分支，就直接进入对应目录修改；不要在现有目录里用 `git checkout` 切分支。**
+SGLang 代码以 `git worktree` 容器形式放在 `sglang/` 下。**`sglang/diffusion_w8a8/` 是主仓子模块**（路径 `sglang/diffusion_w8a8`，指向 fork 的 `junlin_diffusion_w8a8` 分支，GitHub 上可点击跳转）。其余分支都是从它派生的 worktree（共享同一个 `.git`），被 `.gitignore` 精准忽略（非子模块、纯本地）。**需要修改哪个分支，就直接进入对应目录修改；不要在现有目录里用 `git checkout` 切分支。**
 
 | 路径 | 对应分支 | 用途 |
 | ---- | -------- | ---- |
@@ -40,7 +40,7 @@ SGLang 代码以 `git worktree` 容器形式放在 `sglang/` 下（本地目录�
 - 改 Dense W4A4：进入 `sglang/qwen3_dense_w4a4/`
 - 改 MoE W8A8：进入 `sglang/qwen3_moe_w8a8/`
 - 若未来要维护 `junlin_mxfp4_offline` 等没有固定目录的分支，在 `sglang/` 下从主 clone（`sglang/diffusion_w8a8`）用 `git worktree add` 新建独立目录，不要复用已有 worktree checkout。
-- `sglang/` 整体已 gitignore，新增/删除 worktree 不影响主仓；主仓不再记录 sglang commit 指针。
+- 5 个 worktree 子目录（`diffusion_w4a4/`、`qwen3_dense_*/`、`qwen3_moe_w8a8/`）被 `.gitignore` 忽略；新增/删除 worktree 不影响主仓。**`sglang/diffusion_w8a8/` 是子模块**（主仓跟踪其 commit 指针）。
 
 > **本地 vs fork 远端命名**：本地分支名已全部对齐 `junlin_<文件夹>`，fork（`TallMessiWu/sglang`）默认分支已改为 `junlin_diffusion_w8a8`。唯一例外：`junlin_qwen3_dense_w8a8` 的 **fork 远端仍叫 `junlin_qwen3_dense`**（它的 upstream tracking 也指 `origin/junlin_qwen3_dense`）——因为它对应**未合并** PR [#22352](https://github.com/sgl-project/sglang/pull/22352)，而跨 fork 重命名 head 分支会**关闭** PR（已踩坑验证：rename API 不会重定向跨仓 PR）。待 #22352 合并后再把远端同步改名。已合并 PR 的分支（原 `junlin`、`junlin_mxfp4`）改名安全。
 
@@ -179,7 +179,7 @@ SGLang 代码以 `git worktree` 容器形式放在 `sglang/` 下（本地目录�
 代码提交时必须使用gitmoji-commit这个skill。每次提交代码后，更新 AGENTS.md 或相关 agent 指导文档。
 
 ### 子模块 / worktree 提交流程
-1. **sglang 代码改动**：进入对应 worktree（见上「SGLang worktree 目录规则」）提交，并更新该 worktree 内的 agent 指导文档；推送到 fork（https://github.com/TallMessiWu/sglang）。`sglang/` 已 gitignore，主仓不跟踪、**无需更新指针**。
+1. **sglang 代码改动**：进入对应 worktree（见上「SGLang worktree 目录规则」）提交，并更新该 worktree 内的 agent 指导文档；推送到 fork（https://github.com/TallMessiWu/sglang）。`sglang/diffusion_w8a8/` 是主仓子模块，**主仓会跟踪其 commit 指针**——在对应 worktree 提交推送后，回到主仓 `git add sglang/diffusion_w8a8` 更新指针快照即可。其余 5 个 worktree 被 gitignore，主仓不跟踪。
 2. 回到主仓，更新主仓 AGENTS.md（记录相关变更摘要）。
 3. **参考子模块（MindIE-SD / msmodelslim / vllm-ascend）**：`.gitmodules` 已为各自配 `branch=`（dev / master / main）。需要同步上游时在主仓跑 `git submodule update --remote <name>`，再提交主仓记录新指针快照——git 子模块始终记录具体 commit，`branch=` 只是声明跟踪哪条上游分支、供 `--remote` 使用。
 

@@ -11,10 +11,10 @@
 
 | 分支                     | 说明                                                                                                                                         |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `junlin`               | 主线，**不动**                                                                                                                         |
-| `junlin_mxfp4`         | Diffusion MXFP8 + MXFP4 在线量化                                                                                                             |
-| `junlin_mxfp4_offline` | Diffusion 在 `junlin_mxfp4` 基础上增加 MXFP4 离线加载                                                                                      |
-| `junlin_qwen3_dense`   | LLM 侧，Qwen3 / 3.5 dense 模型 MXFP8 量化适配                                                                                      |
+| `junlin_diffusion_w8a8`               | 主线，**不动**                                                                                                                         |
+| `junlin_diffusion_w4a4`         | Diffusion MXFP8 + MXFP4 在线量化                                                                                                             |
+| `junlin_mxfp4_offline` | Diffusion 在 `junlin_diffusion_w4a4` 基础上增加 MXFP4 离线加载                                                                                      |
+| `junlin_qwen3_dense_w8a8`   | LLM 侧，Qwen3 / 3.5 dense 模型 MXFP8 量化适配                                                                                      |
 | `junlin_qwen3_dense_w4a8` | LLM 侧，Dense W4A8 在线量化（MXFP4 双级，`--quantization mxfp4_npu`）；离线 W4A8 已实现（`W4A8_MXFP` → `ModelSlimMXFP4W4A8Scheme`） |
 | `junlin_qwen3_dense_w4a4` | LLM 侧，在 w4a8 基础上新增 W4A4 在线量化（单级 MXFP4，`--quantization mxfp4w4a4_npu`）+ 离线 W4A4（INT4 ModelSlim） |
 | `junlin_qwen3_moe_w8a8`   | **当前工作分支**，LLM 侧，Qwen3/3.5 MoE W8A8 MXFP8 在线量化（FusedMoE/TP，`--quantization mxfp8`）；EPMoE 待实现 |
@@ -25,15 +25,15 @@ SGLang 代码以 `git worktree` 容器形式放在 `sglang/` 下（本地目录�
 
 | 路径 | 对应分支 | 用途 |
 | ---- | -------- | ---- |
-| `sglang/diffusion_w8a8/` | `junlin` | **主 clone**（其余 worktree 由它派生）；Diffusion MXFP8 基线。 |
-| `sglang/diffusion_w4a4/` | `junlin_mxfp4` | Diffusion MXFP4 主工作树（基于 `junlin`，含 MXFP8 + MXFP4 在线量化）。 |
-| `sglang/qwen3_dense_w8a8/` | `junlin_qwen3_dense` | LLM Qwen3/Qwen3.5 Dense W8A8 MXFP8 分支。 |
+| `sglang/diffusion_w8a8/` | `junlin_diffusion_w8a8` | **主 clone**（其余 worktree 由它派生）；Diffusion MXFP8 基线。 |
+| `sglang/diffusion_w4a4/` | `junlin_diffusion_w4a4` | Diffusion MXFP4 主工作树（基于 `junlin_diffusion_w8a8`，含 MXFP8 + MXFP4 在线量化）。 |
+| `sglang/qwen3_dense_w8a8/` | `junlin_qwen3_dense_w8a8` | LLM Qwen3/Qwen3.5 Dense W8A8 MXFP8 分支。 |
 | `sglang/qwen3_dense_w4a8/` | `junlin_qwen3_dense_w4a8` | LLM Dense W4A8 分支。 |
 | `sglang/qwen3_dense_w4a4/` | `junlin_qwen3_dense_w4a4` | LLM Dense W4A4 分支。 |
 | `sglang/qwen3_moe_w8a8/` | `junlin_qwen3_moe_w8a8` | LLM MoE W8A8 MXFP8 分支。 |
 
 开发约定：
-- 改 Diffusion MXFP8 / `junlin` 基线相关内容：进入 `sglang/diffusion_w8a8/`
+- 改 Diffusion MXFP8 / `junlin_diffusion_w8a8` 基线相关内容：进入 `sglang/diffusion_w8a8/`
 - 改 Diffusion MXFP4：进入 `sglang/diffusion_w4a4/`
 - 改 Dense W8A8：进入 `sglang/qwen3_dense_w8a8/`
 - 改 Dense W4A8：进入 `sglang/qwen3_dense_w4a8/`
@@ -41,6 +41,8 @@ SGLang 代码以 `git worktree` 容器形式放在 `sglang/` 下（本地目录�
 - 改 MoE W8A8：进入 `sglang/qwen3_moe_w8a8/`
 - 若未来要维护 `junlin_mxfp4_offline` 等没有固定目录的分支，在 `sglang/` 下从主 clone（`sglang/diffusion_w8a8`）用 `git worktree add` 新建独立目录，不要复用已有 worktree checkout。
 - `sglang/` 整体已 gitignore，新增/删除 worktree 不影响主仓；主仓不再记录 sglang commit 指针。
+
+> **本地 vs fork 远端命名**：本地分支名已全部对齐 `junlin_<文件夹>`，fork（`TallMessiWu/sglang`）默认分支已改为 `junlin_diffusion_w8a8`。唯一例外：`junlin_qwen3_dense_w8a8` 的 **fork 远端仍叫 `junlin_qwen3_dense`**（它的 upstream tracking 也指 `origin/junlin_qwen3_dense`）——因为它对应**未合并** PR [#22352](https://github.com/sgl-project/sglang/pull/22352)，而跨 fork 重命名 head 分支会**关闭** PR（已踩坑验证：rename API 不会重定向跨仓 PR）。待 #22352 合并后再把远端同步改名。已合并 PR 的分支（原 `junlin`、`junlin_mxfp4`）改名安全。
 
 ## 在线/离线量化模式
 
@@ -51,9 +53,9 @@ SGLang 代码以 `git worktree` 容器形式放在 `sglang/` 下（本地目录�
 
 | 功能                                   | 分支                   | 在线实现状态            | 离线实现状态            |
 | -------------------------------------- | ---------------------- | ----------------------- | ----------------------- |
-| Diffusion MXFP8                        | `junlin`             | ✅                      | ✅                      |
-| Diffusion MXFP4                        | `junlin_mxfp4`       | ✅                      | ✅                      |
-| LLM (Qwen3 & 3.5) Dense W8A8 (MXFP8)   | `junlin_qwen3_dense` | ✅ (已对齐 vllm-ascend) | ✅ (已对齐 vllm-ascend) |
+| Diffusion MXFP8                        | `junlin_diffusion_w8a8`             | ✅                      | ✅                      |
+| Diffusion MXFP4                        | `junlin_diffusion_w4a4`       | ✅                      | ✅                      |
+| LLM (Qwen3 & 3.5) Dense W8A8 (MXFP8)   | `junlin_qwen3_dense_w8a8` | ✅ (已对齐 vllm-ascend) | ✅ (已对齐 vllm-ascend) |
 | LLM (Qwen3 & 3.5) Dense W4A8 (MXFP4/8) | `junlin_qwen3_dense_w4a8` | ✅ 在线已实现（`mxfp4_npu`，双级） | ✅ 离线已实现（`W4A8_MXFP` → `ModelSlimMXFP4W4A8Scheme`，权重格式同 MXFP8：`float8_e4m3fn`） |
 | LLM (Qwen3 & 3.5) Dense W4A4 (MXFP4)   | `junlin_qwen3_dense_w4a4` | ✅ 在线已实现（`mxfp4w4a4_npu`，单级 MXFP4） | ✅ 离线已实现（`W4A4_DYNAMIC` → `ModelSlimW4A4Int4` + `NPU_W4A4DynamicLinearMethod`，**INT4 非 MXFP4**） |
 | LLM (Qwen3 & 3.5) MoE W8A8 (MXFP8)     | `junlin_qwen3_moe_w8a8` | ✅ 在线已实现（`mxfp8`，`NPUMXFP8FusedMoEMethod`，仅 FusedMoE/TP；e2e 待 NPU 服务器验证） | ❌ 待实现               |

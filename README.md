@@ -11,9 +11,11 @@ This repository (`sglang_quant_eval`) is dedicated to researching and implementi
 
 ## 📁 Repository Structure
 
-- `sglang/` - The core SGLang source code repository (submodule/clone) where the modifications will be made.
-- `MindIE-SD/` - Huawei's MindIE-SD source code (submodule/clone), serving as a primary reference implementation for Ascend NPU MXFP8/FP8 operations (Diffusion).
-- `vllm-ascend/` - vLLM backend code for Ascend (submodule/clone), serving as a primary reference for LLM MXFP adaptation.
+- `sglang/` - Local `git worktree` container (gitignored, **not a submodule**) holding the SGLang fork checked out across multiple branches (`diffusion_w8a8`, `diffusion_w4a4`, `qwen3_dense_*`, `qwen3_moe_w8a8`); all adaptation code is edited here. See `AGENTS.md` for the worktree-to-branch map.
+- `MindIE-SD/` - Huawei's MindIE-SD source code (submodule, tracks `dev`), serving as a primary reference implementation for Ascend NPU MXFP8/FP8 operations (Diffusion).
+- `msmodelslim/` - Huawei's msmodelslim source code (submodule, tracks `master`), reference for the offline MXFP4/MXFP8 weight export format.
+- `vllm-ascend/` - vLLM backend code for Ascend (submodule, tracks `main`), serving as a primary reference for LLM MXFP adaptation.
+- `diffusion/` & `llm/` - Run scripts and PR notes for Diffusion (Wan2.2) and LLM (Qwen3) inference / quantization.
 - `sglang_mxfp8_ascend_research.md` / `_zh.md` - Comprehensive research report, analysis, and implementation plan for the MXFP8 adaptation in English and Chinese.
 - `README.md` / `README_zh.md` - Project description and guide in English and Chinese.
 - `CLAUDE.md` - AI assistant system instructions and project context.

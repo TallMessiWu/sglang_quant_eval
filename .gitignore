@@ -1,4 +1,5 @@
 .vscode
 .idea
 .claude/settings.local.json
-sglang-worktrees/
+# sglang/ 现为本地 git worktree 容器(主 clone + 多分支 worktree),不再作为子模块跟踪
+sglang/

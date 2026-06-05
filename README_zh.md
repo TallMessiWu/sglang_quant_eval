@@ -11,9 +11,11 @@
 
 ## 📁 仓库结构
 
-- `sglang/` - 核心 SGLang 源码仓库 (submodule/clone)，适配代码将在此处修改。
-- `MindIE-SD/` - 华为 MindIE-SD 源码 (submodule/clone)，作为 Diffusion 侧 Ascend NPU MXFP8/FP8 操作的主要参考实现。
-- `vllm-ascend/` - vllm-ascend 源码 (submodule/clone)，作为 LLM 侧 MXFP 量化实现的主要参考标准。
+- `sglang/` - 本地 `git worktree` 容器（已 gitignore，**非子模块**），将 SGLang fork 在多个分支上同时 checkout（`diffusion_w8a8`、`diffusion_w4a4`、`qwen3_dense_*`、`qwen3_moe_w8a8`），适配代码在此处修改。worktree 与分支的对应关系见 `AGENTS.md`。
+- `MindIE-SD/` - 华为 MindIE-SD 源码（子模块，跟踪 `dev`），作为 Diffusion 侧 Ascend NPU MXFP8/FP8 操作的主要参考实现。
+- `msmodelslim/` - 华为 msmodelslim 源码（子模块，跟踪 `master`），离线 MXFP4/MXFP8 权重导出格式的参考。
+- `vllm-ascend/` - vllm-ascend 源码（子模块，跟踪 `main`），作为 LLM 侧 MXFP 量化实现的主要参考标准。
+- `diffusion/` & `llm/` - Diffusion (Wan2.2) 与 LLM (Qwen3) 推理 / 量化的运行脚本和 PR 说明。
 - `sglang_mxfp8_ascend_research.md` / `_zh.md` - MXFP8 适配的详细研究报告、分析及实现方案（提供中英文双语）。
 - `README.md` / `README_zh.md` - 项目自述文档（提供中英文双语）。
 - `CLAUDE.md` - AI 助手的系统指令配置及项目上下文摘要。

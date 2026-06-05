@@ -21,23 +21,26 @@
 
 ## SGLang worktree 目录规则
 
-SGLang 子仓库使用 `git worktree` 同时维护多个分支。**需要修改哪个分支，就直接进入对应目录修改；不要在现有目录里用 `git checkout` 切分支。**
+SGLang 代码以 `git worktree` 容器形式放在 `sglang/` 下（本地目录，已 gitignore，**不再是主仓子模块**）。主 clone 为 `sglang/diffusion_w8a8/`，其余分支都是从它派生的 worktree（共享同一个 `.git`）。**需要修改哪个分支，就直接进入对应目录修改；不要在现有目录里用 `git checkout` 切分支。**
 
 | 路径 | 对应分支 | 用途 |
 | ---- | -------- | ---- |
-| `sglang/` | `junlin_mxfp4` | Diffusion MXFP4 主工作树。没有单独为 `junlin` 建 worktree，因为 `junlin` 已合入，且 `junlin_mxfp4` 基于 `junlin`，已经包含 `junlin` 内容。 |
-| `sglang-worktrees/qwen3_dense_w8a8/` | `junlin_qwen3_dense` | LLM Qwen3/Qwen3.5 Dense W8A8 MXFP8 分支。 |
-| `sglang-worktrees/qwen3_dense_w4a8/` | `junlin_qwen3_dense_w4a8` | LLM Dense W4A8 分支。 |
-| `sglang-worktrees/qwen3_dense_w4a4/` | `junlin_qwen3_dense_w4a4` | LLM Dense W4A4 分支。 |
-| `sglang-worktrees/qwen3_moe_w8a8/` | `junlin_qwen3_moe_w8a8` | LLM MoE W8A8 MXFP8 分支。 |
+| `sglang/diffusion_w8a8/` | `junlin` | **主 clone**（其余 worktree 由它派生）；Diffusion MXFP8 基线。 |
+| `sglang/diffusion_w4a4/` | `junlin_mxfp4` | Diffusion MXFP4 主工作树（基于 `junlin`，含 MXFP8 + MXFP4 在线量化）。 |
+| `sglang/qwen3_dense_w8a8/` | `junlin_qwen3_dense` | LLM Qwen3/Qwen3.5 Dense W8A8 MXFP8 分支。 |
+| `sglang/qwen3_dense_w4a8/` | `junlin_qwen3_dense_w4a8` | LLM Dense W4A8 分支。 |
+| `sglang/qwen3_dense_w4a4/` | `junlin_qwen3_dense_w4a4` | LLM Dense W4A4 分支。 |
+| `sglang/qwen3_moe_w8a8/` | `junlin_qwen3_moe_w8a8` | LLM MoE W8A8 MXFP8 分支。 |
 
 开发约定：
-- 改 Dense W8A8：进入 `sglang-worktrees/qwen3_dense_w8a8/`
-- 改 Dense W4A8：进入 `sglang-worktrees/qwen3_dense_w4a8/`
-- 改 Dense W4A4：进入 `sglang-worktrees/qwen3_dense_w4a4/`
-- 改 MoE W8A8：进入 `sglang-worktrees/qwen3_moe_w8a8/`
-- 改 Diffusion MXFP4 / `junlin` 基线相关内容：进入 `sglang/`
-- 若未来要维护 `junlin_mxfp4_offline` 等没有固定目录的分支，先新建独立 worktree，再在该目录开发，不要复用已有 worktree checkout。
+- 改 Diffusion MXFP8 / `junlin` 基线相关内容：进入 `sglang/diffusion_w8a8/`
+- 改 Diffusion MXFP4：进入 `sglang/diffusion_w4a4/`
+- 改 Dense W8A8：进入 `sglang/qwen3_dense_w8a8/`
+- 改 Dense W4A8：进入 `sglang/qwen3_dense_w4a8/`
+- 改 Dense W4A4：进入 `sglang/qwen3_dense_w4a4/`
+- 改 MoE W8A8：进入 `sglang/qwen3_moe_w8a8/`
+- 若未来要维护 `junlin_mxfp4_offline` 等没有固定目录的分支，在 `sglang/` 下从主 clone（`sglang/diffusion_w8a8`）用 `git worktree add` 新建独立目录，不要复用已有 worktree checkout。
+- `sglang/` 整体已 gitignore，新增/删除 worktree 不影响主仓；主仓不再记录 sglang commit 指针。
 
 ## 在线/离线量化模式
 
@@ -58,6 +61,8 @@ SGLang 子仓库使用 `git worktree` 同时维护多个分支。**需要修改�
 | LLM (Qwen3 & 3.5) MoE W4A4 (MXFP4)     | 待定                   | ❌ 待实现               | ❌ 待实现               |
 
 ## 关键代码路径
+
+> 注：下文 `sglang/python/...` 为 worktree 内相对路径简写，需按上面「worktree 目录规则」加对应前缀——Diffusion 量化代码在 `sglang/diffusion_w4a4/`（基线在 `sglang/diffusion_w8a8/`），LLM 量化代码在对应 `sglang/qwen3_*/` worktree（各分支只含自己那部分实现）。
 
 ### Diffusion 侧（multimodal_gen）
 
@@ -158,9 +163,9 @@ SGLang 子仓库使用 `git worktree` 同时维护多个分支。**需要修改�
 
 ## 开发工具
 
-- **pre-commit**：`sglang/` 是独立 git 仓库，pre-commit 必须在 `sglang/` 目录内运行：
+- **pre-commit**：`sglang/` 下每个 worktree 都是独立 git checkout，pre-commit 必须进入**具体 worktree**（如 `sglang/diffusion_w4a4/`）后运行：
   ```bash
-  pre-commit run --all-files  # 在 sglang/ 目录下执行
+  pre-commit run --all-files  # 在对应 worktree 目录下执行，如 sglang/diffusion_w4a4/
   ```
   Windows 上 CI 脚本已修复编码和路径分隔符兼容性问题（`check_workflow_job_names.py`、`check_registered_tests.py`）。
 
@@ -171,10 +176,10 @@ SGLang 子仓库使用 `git worktree` 同时维护多个分支。**需要修改�
 ## 代码提交
 代码提交时必须使用gitmoji-commit这个skill。每次提交代码后，更新 AGENTS.md 或相关 agent 指导文档。
 
-### 子模块提交流程
-1. 在子模块（`sglang/`）内完成代码修改后，提交并更新子模块内的 agent 指导文档
-2. 回到主仓，更新主仓 AGENTS.md（记录子模块变更摘要）
-3. 最后提交主仓（含 AGENTS.md 更新 + 子模块指针更新）
+### 子模块 / worktree 提交流程
+1. **sglang 代码改动**：进入对应 worktree（见上「SGLang worktree 目录规则」）提交，并更新该 worktree 内的 agent 指导文档；推送到 fork（https://github.com/TallMessiWu/sglang）。`sglang/` 已 gitignore，主仓不跟踪、**无需更新指针**。
+2. 回到主仓，更新主仓 AGENTS.md（记录相关变更摘要）。
+3. **参考子模块（MindIE-SD / msmodelslim / vllm-ascend）**：`.gitmodules` 已为各自配 `branch=`（dev / master / main）。需要同步上游时在主仓跑 `git submodule update --remote <name>`，再提交主仓记录新指针快照——git 子模块始终记录具体 commit，`branch=` 只是声明跟踪哪条上游分支、供 `--remote` 使用。
 
 ## Agent Team 协作模式（本分支：**禁用**）
 

@@ -171,9 +171,13 @@ SGLang 代码以 `git worktree` 容器形式放在 `sglang/` 下。**`sglang/dif
   ```
   Windows 上 CI 脚本已修复编码和路径分隔符兼容性问题（`check_workflow_job_names.py`、`check_registered_tests.py`）。
 
-## 调试 CI 失败
+## 网络访问限制（重要）
 
-**GitHub Actions 日志需要登录才能查看。** 遇到 CI 失败链接时，如果通过powershell gh访问获取不到信息，必须第一时间告知用户情况。不得自行猜测或绕弯子抓取。
+**Claude 的 Bash 环境无法访问 github.com**：`git push` / `git fetch` / `gh` / `curl https://github.com` 一律 TLS 握手失败（`gnutls_handshake() failed` / `SSL_ERROR_SYSCALL`），关掉沙箱也一样——这是本机网络层限制，不是凭证或仓库问题。因此：
+
+- **不要在 Claude 环境里 push/fetch fork**：本地 commit 完成后，把推送交给用户在自己的终端执行（用户侧网络正常，push 可成功）。Claude 侧 `git push` 报 TLS 错 **不代表推送真的失败**——用户那边往往已成功；可用 `git log origin/<branch>`（依赖本地 remote-tracking ref）核对，但无法主动 fetch 刷新。
+- **CI 日志 / GitHub Actions 同理**：需要登录且 Claude 无法联网抓取，遇到 CI 失败链接必须第一时间告知用户，不得自行猜测或绕弯子抓取。
+- 需要联网（搜索、抓网页）时走 `web-access` skill，不要用裸 curl。
 
 ## 代码提交
 代码提交时必须使用gitmoji-commit这个skill。每次提交代码后，更新 AGENTS.md 或相关 agent 指导文档。

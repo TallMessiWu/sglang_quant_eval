@@ -173,10 +173,10 @@ SGLang 代码以 `git worktree` 容器形式放在 `sglang/` 下。**`sglang/dif
 
 ## 网络访问限制（重要）
 
-**Claude 的 Bash 环境无法访问 github.com**：`git push` / `git fetch` / `gh` / `curl https://github.com` 一律 TLS 握手失败（`gnutls_handshake() failed` / `SSL_ERROR_SYSCALL`），关掉沙箱也一样——这是本机网络层限制，不是凭证或仓库问题。因此：
+**Claude 的 Bash 环境到 github.com 的网络不稳定**：TLS 握手会间歇性失败（`gnutls_handshake() failed` / `SSL_ERROR_SYSCALL`），**大传输尤其容易失败**（实测：fork 的大 merge push 连续失败、`curl`/`fetch` 也失败；但主仓的小 commit push 一次成功）。所以这不是硬封锁，而是按传输大小/运气波动的不稳定连接。因此：
 
-- **不要在 Claude 环境里 push/fetch fork**：本地 commit 完成后，把推送交给用户在自己的终端执行（用户侧网络正常，push 可成功）。Claude 侧 `git push` 报 TLS 错 **不代表推送真的失败**——用户那边往往已成功；可用 `git log origin/<branch>`（依赖本地 remote-tracking ref）核对，但无法主动 fetch 刷新。
-- **CI 日志 / GitHub Actions 同理**：需要登录且 Claude 无法联网抓取，遇到 CI 失败链接必须第一时间告知用户，不得自行猜测或绕弯子抓取。
+- **push 失败先重试几次**；持续失败（尤其是 fork 的大体量 push）就交给用户在自己的终端执行（用户侧网络稳定）。Claude 侧 `git push` 报 TLS 错 **不代表推送真的失败**——用户那边往往已成功；可用 `git log origin/<branch>`（依赖本地 remote-tracking ref）核对，但 TLS 不稳时 `fetch` 也可能刷新不了。
+- **CI 日志 / GitHub Actions**：需要登录，且联网不稳，遇到 CI 失败链接优先告知用户，不要自行猜测或绕弯子抓取。
 - 需要联网（搜索、抓网页）时走 `web-access` skill，不要用裸 curl。
 
 ## 代码提交

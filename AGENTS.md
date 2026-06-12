@@ -15,7 +15,7 @@
 | `junlin_diffusion_w4a4`         | Diffusion MXFP8 + MXFP4 在线量化                                                                                                             |
 | `junlin_mxfp4_offline` | Diffusion 在 `junlin_diffusion_w4a4` 基础上增加 MXFP4 离线加载                                                                                      |
 | `junlin_qwen3_dense_w8a8`   | LLM 侧，Qwen3 / 3.5 dense 模型 MXFP8 量化适配                                                                                      |
-| `junlin_qwen3_dense_w4a8` | LLM 侧，Dense W4A8 在线量化（MXFP4 双级，`--quantization mxfp4_npu`）；离线 W4A8 已实现（`W4A8_MXFP` → `ModelSlimMXFP4W4A8Scheme`） |
+| `junlin_qwen3_dense_w4a8` | LLM 侧，Dense W4A8 在线量化（MXFP4 双级，`--quantization mxfp4_w4a8_npu`）；离线 W4A8 已实现（`W4A8_MXFP` → `ModelSlimMXFP4W4A8Scheme`）。**已 merge 同步至 `junlin_qwen3_dense_w8a8` 的 upstream 基线 + 移植 MXFP8 layout/bias-cache 性能优化（2026-06-12）** |
 | `junlin_qwen3_dense_w4a4` | LLM 侧，在 w4a8 基础上新增 W4A4 在线量化（单级 MXFP4，`--quantization mxfp4w4a4_npu`）+ 离线 W4A4（INT4 ModelSlim） |
 | `junlin_qwen3_moe_w8a8`   | **当前工作分支**，LLM 侧，Qwen3/3.5 MoE W8A8 MXFP8 在线量化（FusedMoE/TP，`--quantization mxfp8`）；EPMoE 待实现 |
 
@@ -56,7 +56,7 @@ SGLang 代码以 `git worktree` 容器形式放在 `sglang/` 下。**`sglang/dif
 | Diffusion MXFP8                        | `junlin_diffusion_w8a8`             | ✅                      | ✅                      |
 | Diffusion MXFP4                        | `junlin_diffusion_w4a4`       | ✅                      | ✅                      |
 | LLM (Qwen3 & 3.5) Dense W8A8 (MXFP8)   | `junlin_qwen3_dense_w8a8` | ✅ (已对齐 vllm-ascend) | ✅ (已对齐 vllm-ascend) |
-| LLM (Qwen3 & 3.5) Dense W4A8 (MXFP4/8) | `junlin_qwen3_dense_w4a8` | ✅ 在线已实现（`mxfp4_npu`，双级） | ✅ 离线已实现（`W4A8_MXFP` → `ModelSlimMXFP4W4A8Scheme`，权重格式同 MXFP8：`float8_e4m3fn`） |
+| LLM (Qwen3 & 3.5) Dense W4A8 (MXFP4/8) | `junlin_qwen3_dense_w4a8` | ✅ 在线已实现（`mxfp4_w4a8_npu`，双级） | ✅ 离线已实现（`W4A8_MXFP` → `ModelSlimMXFP4W4A8Scheme`，权重格式同 MXFP8：`float8_e4m3fn`） |
 | LLM (Qwen3 & 3.5) Dense W4A4 (MXFP4)   | `junlin_qwen3_dense_w4a4` | ✅ 在线已实现（`mxfp4w4a4_npu`，单级 MXFP4） | ✅ 离线已实现（`W4A4_DYNAMIC` → `ModelSlimW4A4Int4` + `NPU_W4A4DynamicLinearMethod`，**INT4 非 MXFP4**） |
 | LLM (Qwen3 & 3.5) MoE W8A8 (MXFP8)     | `junlin_qwen3_moe_w8a8` | ✅ 在线已实现（`mxfp8`，`NPUMXFP8FusedMoEMethod`，仅 FusedMoE/TP；e2e 待 NPU 服务器验证） | ❌ 待实现               |
 | LLM (Qwen3 & 3.5) MoE W4A8 (MXFP4/8)   | 待定                   | ❌ 待实现               | ❌ 待实现               |
@@ -93,7 +93,7 @@ SGLang 代码以 `git worktree` 容器形式放在 `sglang/` 下。**`sglang/dif
 在线量化：
 - `--quantization mxfp8` → `linear_method_npu.py` → `NPUMXFP8LinearMethod`（Linear 层）
 - `--quantization mxfp8` (MoE 层) → `fp8.py:241` → `NPUMXFP8FusedMoEMethod`（仅 FusedMoE/TP；EPMoE 路径抛 `NotImplementedError`）
-- `--quantization mxfp4_npu` → `layers/quantization/npu_mxfp4.py` → `NPUMxfp4Config` → `NPUMXFP4W4A8LinearMethod`（双级 W4A8）
+- `--quantization mxfp4_w4a8_npu` → `layers/quantization/npu_mxfp4.py` → `NPUMxfp4Config` → `NPUMXFP4W4A8LinearMethod`（双级 W4A8）
 - `--quantization mxfp4w4a4_npu` → `layers/quantization/npu_mxfp4_w4a4.py` → `NPUMxfp4W4A4Config` → `NPUSingleLevelMXFP4LinearMethod`（单级 W4A4）
 
 其他关键文件：
@@ -169,6 +169,8 @@ SGLang 代码以 `git worktree` 容器形式放在 `sglang/` 下。**`sglang/dif
   注意：dense linear 路径 (`NPUMXFP8LinearMethod`) 用 `.transpose(0, 1).contiguous()` 是 OK 的，因为 `npu_quant_matmul` 接受 contig 布局；MoE 的 `npu_grouped_matmul` 不接受。
   
   踩坑历史：早先版本错误地加了 `.contiguous()`，跑通但输出乱码——纠正回 vllm-ascend 的 strided-view 布局后修复。
+
+- **W4A8 在线 dual-level 去 `.contiguous()` 待 NPU 验证**（`junlin_qwen3_dense_w4a8`，2026-06-12）：把 MXFP8 dense 的 layout 优化移植到 `NPUMXFP4W4A8LinearMethod` 时，`process_weights_after_loading` 里 `w_dual_scale.squeeze(-1).transpose(0, 1)` 去掉了 `.contiguous()`（commit `33dfc0b9b`，已标 `TODO(NPU-validate)`）。但这是 **`npu_dual_level_quant_matmul`**（W4A8 dual-level kernel），**与 MXFP8 dense 的 `npu_quant_matmul` 不是同一个 kernel**，strided-view 容忍度未在 Ascend 950/A3 上验证。**首次在 NPU 跑在线 W4A8（`--quantization mxfp4_w4a8_npu`）时必须确认输出无乱码**；若回归，只 revert `linear_method_npu.py` 这一行（恢复 `.contiguous()`），bias 缓存优化不受影响。bias 缓存（`layer.bias_fp32`）对在线/离线两条 W4A8 路径都安全、已落地。
 
 > 详细 API 参考和实现模式见 `/mxfp4-impl-ref` skill。
 

@@ -15,7 +15,7 @@
 | `junlin_diffusion_w4a4`         | Diffusion MXFP8 + MXFP4 在线量化                                                                                                             |
 | `junlin_mxfp4_offline` | Diffusion 在 `junlin_diffusion_w4a4` 基础上增加 MXFP4 离线加载                                                                                      |
 | `junlin_qwen3_dense_w8a8`   | LLM 侧，Qwen3 / 3.5 dense 模型 MXFP8 量化适配                                                                                      |
-| `junlin_qwen3_dense_w4a8` | LLM 侧，Dense W4A8 在线量化（MXFP4 双级，`--quantization mxfp4_w4a8_npu`）；离线 W4A8 已实现（`W4A8_MXFP` → `ModelSlimMXFP4W4A8Scheme`）。**已 merge 同步至 `junlin_qwen3_dense_w8a8` 的 upstream 基线 + 移植 MXFP8 layout/bias-cache 性能优化（2026-06-12）** |
+| `junlin_qwen3_dense_w4a8` | LLM 侧，Dense W4A8 在线量化（MXFP4 双级，`--quantization mxfp4_w4a8_npu`）；离线 W4A8 已实现（`W4A8_MXFP` → `ModelSlimMXFP4W4A8Scheme`）。**已 merge 同步至 `junlin_qwen3_dense_w8a8` 的 upstream 基线（2026-06-12）；bias-cache 优化保留，但 strided-view layout 优化因 NPU 实测变慢已回退恢复 `.contiguous()`（2026-06-16，strided 版存档于 `junlin_qwen3_dense_w4a8_strided`）** |
 | `junlin_qwen3_dense_w4a4` | LLM 侧，在 w4a8 基础上新增 W4A4 在线量化（单级 MXFP4，`--quantization mxfp4w4a4_npu`）+ 离线 W4A4（INT4 ModelSlim） |
 | `junlin_qwen3_moe_w8a8`   | **当前工作分支**，LLM 侧，Qwen3/3.5 MoE W8A8 MXFP8 在线量化（FusedMoE/TP，`--quantization mxfp8`）；EPMoE 待实现 |
 
@@ -170,7 +170,7 @@ SGLang 代码以 `git worktree` 容器形式放在 `sglang/` 下。**`sglang/dif
   
   踩坑历史：早先版本错误地加了 `.contiguous()`，跑通但输出乱码——纠正回 vllm-ascend 的 strided-view 布局后修复。
 
-- **W4A8 在线 dual-level 去 `.contiguous()` 待 NPU 验证**（`junlin_qwen3_dense_w4a8`，2026-06-12）：把 MXFP8 dense 的 layout 优化移植到 `NPUMXFP4W4A8LinearMethod` 时，`process_weights_after_loading` 里 `w_dual_scale.squeeze(-1).transpose(0, 1)` 去掉了 `.contiguous()`（commit `33dfc0b9b`，已标 `TODO(NPU-validate)`）。但这是 **`npu_dual_level_quant_matmul`**（W4A8 dual-level kernel），**与 MXFP8 dense 的 `npu_quant_matmul` 不是同一个 kernel**，strided-view 容忍度未在 Ascend 950/A3 上验证。**首次在 NPU 跑在线 W4A8（`--quantization mxfp4_w4a8_npu`）时必须确认输出无乱码**；若回归，只 revert `linear_method_npu.py` 这一行（恢复 `.contiguous()`），bias 缓存优化不受影响。bias 缓存（`layer.bias_fp32`）对在线/离线两条 W4A8 路径都安全、已落地。
+- **strided-view（去 `.contiguous()`）在 w4a8 硬件上反而变慢，已恢复 `.contiguous()`**（`junlin_qwen3_dense_w4a8`，2026-06-16）：strided weight/scale view（w8a8 上实测 -6.6% 提升）在 **w4a8 分支的 NPU 上端到端比更新前 w4a8 慢**（多条路径），且是「慢」非「乱码」。故 commit `9d6e9583e` 把两处 `.contiguous()` 恢复回来：MXFP8 dense（`NPUMXFP8LinearMethod`，merge 带来的 strided）+ W4A8 dual-level（`NPUMXFP4W4A8LinearMethod`，原 perf commit `33dfc0b9b` 去掉的）。**bias 缓存（`layer.bias_fp32`）是纯增益、保留**。strided 优化版存档在分支 **`junlin_qwen3_dense_w4a8_strided`**（72fa20005）。教训:`.contiguous()` 去留是「硬件/kernel 相关」,不要跨分支照搬 w8a8 的 layout 优化,需各自 NPU benchmark。
 
 > 详细 API 参考和实现模式见 `/mxfp4-impl-ref` skill。
 

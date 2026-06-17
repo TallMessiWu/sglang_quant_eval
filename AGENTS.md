@@ -42,7 +42,7 @@ SGLang 代码以 `git worktree` 容器形式放在 `sglang/` 下。**`sglang/dif
 - 若未来要维护 `junlin_mxfp4_offline` 等没有固定目录的分支，在 `sglang/` 下从主 clone（`sglang/diffusion_w8a8`）用 `git worktree add` 新建独立目录，不要复用已有 worktree checkout。
 - 5 个 worktree 子目录（`diffusion_w4a4/`、`qwen3_dense_*/`、`qwen3_moe_w8a8/`）被 `.gitignore` 忽略；新增/删除 worktree 不影响主仓。**`sglang/diffusion_w8a8/` 是子模块**（主仓跟踪其 commit 指针）。
 
-> **本地 vs fork 远端命名**：本地分支名已全部对齐 `junlin_<文件夹>`，fork（`TallMessiWu/sglang`）默认分支已改为 `junlin_diffusion_w8a8`。唯一例外：`junlin_qwen3_dense_w8a8` 的 **fork 远端仍叫 `junlin_qwen3_dense`**（它的 upstream tracking 也指 `origin/junlin_qwen3_dense`）——因为它对应**未合并** PR [#22352](https://github.com/sgl-project/sglang/pull/22352)，而跨 fork 重命名 head 分支会**关闭** PR（已踩坑验证：rename API 不会重定向跨仓 PR）。待 #22352 合并后再把远端同步改名。已合并 PR 的分支（原 `junlin`、`junlin_mxfp4`）改名安全。
+> **本地 vs fork 远端命名**：本地分支名已全部对齐 `junlin_<文件夹>`，fork（`TallMessiWu/sglang`）默认分支已改为 `junlin_diffusion_w8a8`。PR [#22352](https://github.com/sgl-project/sglang/pull/22352)（Dense W8A8）已于 2026-06-16 合并，fork 远端已同步改名为 `junlin_qwen3_dense_w8a8`，本地 tracking 已更新（2026-06-17）。注意：跨 fork 重命名 head 分支会关闭对应 PR（已踩坑），已合并后改名安全。
 
 ## 在线/离线量化模式
 

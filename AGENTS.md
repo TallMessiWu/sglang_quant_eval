@@ -19,6 +19,15 @@
 | `junlin_qwen3_dense_w4a4` | LLM 侧，在 w4a8 基础上新增 W4A4 在线量化（单级 MXFP4，`--quantization mxfp4w4a4_npu`）+ 离线 W4A4（INT4 ModelSlim） |
 | `junlin_qwen3_moe_w8a8`   | **当前工作分支**，LLM 侧，Qwen3/3.5 MoE W8A8 MXFP8 在线量化（FusedMoE/TP，`--quantization mxfp8`）；EPMoE 待实现 |
 
+> **备份分支（用于回退/还原，勿当工作分支）**：
+> | 分支 | 内容 | 远端 |
+> | ---- | ---- | ---- |
+> | `junlin_qwen3_dense_w4a8_strided` (`72fa20005`) | w4a8 的 strided-view layout 优化版（去 `.contiguous()`，NPU 实测变慢已回退） | 已推 fork (`origin`) |
+> | `backup-w4a8-pre-rebase-20260622` (`e586b832c7`) | PR #23650 **rebase 重建前**的完整旧历史（merge-base 落后、diff 重含已合并 W8A8） | 仅本地 |
+> | `backup-w4a8-with-int4-dynamic-20260622` (`8c4e5857f0`) | rebase 重建后、但**仍含被摘除的 INT4 `W4A8_DYNAMIC`** 那套（`ModelSlimW4A8Int8` + `NPUW4A8DynamicLinearMethod`）。日后要还原 INT4 直接从此 cherry-pick/checkout | 已推 fork (`origin`) |
+>
+> 当前 `junlin_qwen3_dense_w4a8` head 为 `8ff7856846`（纯 MXFP4 W4A8）。另有更早的 `backup-w4a8-pre-merge`（pre-merge 快照，已过时）。
+
 ## SGLang worktree 目录规则
 
 SGLang 代码以 `git worktree` 容器形式放在 `sglang/` 下。**`sglang/diffusion_w8a8/` 是主仓子模块**（路径 `sglang/diffusion_w8a8`，指向 fork 的 `junlin_diffusion_w8a8` 分支，GitHub 上可点击跳转）。其余分支都是从它派生的 worktree（共享同一个 `.git`），被 `.gitignore` 精准忽略（非子模块、纯本地）。**需要修改哪个分支，就直接进入对应目录修改；不要在现有目录里用 `git checkout` 切分支。**

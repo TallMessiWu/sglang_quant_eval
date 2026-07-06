@@ -27,7 +27,7 @@
 > | `backup-w4a8-with-int4-dynamic-20260622` (`8c4e5857f0`) | rebase 重建后、但**仍含被摘除的 INT4 `W4A8_DYNAMIC`** 那套（`ModelSlimW4A8Int8` + `NPUW4A8DynamicLinearMethod`）。日后要还原 INT4 直接从此 cherry-pick/checkout | 已推 fork (`origin`) |
 > | `backup-w4a8-pre-squash-20260625` (`a1947f3133`) | **本轮 squash+rebase 前**的多提交历史（16 个 commit：feature 初版 `8ff7856846` + 离线 A5 调试 fix/rewind/debug + 在线真 W4A8 修正）。要看调试过程或单独 commit 从此 checkout | 已推 fork (`origin`) |
 >
-> 当前 `junlin_qwen3_dense_w4a8` head 为 `b73c30235c`（`2efd90a6e5` 的 feature + PR #23650 review follow-up：全脱 torch_npu + 复用 npu_format_cast util + 文档，**已 squash 成单一 feature 提交并 force-push fork**，2026-07-02，**A5 已验证在线+离线可跑**）。**在线 CLI choice 已从 `mxfp4_w4a8_npu` 重命名为 `mxfp_w4a8`（2026-07-06，commit `e9c8f7a2b1`，已推 fork）：去 `_npu` 后缀（设备无关、对齐 `mxfp8`）＋ `mxfp_` 前缀反映全 MX 语义（MXFP4 权重 ＋ MXFP8 激活），与 INT4 权重的 `w4afp8` 区分；同步改 CHOICES／注册键／`get_name()`／docstring／`docs/advanced_features/quantization.md` 及测试脚本 `llm/qwen3_dense_online_w4a8.sh`。**另有更早的 `backup-w4a8-pre-merge`（pre-merge 快照，已过时）。
+> 当前 `junlin_qwen3_dense_w4a8` head 为 `b73c30235c`（`2efd90a6e5` 的 feature + PR #23650 review follow-up：全脱 torch_npu + 复用 npu_format_cast util + 文档，**已 squash 成单一 feature 提交并 force-push fork**，2026-07-02，**A5 已验证在线+离线可跑**）。**在线 CLI choice 已从 `mxfp4_w4a8_npu` 重命名为 `mxfp_w4a8`（2026-07-06，commit `136b8b506c`，已推 fork）：去 `_npu` 后缀（设备无关、对齐 `mxfp8`）＋ `mxfp_` 前缀反映全 MX 语义（MXFP4 权重 ＋ MXFP8 激活），与 INT4 权重的 `w4afp8` 区分；同步改 CHOICES／注册键／`get_name()`／docstring／`docs/advanced_features/quantization.md` 及测试脚本 `llm/qwen3_dense_online_w4a8.sh`；并把 config 类 `NPUMxfp4Config` 重命名为设备无关的 `Mxfp4W4A8Config`、`get_quant_method` 改按 `is_npu` 分发（非 NPU 抛 `NotImplementedError`）。**另有更早的 `backup-w4a8-pre-merge`（pre-merge 快照，已过时）。
 
 ## SGLang worktree 目录规则
 

@@ -653,5 +653,6 @@
     "version": "1.0.0",
     "model_quant_type": "W4A8_MXFP",
     "metadata": {},
-    "group_size": 32
+    "group_size": 32,
+    "optional": {}
 }

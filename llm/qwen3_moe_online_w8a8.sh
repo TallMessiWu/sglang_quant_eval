@@ -37,8 +37,10 @@ sglang serve \
     --model-path /home/weights/Qwen3-30B-A3B \
     --host 127.0.0.1 \
     --port $VLLM_PORT \
+    --quantization mxfp8 \
     --device npu \
     --tp 1 \
     --reasoning-parser qwen3 \
     --context-length 5000 \
-    --trust-remote-code
+    --trust-remote-code \
+    --disable-cuda-graph

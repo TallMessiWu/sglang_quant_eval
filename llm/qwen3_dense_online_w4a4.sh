@@ -37,7 +37,7 @@ sglang serve \
     --model-path /home/weights/Qwen3-8B \
     --host 127.0.0.1 \
     --port $VLLM_PORT \
-    --quantization mxfp4_w4a4_npu \
+    --quantization mxfp4 \
     --device npu \
     --tp 1 \
     --reasoning-parser qwen3 \

@@ -68,7 +68,7 @@ LLM 侧，Dense W4A8 在线量化（单级真 W4A8/MXFP8 激活，`--quantizatio
 
 **在线 CLI choice 已从 `mxfp4_w4a8_npu` 重命名为 `mxfp_w4a8`**（2026-07-06，commit `136b8b506c`，已推 fork）：去 `_npu` 后缀（设备无关、对齐 `mxfp8`）＋ `mxfp_` 前缀反映全 MX 语义（MXFP4 权重 ＋ MXFP8 激活），与 INT4 权重的 `w4afp8` 区分；同步改 CHOICES／注册键／`get_name()`／docstring／文档及测试脚本；并把 config 类 `NPUMxfp4Config` 重命名为设备无关的 `Mxfp4W4A8Config`、`get_quant_method` 改按 `is_npu` 分发（非 NPU 抛 `NotImplementedError`）。
 
-## `junlin_qwen3_dense_w4a4` — LLM Dense W4A4 (MXFP4) 🚧
+## `junlin_qwen3_dense_w4a4` — LLM Dense W4A4 (MXFP4) ✅
 
 LLM 侧，Dense W4A4 在线量化（单级 MXFP4：4-bit 权重 + 4-bit 激活，`--quantization mxfp4`）+ 离线 W4A4（`W4A4_MXFP4` → `ModelSlimMXFP4Scheme`，真 MXFP4）。
 
@@ -76,7 +76,7 @@ LLM 侧，Dense W4A4 在线量化（单级 MXFP4：4-bit 权重 + 4-bit 激活�
 - `git reset --hard upstream/main`（`e85ef5487`，含 #23650 squash）去掉 diff 里重复的已合并 W8A8/W4A8 代码，只留 W4A4 delta（8 文件 442 行，单一 feature 提交 head `d831fb30e`）
 - 对齐 #23650 重构风格：① CLI 从 `mxfp4w4a4_npu` 改为 `mxfp4`（设备无关；srt 侧 `mxfp4` 只在 cpu/cuda/hip 注册给上游 `Mxfp4Config`/MoE，NPU 上没注册，故在 `__init__.py` 的 `is_npu()` 块加 `"mxfp4": Mxfp4W4A4Config`，镜像 `GPTQAscendConfig`——NPU 走我们的 W4A4、GPU 走上游，零冲突、不改上游 `Mxfp4Config`）；② config `NPUMxfp4W4A4Config` → 设备无关 `Mxfp4W4A4Config`，`get_quant_method` 按 `is_npu()` 分发；③ 在线 `NPUSingleLevelMXFP4LinearMethod` + 新增离线 `NPUSingleLevelMXFP4OfflineLinearMethod`（继承在线、共享 `apply`）全走 `torch.ops.npu.*`、复用惰性 helper `_get_float4_e2m1fn_x2_dtype()`（fp4 dtype 必来自 torch_npu）/`_get_float8_e8m0fnu_dtype()`，无顶层 `import torch_npu`；④ 离线 `ModelSlimMXFP4Scheme` 改为继承 `ModelSlimLinearScheme` + `self.kernel` 委托，注册进 `get_linear_scheme` 的 `linear_quant_schemes`（`("W4A4_MXFP4", ...)`）；⑤ 文档写 `docs_new/`。
 
-kernel 数学保持原样（单级 fp4，`npu_quant_matmul(x1=x2=fp4, group_sizes=[1,1,32])`、激活 `npu_dynamic_mx_quant(dst=fp4)`，无 FRACTAL_NZ；与 W4A8 的 `[0,0,32]`+NZ 是不同路径）。本地无 torch/NPU，仅过 py_compile + pre-commit；**W4A4 MXFP4 尚未 A5 e2e 验证，PR 标 WIP，NZ 布局待 A5 bring-up**。
+kernel 数学保持原样（单级 fp4，`npu_quant_matmul(x1=x2=fp4, group_sizes=[1,1,32])`、激活 `npu_dynamic_mx_quant(dst=fp4)`，无 FRACTAL_NZ；与 W4A8 的 `[0,0,32]`+NZ 是不同路径）。**W4A4 MXFP4 在线 + 离线均已在 A5 e2e 验证输出正常**（2026-07-09）：性能约 +49% 吞吐 / −32% 时延，GSM8K 在线 92.87（−2.45 pt）、离线 93.48（−1.84 pt） vs BF16 95.32，完整跑分表已写入 PR #23795 body。PR 已去 WIP。
 
 ⚠️ 旧进度表曾把离线记为 INT4 `W4A4_DYNAMIC`，与分支实际（`W4A4_MXFP4` 真 MXFP4）不符，已订正。
 

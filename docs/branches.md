@@ -78,6 +78,8 @@ LLM 侧，Dense W4A4 在线量化（单级 MXFP4：4-bit 权重 + 4-bit 激活�
 
 kernel 数学保持原样（单级 fp4，`npu_quant_matmul(x1=x2=fp4, group_sizes=[1,1,32])`、激活 `npu_dynamic_mx_quant(dst=fp4)`，无 FRACTAL_NZ；与 W4A8 的 `[0,0,32]`+NZ 是不同路径）。**W4A4 MXFP4 在线 + 离线均已在 A5 e2e 验证输出正常**（2026-07-09）：性能约 +49% 吞吐 / −32% 时延，GSM8K 在线 92.87（−2.45 pt）、离线 93.48（−1.84 pt） vs BF16 95.32，完整跑分表已写入 PR #23795 body。PR 已去 WIP。
 
+🆕 **在线路径改用双级（dual-level）MXFP4**（2026-07-09，head `635d1d8b6`）：单级在线 RTN（UE8M0 幂-2 block scale）精度不足，长文本贪心解码会陷入「只输出 reasoning、发不出 EOS」的死循环（离线校准权重无此问题）。新增 `NPUDualLevelMXFP4LinearMethod`（`npu_dynamic_dual_level_mx_quant` + `npu_dual_level_quant_matmul`，细 FP8 E4M3 L0 scale + 粗 L1 scale，权重 FRACTAL_NZ），移植自 Diffusion `NPUMXFP4DiffusionLinearMethod`/MindIE-SD `W4A4MXFP4DualQuantLinear`，A5 实测明显改善、死循环消失。**在线现只走双级**（去掉了 env 开关与单级分支）；单级 `NPUSingleLevelMXFP4LinearMethod` 仅作离线基类保留（离线 checkpoint 存单级 UE8M0 scale）。仅 Ascend 950（A5）支持 `DualLevelQuantBatchMatmul`，A2/A3 无此 op。
+
 ⚠️ 旧进度表曾把离线记为 INT4 `W4A4_DYNAMIC`，与分支实际（`W4A4_MXFP4` 真 MXFP4）不符，已订正。
 
 ## `junlin_qwen3_moe_w8a8` — 当前工作分支 🚧

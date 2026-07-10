@@ -154,6 +154,50 @@ def probe_offline_proj(tag, w_fp8, scale_u8):
         print(f"  [B] FAILED: {type(e).__name__}: {e}")
 
 
+ROUTER_W = "model.layers.0.mlp.gate.weight"
+ROUTER_S = "model.layers.0.mlp.gate.weight_scale"
+
+
+def probe_router_gate(ckpt):
+    """The router gate is built as ReplicatedLinear(quant_config=None) -> stays
+    bf16. If msmodelslim quantised it (fp8 + weight_scale), default_weight_loader
+    casts fp8 -> bf16 WITHOUT applying the block scale (the scale key has no
+    param and is dropped) => per-block-scrambled router => wrong experts =>
+    garbage. Online loads a bf16 gate so it is immune. This checks the actual
+    stored dtype and shows the magnitude damage.
+    """
+    print("=" * 96)
+    print("ROUTER GATE dtype (offline-specific suspect: gate is quant_config=None => bf16)")
+    files = sorted(glob.glob(os.path.join(ckpt, "*.safetensors")))
+    w = s = None
+    for f in files:
+        with safe_open(f, framework="pt") as fh:
+            keys = set(fh.keys())
+            if ROUTER_W in keys:
+                w = fh.get_tensor(ROUTER_W)
+            if ROUTER_S in keys:
+                s = fh.get_tensor(ROUTER_S)
+    if w is None:
+        print(f"    {ROUTER_W} not found — check naming.")
+        return
+    _stat("gate.weight      ", w)
+    print(f"    gate.weight_scale present in checkpoint: {s is not None}"
+          + (f"  shape={tuple(s.shape)} dtype={s.dtype}" if s is not None else ""))
+    if w.dtype == E4M3:
+        print("    !!! gate.weight is float8_e4m3fn, but sglang builds the gate as")
+        print("        ReplicatedLinear(quant_config=None) => a bf16 param. default_weight_loader")
+        print("        casts fp8->bf16 WITHOUT the block scale => scrambled router => GARBAGE.")
+        if s is not None:
+            raw = w.float()                                          # what sglang loads (no scale)
+            deq = _dequant_ref(w.to(DEVICE), s.to(DEVICE), block_axis=1).float().cpu()
+            print(f"        raw-cast(no scale) norm={raw.norm():.3f}  vs  proper-dequant norm="
+                  f"{deq.norm():.3f}  (off by ~{deq.norm()/max(raw.norm(),1e-6):.1f}x, per-block)")
+            print("    => FIX: keep the router gate in FLOAT in the msmodelslim export, OR make")
+            print("       sglang dequantise the fp8 gate on load. This is the garbage source.")
+    else:
+        print(f"    gate.weight is {w.dtype} (not fp8) => router not the bug; look at expert fusion.")
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print(__doc__)
@@ -164,7 +208,8 @@ if __name__ == "__main__":
     tensors = _load_tensors(ckpt, [GATE_W, GATE_S, DOWN_W, DOWN_S])
     probe_offline_proj("GATE_PROJ (block over in=H)", tensors[GATE_W], tensors[GATE_S])
     probe_offline_proj("DOWN_PROJ (block over in=I)", tensors[DOWN_W], tensors[DOWN_S])
+    probe_router_gate(ckpt)
     print("=" * 96)
-    print("Read: [A] PASS + [B] match => offline weight/scale/layout all correct for the")
-    print("kernel; the garbage is in fusion/routing/assembly, not the per-proj repr.")
-    print("[A] FAIL or [B] mismatch => the offline weight/scale itself is wrong (convention).")
+    print("Read: [A] PASS + [B] match => per-expert weight/scale/layout correct for the kernel.")
+    print("Then ROUTER GATE section: if gate.weight is fp8, that mis-loaded router is the")
+    print("offline-garbage source (online uses a bf16 gate and is unaffected).")

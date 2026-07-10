@@ -60,7 +60,7 @@ SGLang 代码以 `git worktree` 容器形式放在 `sglang/` 下。**`sglang/dif
 | LLM (Qwen3 & 3.5) Dense W8A8 (MXFP8)   | `junlin_qwen3_dense_w8a8` | ✅ (已对齐 vllm-ascend) | ✅ (已对齐 vllm-ascend) |
 | LLM (Qwen3 & 3.5) Dense W4A8 (MXFP4/8) | `junlin_qwen3_dense_w4a8` | ✅ 在线已实现（`mxfp_w4a8`，单级真 W4A8/MXFP8 激活） | ✅ 离线已实现（`W4A8_MXFP` → `ModelSlimMXFP4W4A8Scheme`，权重格式同 MXFP8：`float8_e4m3fn`） |
 | LLM (Qwen3 & 3.5) Dense W4A4 (MXFP4)   | `junlin_qwen3_dense_w4a4` | ✅ 在线已实现（`mxfp4`，NPU 设备分发，**双级 MXFP4** `NPUDualLevelMXFP4LinearMethod`；A5 e2e 已验证，双级修复了单级 RTN 贪心死循环） | ✅ 离线已实现（`W4A4_MXFP4` → `ModelSlimMXFP4Scheme` → `NPUSingleLevelMXFP4OfflineLinearMethod`，单级真 MXFP4，权重 fp8 容器 `float8_e4m3fn`） |
-| LLM (Qwen3 & 3.5) MoE W8A8 (MXFP8)     | `junlin_qwen3_moe_w8a8` | ✅ 在线已实现（`mxfp8`，`NPUMXFP8FusedMoEMethod`，仅 FusedMoE/TP；e2e 待 NPU 服务器验证） | ❌ 待实现               |
+| LLM (Qwen3 & 3.5) MoE W8A8 (MXFP8)     | `junlin_qwen3_moe_w8a8` | ✅ 在线已实现（`mxfp8`，`NPUMXFP8FusedMoEMethod`，A5 e2e 已验证） | ✅ 离线已实现（`W8A8_MXFP8` → `ModelSlimMXFP8MoEScheme` → `NPUMXFP8FusedMoEMethod` 离线分支，e2e 待验证） |
 | LLM (Qwen3 & 3.5) MoE W4A8 (MXFP4/8)   | 待定                   | ❌ 待实现               | ❌ 待实现               |
 | LLM (Qwen3 & 3.5) MoE W4A4 (MXFP4)     | 待定                   | ❌ 待实现               | ❌ 待实现               |
 

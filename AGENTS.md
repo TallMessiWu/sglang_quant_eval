@@ -94,7 +94,7 @@ SGLang 代码以 `git worktree` 容器形式放在 `sglang/` 下。**`sglang/dif
 
 在线量化：
 - `--quantization mxfp8` → `linear_method_npu.py` → `NPUMXFP8LinearMethod`（Linear 层）
-- `--quantization mxfp8` (MoE 层) → `fp8.py:241` → `NPUMXFP8FusedMoEMethod`（仅 FusedMoE/TP；EPMoE 路径抛 `NotImplementedError`）
+- `--quantization mxfp8` (MoE 层) → `fp8.py:351` → `NPUMXFP8FusedMoEMethod`（在线 MXFP8，三段式 `create_weights` / `process_weights_after_loading` / `apply`，仅 FusedMoE/TP）
 - `--quantization mxfp_w4a8` → `layers/quantization/npu_mxfp4.py` → `NPUMxfp4Config` → `NPUMXFP4W4A8LinearMethod`（真 W4A8：单级 FP8 激活 + FP4 权重，apply 复用离线 `npu_quant_matmul(x2_dtype=fp4)`；权重在线 `npu_dynamic_mx_quant(dst=float4_e2m1fn_x2)`）
 - `--quantization mxfp4`（NPU 设备分发，`is_npu()` 块注册 `Mxfp4W4A4Config`；非 NPU 为上游 `Mxfp4Config`/MoE）→ `layers/quantization/npu_mxfp4_w4a4.py` → `Mxfp4W4A4Config` → **`NPUDualLevelMXFP4LinearMethod`（在线唯一路径，双级 MXFP4：细 FP8 E4M3 L0 scale + 粗 L1 scale，`npu_dynamic_dual_level_mx_quant` + `npu_dual_level_quant_matmul`，权重 FRACTAL_NZ，仅 A5/Ascend 950）**。单级 `NPUSingleLevelMXFP4LinearMethod` 仅作离线基类保留（离线 `W4A4_MXFP4` → `ModelSlimMXFP4Scheme` → `NPUSingleLevelMXFP4OfflineLinearMethod`，单级）。移植自 Diffusion `NPUMXFP4DiffusionLinearMethod`/MindIE-SD `W4A4MXFP4DualQuantLinear`
 
@@ -102,8 +102,7 @@ SGLang 代码以 `git worktree` 容器形式放在 `sglang/` 下。**`sglang/dif
 
 - `srt/models/qwen3.py` — Qwen3 / 3.5 模型定义，`EntryClass = Qwen3ForCausalLM`
 - `srt/models/qwen3_moe.py` — Qwen3 MoE 模型定义，`EntryClass = Qwen3MoeForCausalLM`
-- `srt/hardware_backend/npu/quantization/moe_method_npu.py` — `NPUMXFP8FusedMoEMethod`（MoE 在线 MXFP8，三段式：`create_weights` / `process_weights_after_loading` / `apply`）
-- `srt/hardware_backend/npu/quantization/fused_moe_method_npu.py` — MoE NPU kernel 函数集（`npu_fused_experts_mxfp8` / `npu_fused_experts_w4a4` / `npu_fused_experts` 等）
+- `srt/hardware_backend/npu/quantization/fused_moe_method_npu.py` — MoE NPU kernel 函数集 + 所有 MoE method 类（`npu_fused_experts_mxfp8`、`npu_fused_experts_w4a4`、`npu_fused_experts` 等；`NPUMXFP8FusedMoEMethod`、`NPUW8A8Int8DynamicMoEMethod`、`NPUW4A4Int4DynamicMoEMethod` 等）
 - `srt/models/registry.py` — `ModelRegistry`，扫描 `sglang.srt.models` 注册所有 `EntryClass`
 - `srt/layers/rotary_embedding/base.py` — RoPE 实现，NPU 路径 import `sgl_kernel_npu`
 - `srt/model_loader/loader.py` — `DefaultModelLoader`：`_get_quantization_config` → `_initialize_model`
@@ -135,6 +134,12 @@ SGLang 代码以 `git worktree` 容器形式放在 `sglang/` 下。**`sglang/dif
 - **MoE gmm1 用 fused `npu_grouped_matmul_swiglu_quant_v2`**：勿拆三步；`group_list` 需 count→cumulative 转换。
 - **MoE weight+scale `.transpose(1,2)` 不要 `.contiguous()`**：strided view 保持 block-scale 映射；dense 路径 contig 则 OK。
 - **strided-view 在 w4a8 上变慢**：已恢复 `.contiguous()`。`.contiguous()` 去留是硬件相关的，勿跨分支照搬。
+- **MXFP8 MoE kernel 契约（torch_npu 2.10.0.post2 + A5，已探针验证）**：
+  - `npu_dynamic_mx_quant(x[N,K], dst=float8_e4m3fn)` → scale `[N, K//64, 2]` uint8（**3D pair-split**，无需 normalize）；**3D 输入 [E,N,K] 被 kernel 直接接受** → 免逐 expert 循环 + uint8 stack。
+  - gmm1 `npu_grouped_matmul_swiglu_quant_v2`：weight/scale 单元素 list，group_list **cumulative**；`x_dtype=None, weight_dtype=None`（e4m3 隐式），`weight_scale_dtype=x_scale_dtype=float8_e8m0fnu`（**必须显式**）。
+  - gmm2 `npu_grouped_matmul`：weight/scale 单元素 list，group_list **COUNT + 显式 `group_list_type=1`**；scale dtype 同上，**无 group_sizes**。
+  - weight `transpose(1,2)` → **strided view**（NO contiguous）—— probe 证实 strided 和 contiguous 都 PASS（cos≈0.997），但 strided 匹配 vllm-ascend 性能。
+  - E8M0 = `getattr(torch_npu, "float8_e8m0fnu")` = int 293；函数内 lazy import torch_npu，不模块级引入。
 
 > 详细根因分析、调试过程、代码示例、修复方法见 [docs/known-pitfalls.md](docs/known-pitfalls.md)。
 

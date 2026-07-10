@@ -352,13 +352,57 @@ def probe_init_routing():
         print(f"    FAILED: {type(e).__name__}: {e}")
 
 
+# ---------------------------------------------------------------------------
+# Q8 — scale block PAIRING order (contiguous vs interleaved)
+# ---------------------------------------------------------------------------
+def probe_scale_pairing():
+    """Decide whether the kernel's [K/64, 2] pair-split is CONTIGUOUS or INTERLEAVED.
+
+    This is the online-vs-offline crux. Online scale comes straight from
+    npu_dynamic_mx_quant (kernel-native pairing, never reinterpreted → always
+    correct). Offline reshapes msmodelslim's FLAT [N, K/32] (block order
+    0,1,2,...) CONTIGUOUSLY into [N, K/64, 2], assuming pair i = (block 2i,
+    block 2i+1). If the kernel actually pairs interleaved (block i, block
+    i+K/64), the offline contiguous reshape scrambles the scale → GARBAGE,
+    while online is immune. This test reveals the true pairing WITHOUT a
+    checkpoint: give each 32-wide block a monotonically increasing magnitude,
+    quantise, and read the scale bytes in memory order.
+    """
+    _line("=")
+    print("Q8  SCALE PAIRING ORDER (contiguous [2i,2i+1] vs interleaved [i,i+K/64])")
+    K = 256  # 8 blocks of 32 -> 4 pairs
+    nblk = K // MXFP8_BLOCK_SIZE  # 8
+    try:
+        w = torch.zeros(1, K, device=DEVICE, dtype=DTYPE)
+        for b in range(nblk):
+            w[0, b * 32:(b + 1) * 32] = float(2.0 ** b)  # block b magnitude 2^b
+        _qw, s = torch.ops.npu.npu_dynamic_mx_quant(w, dst_type=E4M3)
+        _stat("scale", s)
+        s_mem = s.reshape(-1).to(torch.int32).tolist()  # memory order, length nblk
+        print(f"    input block magnitudes (b=0..{nblk-1}): 2^b, strictly increasing")
+        print(f"    scale bytes in MEMORY order: {s_mem}")
+        monotonic = all(s_mem[i] <= s_mem[i + 1] for i in range(len(s_mem) - 1))
+        if monotonic:
+            print("    => MONOTONIC => CONTIGUOUS pairing [2i,2i+1].")
+            print("    => offline reshape [N,K/32]->[N,K/64,2] is CORRECT.")
+        else:
+            # what contiguous order WOULD look like vs what we got
+            print("    => NOT monotonic => INTERLEAVED pairing.")
+            print("    => offline CONTIGUOUS reshape is the BUG. Offline must instead")
+            print("       reshape [N, 2, K/64] then transpose last two dims, i.e.")
+            print("       s.reshape(N, 2, K//64).transpose(-1,-2)  (verify against this).")
+    except Exception as e:  # noqa: BLE001
+        print(f"    FAILED: {type(e).__name__}: {e}")
+
+
 if __name__ == "__main__":
     probe_capabilities()
     probe_scale_layout()
+    probe_scale_pairing()
     probe_dense_matmul()
     probe_init_routing()
     probe_moe_forward(contiguous=False)   # STRIDED view first (what prod wants)
     probe_moe_forward(contiguous=True)    # fallback if strided rejected
     _line("=")
-    print("DONE. Read Q1 (scale ndim), Q6 cos per layout. The layout whose Q6")
-    print("prints PASS is the one process_weights_after_loading must produce.")
+    print("DONE. Read Q1 (scale ndim), Q8 (pairing — online/offline crux), Q6 cos")
+    print("per layout. If Q8 says INTERLEAVED, that is the offline-garbage bug.")

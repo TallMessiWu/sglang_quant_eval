@@ -142,6 +142,7 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，只有 3 个目录�
   - gmm2 `npu_grouped_matmul`：weight/scale 单元素 list，group_list **COUNT + 显式 `group_list_type=1`**；scale dtype 同上，**无 group_sizes**。
   - weight `transpose(1,2)` → **strided view**（NO contiguous）—— probe 证实 strided 和 contiguous 都 PASS（cos≈0.997），但 strided 匹配 vllm-ascend 性能。
   - E8M0 = `getattr(torch_npu, "float8_e8m0fnu")` = int 293；函数内 lazy import torch_npu，不模块级引入。
+  - **融合激活量化（quant_mode=3，已 A5 探针验证 Q9）**：`npu_moe_init_routing_v2` 可直接在 routing 内做 MXFP8 激活量化——`quant_mode=3` → 排序输出 e4m3、第 4 返回值给 e8m0 block scale，省掉单独一次 `npu_dynamic_mx_quant`（对齐 vllm-ascend A5：原生 v2，非 v3/custom op）。`npu_fused_experts_mxfp8` 已实现该分支,由 `SGLANG_ENABLE_NPU_FUSED_MOE_ROUTING_QUANT`（默认关，opt-in）+ 运行时能力探测双重 gate,不支持则自动回退两步。**Q9 实测（torch_npu 2.10.0.post2 + A5）**：`quant_mode=3` 接受且 **x_dtype 传 None**（不需要）；ret[3] scale 是 **2D `[N, K/32]` float8_e8m0fnu**（与 `npu_dynamic_mx_quant` 直出 3D 不同）→ **必须 `_normalize_mxfp_scale` 2D→3D `[N,K/64,2]`**；融合 vs 两步 **cos=1.0、qx 字节完全一致**（非近似）。**开关仍默认关**,待在线 e2e 通过后再翻默认（翻默认属行为变更，按 env-var-conventions 单独声明）。DeepEP 路径（`apply_without_routing_weights`）不经 init_routing,不受影响。
 
 > 详细根因分析、调试过程、代码示例、修复方法见 [docs/known-pitfalls.md](docs/known-pitfalls.md)。
 

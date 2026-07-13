@@ -1,6 +1,6 @@
 # 分支详情
 
-> 本文档只记录 **2 个活跃分支** 的开发历史、commit hash、A5 验证节点、调试过程。
+> 本文档只记录 **3 个活跃分支** 的开发历史、commit hash、A5 验证节点、调试过程。
 > 已合并 PR 的代码都在 upstream/main，概览见 [AGENTS.md](../AGENTS.md#已合并-pr代码已在-upstreammain)，此处不再展开。
 
 ## 已合并 PR（速查）
@@ -36,6 +36,21 @@ LLM 侧，Qwen3/3.5 MoE W8A8 MXFP8（FusedMoE/TP，`--quantization mxfp8`）；E
 - 在线：`NPUMXFP8FusedMoEMethod`（三段式 `create_weights` / `process_weights_after_loading` / `apply`），A5 e2e 已验证。
 - 离线：`W8A8_MXFP8` → `ModelSlimMXFP8MoEScheme` → `NPUMXFP8FusedMoEMethod` 离线分支，e2e **待验证**。
 - MXFP8 MoE kernel 契约（torch_npu 2.10.0.post2 + A5 已探针验证）详见 [known-pitfalls.md](known-pitfalls.md) 与 AGENTS.md「已知陷阱」。
+
+---
+
+## `junlin_qwen3.5_dense_w8a8` — Qwen3.5 Dense W8A8 (MXFP8) 🚧
+
+Qwen3.5 Dense W8A8 MXFP8 实验/验证分支。此目录（`sglang/qwen3.5_dense_w8a8/`）是从主 clone `sglang/qwen3_dense_w4a4/` 派生的 worktree（gitignore、纯本地，主仓不跟踪）。
+
+- 基于 upstream/main（`4cec9ef9d`，2026-07-13），已含全部已合并 MXFP8/W8A8/W4A8 量化代码。
+- Qwen3.5 与 Qwen3 在 SGLang 内部共用底层 Linear/MoE 算子，故量化实现代码完全一致；此分支仅需验证 Qwen3.5-8B 模型在 A5 上的在线 + 离线 W8A8 效果、跑分。
+- 启动脚本：`llm/qwen3.5_dense_bf16.sh`（BF16 基线）。
+
+**状态**：
+- 在线 W8A8：待验证
+- 离线 W8A8：待验证
+- 跑分：待进行
 
 ---
 

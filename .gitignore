@@ -2,5 +2,6 @@
 .idea
 .claude/settings.local.json
 # sglang: qwen3_dense_w4a4 是主仓子模块(见 .gitmodules,主 clone);
-# qwen3_moe_w8a8 是从它派生的 worktree,纯本地不跟踪
+# qwen3_moe_w8a8 和 qwen3.5_dense_w8a8 是从它派生的 worktree,纯本地不跟踪
 sglang/qwen3_moe_w8a8/
+sglang/qwen3.5_dense_w8a8/

@@ -13,6 +13,8 @@ python3 -c "from sglang.srt.models.qwen3 import Qwen3ForCausalLM; print('OK')"
 ```
 
 修复：`sgl_kernel_npu` 非核心 kernel 的 import 改为 try/except + `None` fallback（见 `rotary_embedding/base.py`）。
+若是 `sgl_kernel_npu` 版本太旧、缺某个 kernel 符号（如跑 Qwen3.5 缺 `split_qkvgate_gemma_rmsnorm_rope`），
+需从源码升级 `sgl_kernel_npu`，编译安装过程见 [sgl-kernel-npu-build.md](sgl-kernel-npu-build.md)。
 
 ---
 

@@ -34,7 +34,7 @@ echo "🚀 [启动任务] 当前设备可见性: ASCEND_RT_VISIBLE_DEVICES=$ASCE
 
 # ========== 下方是原有的模型启动命令 ==========
 sglang serve \
-    --model-path /home/weights/Qwen3.5-8B \
+    --model-path /home/weights/Qwen3.5-27B \
     --host 127.0.0.1 \
     --port $VLLM_PORT \
     --device npu \

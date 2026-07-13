@@ -9,7 +9,7 @@
 
 ## 为何 single-context
 
-虽然仓库下有 `sglang/` worktree 容器（本地多分支 checkout：`junlin_diffusion_w8a8`、`junlin_diffusion_w4a4`、`junlin_qwen3_dense_w8a8`、`junlin_qwen3_dense_w4a8`、`junlin_qwen3_dense_w4a4`、`junlin_qwen3_moe_w8a8` 等），但这些拆分的是**实现分支**而非**领域**。整体仍然是同一套领域语言：
+虽然仓库下有 `sglang/` worktree 容器（本地 2 个活跃分支 checkout：`junlin_qwen3_moe_w8a8`、`junlin_qwen3_dense_w4a4`；其余功能已合并上游），但这些拆分的是**实现分支**而非**领域**。整体仍然是同一套领域语言：
 
 - MXFP8 / MXFP4 量化（在线 / 离线 / ModelSlim）
 - Ascend NPU（A2/A3，CANN ≥ 8.0.RC3）

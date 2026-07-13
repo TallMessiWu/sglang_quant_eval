@@ -11,7 +11,7 @@ This repository (`sglang_quant_eval`) is dedicated to researching and implementi
 
 ## 📁 Repository Structure
 
-- `sglang/` - Local `git worktree` container with the SGLang fork checked out across multiple branches. **`sglang/diffusion_w8a8/` is a submodule** (clickable on GitHub → fork); the other 5 directories are worktrees derived from it (`diffusion_w4a4`, `qwen3_dense_*`, `qwen3_moe_w8a8`). See `AGENTS.md` for the worktree-to-branch map.
+- `sglang/` - Local `git worktree` container with the SGLang fork checked out across 2 active branches. `qwen3_dense_w4a4/` is the main clone **and a submodule** (clickable on GitHub → fork's `junlin_qwen3_dense_w4a4`); `qwen3_moe_w8a8/` is a derived worktree (local-only, gitignored). Merged features (Diffusion MXFP8/MXFP4, Dense W8A8/W4A8) already live in upstream/main. See `AGENTS.md` for the worktree-to-branch map and merged-PR list.
 - `MindIE-SD/` - Huawei's MindIE-SD source code (submodule, tracks `dev`), serving as a primary reference implementation for Ascend NPU MXFP8/FP8 operations (Diffusion).
 - `msmodelslim/` - Huawei's msmodelslim source code (submodule, tracks `master`), reference for the offline MXFP4/MXFP8 weight export format.
 - `vllm-ascend/` - vLLM backend code for Ascend (submodule, tracks `main`), serving as a primary reference for LLM MXFP adaptation.

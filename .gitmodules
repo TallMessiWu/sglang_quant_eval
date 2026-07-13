@@ -6,10 +6,10 @@
 	path = msmodelslim
 	url = https://gitcode.com/Ascend/msmodelslim.git
 	branch = master
-[submodule "sglang/diffusion_w8a8"]
-	path = sglang/diffusion_w8a8
+[submodule "sglang/qwen3_dense_w4a4"]
+	path = sglang/qwen3_dense_w4a4
 	url = https://github.com/TallMessiWu/sglang.git
-	branch = junlin_diffusion_w8a8
+	branch = junlin_qwen3_dense_w4a4
 [submodule "vllm-ascend"]
 	path = vllm-ascend
 	url = https://github.com/vllm-project/vllm-ascend.git

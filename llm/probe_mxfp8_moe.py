@@ -395,6 +395,151 @@ def probe_scale_pairing():
         print(f"    FAILED: {type(e).__name__}: {e}")
 
 
+# ---------------------------------------------------------------------------
+# Q9 — FUSE activation MXFP8 quant INTO init_routing (quant_mode=3)
+# ---------------------------------------------------------------------------
+def _init_routing(hidden_states, topk_ids, *, num_experts, top_k, quant_mode, x_dtype):
+    """Thin wrapper mirroring npu_fused_experts_mxfp8's init_routing call."""
+    num_tokens = hidden_states.shape[0]
+    return torch_npu.npu_moe_init_routing_v2(
+        hidden_states,
+        topk_ids,
+        scale=None,
+        active_num=num_tokens * top_k,
+        expert_num=num_experts,
+        expert_tokens_num_type=1,       # COUNT
+        expert_tokens_num_flag=True,
+        active_expert_range=[0, num_experts],
+        quant_mode=quant_mode,
+        x_dtype=x_dtype,
+    )
+
+
+def _moe_gmm(qx, x_scale, expert_tokens, w13, w13_scale, w2, w2_scale):
+    """gmm1(swiglu+requant) -> gmm2, mirrors npu_fused_experts_mxfp8 lines 347-381."""
+    group_cumsum = expert_tokens.cumsum(0)
+    g1_out, g1_scale = torch_npu.npu_grouped_matmul_swiglu_quant_v2(
+        x=qx, weight=[w13], group_list=group_cumsum, weight_scale=[w13_scale],
+        x_scale=x_scale, dequant_mode=2, quant_mode=2,
+        dequant_dtype=torch.float32, quant_dtype=E4M3,
+        x_dtype=None, weight_dtype=None,
+        weight_scale_dtype=E8M0, x_scale_dtype=E8M0,
+    )
+    g1_scale = _normalize_scale(g1_scale)
+    return torch_npu.npu_grouped_matmul(
+        x=[g1_out], weight=[w2], scale=[w2_scale], bias=None,
+        per_token_scale=[g1_scale], split_item=2, group_list_type=1, group_type=0,
+        group_list=expert_tokens, output_dtype=DTYPE,
+        scale_dtype=E8M0, per_token_scale_dtype=E8M0,
+        x_dtype=None, weight_dtype=None,
+    )[0]
+
+
+def _bf16_sorted_ref(x_sorted_bf16, counts, w13_bf, w2_bf):
+    """Per-expert bf16 reference over already-permuted tokens (same as Q6)."""
+    parts, off = [], 0
+    for e in range(E):
+        n = int(counts[e])
+        xe = x_sorted_bf16[off:off + n]
+        h = _swiglu_ref(xe @ w13_bf[e].transpose(0, 1))
+        parts.append(h @ w2_bf[e].transpose(0, 1))
+        off += n
+    return torch.cat(parts, 0) if parts else x_sorted_bf16.new_zeros(0, H)
+
+
+def probe_fused_routing_quant():
+    """Can init_routing do the activation MXFP8 quant inline (quant_mode=3)?
+
+    Compares the FUSED path (one init_routing call, quant_mode=3) against the
+    current TWO-STEP prod path (quant_mode=-1 + separate npu_dynamic_mx_quant)
+    and a bf16 per-expert reference. This is the go/no-go for the migration:
+      * does the op accept quant_mode=3 + x_dtype on THIS torch_npu/CANN?
+      * is the returned scale (ret[3]) the e8m0 block scale gmm1 wants, and does
+        it need _normalize_scale (2D->3D) like vllm-ascend, or is it already 3D?
+      * does the fused path match the two-step path numerically?
+    """
+    _line("=")
+    print("Q9  FUSE act-quant INTO init_routing (quant_mode=3) vs two-step vs bf16")
+    num_tokens, top_k = 8, 2
+    try:
+        w13_bf, w2_bf, w13, w13_scale, w2, w2_scale = _build_moe_weights(contiguous=False)
+        hidden = torch.randn(num_tokens, H, device=DEVICE, dtype=DTYPE)
+        topk_ids = torch.randint(0, E, (num_tokens, top_k), device=DEVICE, dtype=torch.int32)
+
+        # ---- two-step path (current prod) ----
+        s_states, eri_a, et_a, _ = _init_routing(
+            hidden, topk_ids, num_experts=E, top_k=top_k, quant_mode=-1, x_dtype=None)
+        et_a = et_a.to(torch.int64)
+        qx_a, xs_a = torch_npu.npu_dynamic_mx_quant(s_states, dst_type=E4M3)
+        xs_a = _normalize_scale(xs_a)
+        y_ref = _bf16_sorted_ref(s_states, et_a, w13_bf, w2_bf)   # s_states is bf16
+        y_a = _moe_gmm(qx_a, xs_a, et_a, w13, w13_scale, w2, w2_scale)
+
+        # ---- fused path (quant_mode=3). Try x_dtype=None first, then E4M3. ----
+        fused = None
+        for x_dtype in (None, E4M3):
+            try:
+                fused = _init_routing(
+                    hidden, topk_ids, num_experts=E, top_k=top_k,
+                    quant_mode=3, x_dtype=x_dtype)
+                print(f"    quant_mode=3 accepted with x_dtype={x_dtype}")
+                break
+            except Exception as e:  # noqa: BLE001
+                print(f"    quant_mode=3 x_dtype={x_dtype} rejected: "
+                      f"{type(e).__name__}: {e}")
+        if fused is None:
+            print("    => quant_mode=3 NOT supported here. Migration blocked on this "
+                  "torch_npu/CANN; keep the two-step path.")
+            return
+
+        qx_b, eri_b, et_b, xs_b_raw = fused
+        et_b = et_b.to(torch.int64)
+        print(f"    returned {len(fused)} tensors:")
+        _stat("qx_b (ret0)      ", qx_b)
+        _stat("expanded_idx(ret1)", eri_b if isinstance(eri_b, torch.Tensor) else None)
+        _stat("expert_tok(ret2) ", et_b)
+        _stat("scale ret3 (raw) ", xs_b_raw if isinstance(xs_b_raw, torch.Tensor) else None)
+
+        # routing must permute identically (same inputs, only quant_mode differs)
+        same_counts = torch.equal(et_a, et_b)
+        print(f"    expert_tokens match two-step? {same_counts}  "
+              f"(a={et_a.tolist()} b={et_b.tolist()})")
+
+        # scale layout: does ret3 need _normalize_scale like the two-step xs_a?
+        if isinstance(xs_b_raw, torch.Tensor):
+            print(f"    ret3 ndim={xs_b_raw.ndim} dtype={xs_b_raw.dtype}; two-step "
+                  f"xs_a shape={tuple(xs_a.shape)} (normalized 3D)")
+            xs_b = _normalize_scale(xs_b_raw)
+            _stat("scale ret3 (norm)", xs_b)
+            print(f"    ret3 needs _normalize_scale (was 2D)? {xs_b_raw.ndim == 2}")
+        else:
+            print("    ret3 is NOT a tensor — fused quant produced no scale; ABORT.")
+            return
+
+        if not same_counts:
+            print("    permutation differs — cannot compare element-wise; check op semantics.")
+            return
+
+        # qx / scale byte-level agreement with two-step (best case: identical)
+        qx_match = torch.equal(qx_a.view(torch.uint8), qx_b.view(torch.uint8))
+        print(f"    qx bytes identical to two-step? {qx_match}")
+
+        # ---- numeric: fused full path vs two-step vs bf16 ref ----
+        y_b = _moe_gmm(qx_b, xs_b, et_b, w13, w13_scale, w2, w2_scale)
+        cos_ba, mx_ba, mn_ba = _cos_relerr(y_a, y_b)
+        cos_br, mx_br, mn_br = _cos_relerr(y_ref, y_b)
+        cos_ar, _, _ = _cos_relerr(y_ref, y_a)
+        print(f"    two-step vs bf16 : cos={cos_ar:.5f}")
+        print(f"    FUSED vs two-step: cos={cos_ba:.5f}  max_rel={mx_ba:.3f}  mean_rel={mn_ba:.4f}")
+        print(f"    FUSED vs bf16    : cos={cos_br:.5f}  max_rel={mx_br:.3f}  mean_rel={mn_br:.4f}")
+        ok = cos_ba > 0.999 and cos_br > 0.97
+        print(f"    >>> {'PASS — fused == two-step, migration viable' if ok else 'FAIL — investigate x_dtype / scale layout'}")
+    except Exception as e:  # noqa: BLE001
+        import traceback
+        print(f"    FAILED: {type(e).__name__}: {e}")
+        traceback.print_exc()
+
+
 if __name__ == "__main__":
     probe_capabilities()
     probe_scale_layout()
@@ -403,6 +548,8 @@ if __name__ == "__main__":
     probe_init_routing()
     probe_moe_forward(contiguous=False)   # STRIDED view first (what prod wants)
     probe_moe_forward(contiguous=True)    # fallback if strided rejected
+    probe_fused_routing_quant()           # Q9: fuse act-quant into routing
     _line("=")
     print("DONE. Read Q1 (scale ndim), Q8 (pairing — online/offline crux), Q6 cos")
     print("per layout. If Q8 says INTERLEAVED, that is the offline-garbage bug.")
+    print("Q9: if PASS, wire fused quant_mode=3 into npu_fused_experts_mxfp8.")

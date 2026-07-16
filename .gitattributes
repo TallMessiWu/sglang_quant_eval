@@ -1,0 +1,6 @@
+.claude/    merge=ours
+.agents/    merge=ours
+AGENTS.md   merge=ours
+
+# Shell 脚本强制 LF，保证在 Linux 服务器上可直接执行（CRLF 会导致 bad interpreter）
+*.sh text eol=lf

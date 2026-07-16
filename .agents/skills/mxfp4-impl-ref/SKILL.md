@@ -129,4 +129,4 @@ output = output.reshape(output_shape)
 
 - 实现：`sglang/.../quantization/mxfp4_npu.py`（在线）、`modelslim_mxfp4_scheme.py`（离线）
 - 参考：`MindIE-SD/mindiesd/quantization/layer.py` → `W4A4MXFP4DualQuantLinear`
-- API 文档：项目根目录 `DualLevelQuantBatchMatmul.md`、`DynamicDualLevelMxQuant.md`
+- API 文档：`docs/npu-api/` 下 `DualLevelQuantBatchMatmul.md`、`DynamicDualLevelMxQuant.md`

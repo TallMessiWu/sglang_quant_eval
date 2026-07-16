@@ -1,3 +1,4 @@
+#!/bin/bash
 echo "在线量化mxfp4"
 SGLANG_CACHE_DIT_FN=2
 SGLANG_CACHE_DIT_BN=1

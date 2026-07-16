@@ -1,3 +1,4 @@
+#!/bin/bash
 echo "基线BF16"
 SGLANG_CACHE_DIT_FN=2
 SGLANG_CACHE_DIT_BN=1

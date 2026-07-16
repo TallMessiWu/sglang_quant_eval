@@ -111,6 +111,7 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，只有 3 个目录�
 - `MindIE-SD/mindiesd/quantization/layer.py` — NPU 量化参考实现 (Diffusion)
 - `vllm-ascend/vllm_ascend/quantization/methods/w8a8_mxfp8.py` — NPU 量化参考实现 (LLM)
 - `msmodelslim/.../save/ascendv1.py` — MXFP4 权重导出格式
+- `docs/npu-api/DualLevelQuantBatchMatmul.md`、`docs/npu-api/DynamicDualLevelMxQuant.md` — Ascend 双级量化 kernel API 参考（原在根目录，现归入 `docs/npu-api/`）
 
 ## 注意事项
 

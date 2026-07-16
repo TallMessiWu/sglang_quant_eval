@@ -1,3 +1,4 @@
+#!/bin/bash
 python run_wan22_ti2v.py \
     --model-path /home/weights/Wan2.2-TI2V-5B-Diffusers \
     --image-path gyro.jpg \

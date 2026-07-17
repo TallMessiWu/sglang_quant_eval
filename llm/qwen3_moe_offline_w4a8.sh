@@ -27,6 +27,11 @@ IFS="$OLD_IFS"
 
 echo "🚀 [启动任务] 当前设备可见性: ASCEND_RT_VISIBLE_DEVICES=$ASCEND_RT_VISIBLE_DEVICES"
 
+# A5(Ascend 950) 走 FIA 融合注意力算子 npu_fused_infer_attention_score；
+# 否则默认走 ATB SelfAttentionOperation(_npu_flash_attention_qlens)，在 A5 上 CreateOperation 失败、warmup 请求崩溃。
+# prefill+decode 一起绕开 ATB（decode 默认走 _npu_paged_attention，同源）。
+export ASCEND_USE_FIA=1
+
 # ========== Qwen3 MoE W4A8 MXFP 离线量化 ==========
 # 加载 msmodelslim 预量化的 W4A8_MXFP checkpoint（packed-fp4 uint8 权重）
 

@@ -9,14 +9,15 @@
 
 ## 分支规则
 
-Diffusion 与 Dense W8A8/W4A8 侧功能已合入上游 `sgl-project/sglang`（见下「已合并 PR」）。后续分支都基于 upstream/main rebase，**已含全部已合并代码**，故本地只保留 **4 个活跃工作分支**（各对应一个未合并 PR）：
+Diffusion、Dense W8A8/W4A8 及 **Dense W4A4（PR #23795，2026-07-17 合入）** 侧功能均已合入上游 `sgl-project/sglang`（见下「已合并 PR」）。后续分支都基于 upstream/main rebase，**已含全部已合并代码**，故本地只保留 **3 个活跃工作分支**（各对应一个未合并 PR）：
 
 | 分支 | 目录 | PR | 状态 |
 | ---- | ---- | -- | ---- |
-| `junlin_qwen3_dense_w4a4` | `sglang/qwen3_dense_w4a4/`（主 clone + 子模块） | [#23795](https://github.com/sgl-project/sglang/pull/23795) | OPEN，LLM Dense W4A4 MXFP4，A5 已验证在线（双级）+离线 |
 | `junlin_qwen3_moe_w8a8` | `sglang/qwen3_moe_w8a8/`（派生 worktree） | [#30768](https://github.com/sgl-project/sglang/pull/30768) | WIP OPEN，LLM MoE W8A8 MXFP8，在线 A5 已验证、离线待验证 |
 | `junlin_qwen3_moe_w4a8` | `sglang/qwen3_moe_w4a8/`（派生 worktree） | 待创建 | 🚧 WIP，LLM MoE W4A8 MXFP（MXFP4 权重 + FP8 激活），在线+离线已实现，A5 待验证 |
 | `junlin_qwen3.5_dense_w8a8` | `sglang/qwen3.5_dense_w8a8/`（派生 worktree） | 待创建 | 🚧 WIP，Qwen3.5 Dense W8A8 MXFP8 实验/验证（代码已合入 upstream/main，此分支用于 A5 在线+离线验证、跑分、模型适配） |
+
+> `junlin_qwen3_dense_w4a4` 的 PR #23795 已合并，但 `sglang/qwen3_dense_w4a4/` 目录**不能删除**——它是 worktree 主 clone（持有共享 `.git`）+ 主仓子模块，其余 3 个 worktree 都挂在它下面，删除会破坏整个 worktree 结构。详见下文「SGLang worktree 目录规则」。
 
 ### 已合并 PR（代码已在 upstream/main）
 
@@ -29,8 +30,9 @@ Diffusion 与 Dense W8A8/W4A8 侧功能已合入上游 `sgl-project/sglang`（�
 | [#22352](https://github.com/sgl-project/sglang/pull/22352) | Qwen3 Dense W8A8 MXFP8 | `junlin_qwen3_dense` | 2026-06-16 |
 | [#28505](https://github.com/sgl-project/sglang/pull/28505) | Dense MXFP8 重构（委托 kernel + `torch.ops.npu`） | `junlin_qwen3_dense_w8a8` | 2026-06-17 |
 | [#23650](https://github.com/sgl-project/sglang/pull/23650) | Qwen3 Dense W4A8 MXFP | `junlin_qwen3_dense_w4a8` | 2026-07-06 |
+| [#23795](https://github.com/sgl-project/sglang/pull/23795) | Qwen3 Dense W4A4 MXFP4（在线双级 + 离线单级） | `junlin_qwen3_dense_w4a4` | 2026-07-17 |
 
-> 两个活跃分支的详细状态（commit hash、A5 验证节点、备份分支清单）见 [docs/branches.md](docs/branches.md)。
+> 活跃分支的详细状态（commit hash、A5 验证节点、备份分支清单）见 [docs/branches.md](docs/branches.md)。
 
 ## SGLang worktree 目录规则
 
@@ -38,14 +40,14 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，只有 4 个目录�
 
 | 路径 | 对应分支 | 用途 |
 | ---- | -------- | ---- |
-| `sglang/qwen3_dense_w4a4/` | `junlin_qwen3_dense_w4a4` | **主 clone + 主仓子模块**；LLM Dense W4A4 MXFP4（PR #23795）。 |
+| `sglang/qwen3_dense_w4a4/` | `junlin_qwen3_dense_w4a4` | **主 clone + 主仓子模块**（其余 3 个 worktree 共享此处 `.git`）；LLM Dense W4A4 MXFP4，**PR #23795 已合并（2026-07-17）**，此目录作为 worktree 基础设施保留，不再是活跃开发分支。 |
 | `sglang/qwen3_moe_w8a8/` | `junlin_qwen3_moe_w8a8` | 派生 worktree（gitignore、纯本地）；LLM MoE W8A8 MXFP8（PR #30768）。 |
 | `sglang/qwen3_moe_w4a8/` | `junlin_qwen3_moe_w4a8` | 派生 worktree（gitignore、纯本地）；LLM MoE W4A8 MXFP（MXFP4 权重 + FP8 激活）。 |
 | `sglang/qwen3.5_dense_w8a8/` | `junlin_qwen3.5_dense_w8a8` | 派生 worktree（gitignore、纯本地）；Qwen3.5 Dense W8A8 MXFP8 实验/验证。 |
 
 开发约定：
-- 改 Dense W4A4：进入 `sglang/qwen3_dense_w4a4/`；改 MoE W8A8：进入 `sglang/qwen3_moe_w8a8/`；改 MoE W4A8：进入 `sglang/qwen3_moe_w4a8/`；改 Qwen3.5 Dense W8A8：进入 `sglang/qwen3.5_dense_w8a8/`。
-- 已合并的 Diffusion / Dense W8A8 / W4A8 代码都在 upstream/main（两个 worktree rebase 后均含），无需单独 checkout。如需基于某已合并 PR 再开发，从主 clone（`sglang/qwen3_dense_w4a4`）用 `git worktree add` 新建独立目录，不要复用已有 worktree。
+- 改 MoE W8A8：进入 `sglang/qwen3_moe_w8a8/`；改 MoE W4A8：进入 `sglang/qwen3_moe_w4a8/`；改 Qwen3.5 Dense W8A8：进入 `sglang/qwen3.5_dense_w8a8/`。`sglang/qwen3_dense_w4a4/`（Dense W4A4，PR #23795）已合并，日常开发不再进入，仅作为其余 3 个 worktree 的 `.git` 宿主保留。
+- 已合并的 Diffusion / Dense W8A8/W4A8/W4A4 代码都在 upstream/main（各 worktree rebase 后均含），无需单独 checkout。如需基于某已合并 PR 再开发，从主 clone（`sglang/qwen3_dense_w4a4`）用 `git worktree add` 新建独立目录，不要复用已有 worktree。
 - **`sglang/qwen3_dense_w4a4/` 是主仓子模块**（主仓跟踪其 commit 指针，见 `.gitmodules`）；`qwen3_moe_w8a8/`、`qwen3_moe_w4a8/` 和 `qwen3.5_dense_w8a8/` 被 `.gitignore` 忽略、主仓不跟踪。旧 `sglang/diffusion_w8a8` 子模块随 Diffusion 合并上游后已移除。
 
 > **命名与陷阱**：本地分支名对齐 `junlin_<文件夹>`；fork（`TallMessiWu/sglang`）默认分支为 `junlin_diffusion_w8a8`。注意：跨 fork 重命名 **未合并** PR 的 head 分支会关闭对应 PR（已踩坑），已合并后改名才安全。
@@ -63,14 +65,14 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，只有 4 个目录�
 | Diffusion MXFP4                        | 已合并 #22338          | ✅                      | ✅                      |
 | LLM (Qwen3 & 3.5) Dense W8A8 (MXFP8)   | 已合并 #22352 / #28505 | ✅ (已对齐 vllm-ascend) | ✅ (已对齐 vllm-ascend) |
 | LLM (Qwen3 & 3.5) Dense W4A8 (MXFP4/8) | 已合并 #23650          | ✅ 在线（`mxfp_w4a8`，单级真 W4A8/MXFP8 激活） | ✅ 离线（`W4A8_MXFP` → `ModelSlimMXFP4W4A8Scheme`，权重格式同 MXFP8：`float8_e4m3fn`） |
-| LLM (Qwen3 & 3.5) Dense W4A4 (MXFP4)   | `junlin_qwen3_dense_w4a4`（#23795 OPEN） | ✅ 在线已实现（`mxfp4`，NPU 设备分发，**双级 MXFP4** `NPUDualLevelMXFP4LinearMethod`；A5 e2e 已验证，双级修复了单级 RTN 贪心死循环） | ✅ 离线已实现（`W4A4_MXFP4` → `ModelSlimMXFP4Scheme` → `NPUSingleLevelMXFP4OfflineLinearMethod`，单级真 MXFP4，权重 fp8 容器 `float8_e4m3fn`） |
+| LLM (Qwen3 & 3.5) Dense W4A4 (MXFP4)   | 已合并 #23795          | ✅ 在线已实现（`mxfp4`，NPU 设备分发，**双级 MXFP4** `NPUDualLevelMXFP4LinearMethod`；A5 e2e 已验证，双级修复了单级 RTN 贪心死循环） | ✅ 离线已实现（`W4A4_MXFP4` → `ModelSlimMXFP4Scheme` → `NPUSingleLevelMXFP4OfflineLinearMethod`，单级真 MXFP4，权重 fp8 容器 `float8_e4m3fn`） |
 | LLM (Qwen3 & 3.5) MoE W8A8 (MXFP8)     | `junlin_qwen3_moe_w8a8`（#30768 WIP） | ✅ 在线已实现（`mxfp8`，`NPUMXFP8FusedMoEMethod`，A5 e2e 已验证） | ✅ 离线已实现（`W8A8_MXFP8` → `ModelSlimMXFP8MoEScheme` → `NPUMXFP8FusedMoEMethod` 离线分支，e2e 待验证） |
 | LLM (Qwen3 & 3.5) MoE W4A8 (MXFP4/8)   | `junlin_qwen3_moe_w4a8`（待创建 PR） | ✅ 在线（`mxfp_w4a8`，NPU 设备分发，`NPUMXFP4W4A8FusedMoEMethod`，A5 e2e 待验证） | ✅ 离线（`W4A8_MXFP` → `ModelSlimMXFP4W4A8MoEScheme` → `NPUMXFP4W4A8MoEMethod`，权重 packed fp4 uint8，A5 e2e 待验证） |
 | LLM (Qwen3 & 3.5) MoE W4A4 (MXFP4)     | 待定                   | ❌ 待实现               | ❌ 待实现               |
 
 ## 关键代码路径
 
-> 注：下文 `sglang/python/...` 为 worktree 内相对路径简写，需加对应目录前缀（`sglang/qwen3_moe_w8a8/` 或 `sglang/qwen3_dense_w4a4/`）。已合并的 Diffusion / Dense 量化代码在 upstream/main，两个 worktree 均含；各未合并分支只额外含自己那部分实现。
+> 注：下文 `sglang/python/...` 为 worktree 内相对路径简写，需加对应目录前缀（如 `sglang/qwen3_moe_w8a8/`）。已合并的 Diffusion / Dense 量化代码在 upstream/main，各 worktree 均含；各未合并分支只额外含自己那部分实现。
 
 ### Diffusion 侧（multimodal_gen）
 

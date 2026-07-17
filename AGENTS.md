@@ -137,6 +137,7 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，只有 4 个目录�
 - **FusedMoE vs EPMoE dispatch_output 类型不同**：当前仅支持 `StandardDispatchOutput`（TP-only）。
 - **W4A8_MXFP 权重格式同 MXFP8**：`float8_e4m3fn`（非 packed uint8），`create_weights` 实现一致。
 - **离线 W4A8 A5 两报错**：① prefill NZ format 错 → 升级 torch_npu 到 `2.10.0.post1` 解决；② decode ATB 段错误 → 与量化无关，别加 `--disable-cuda-graph`（或用 `ASCEND_USE_FIA=1`）。
+- **A5 默认 ATB 注意力算子崩溃（warmup 固定挂，与量化无关）**：`--device npu` 在 A5(Ascend 950) 上默认 prefill 走 ATB `SelfAttentionOperation`（`_npu_flash_attention_qlens`，`ascend_backend.py:1472`）；服务起来后 SGLang 自动 warmup 请求（一次 prefill）触发 `RuntimeError: SelfAttentionOperation CreateOperation failed!`。`CreateOperation` 是 ATB 按 SoC 能力表构图/校验的步骤，A5 不支持该算子（decode 默认 `_npu_paged_attention` 同源）；A2/A3(910B/C) 支持故不受影响——**崩溃是 A5 特有**。修复：`export ASCEND_USE_FIA=1`，让 prefill+decode 都走 A5 原生 FIA 算子 `npu_fused_infer_attention_score`（`forward_extend` 走 `use_fia` 分支，永不到达 `_npu_flash_attention_qlens`）。`llm/` 全部 serve 脚本已默认带此 env。**别**用注释掉 `qk_head_dim<=128 and ...` 条件强制 `False`→native SDPA 的脏改（慢、无融合 kernel、且只补 prefill）。与上条 decode ATB 段错误同根。
 - **在线 W4A8 FP4 dtype 来源**：fp4 dtype 参数必须来自 `torch_npu.float4_e2m1fn_x2`（int 296），**不能**用 `torch.float4_e2m1fn_x2`（torch dtype 对象会被 op 拒绝）。`_get_float4_e2m1fn_x2_dtype()` 在 NPU 时优先 `getattr(torch_npu, ...)`。
 - **sglang 文档迁到 `docs_new/docs/`**：改 legacy `docs/` 会被 CI lint 拒，新文档一律写 `docs_new/docs/`（`.mdx`）。
 - **MoE `npu_grouped_matmul` 需显式 `x_dtype` + `weight_dtype`**：缺少则 kernel 走错 dequant 路径 → 乱码。dense `npu_quant_matmul` 不需要（有 `group_sizes`）。

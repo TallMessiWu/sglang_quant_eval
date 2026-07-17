@@ -9,12 +9,13 @@
 
 ## 分支规则
 
-Diffusion 与 Dense W8A8/W4A8 侧功能已合入上游 `sgl-project/sglang`（见下「已合并 PR」）。后续分支都基于 upstream/main rebase，**已含全部已合并代码**，故本地只保留 **3 个活跃工作分支**（各对应一个未合并 PR）：
+Diffusion 与 Dense W8A8/W4A8 侧功能已合入上游 `sgl-project/sglang`（见下「已合并 PR」）。后续分支都基于 upstream/main rebase，**已含全部已合并代码**，故本地只保留 **4 个活跃工作分支**（各对应一个未合并 PR）：
 
 | 分支 | 目录 | PR | 状态 |
 | ---- | ---- | -- | ---- |
 | `junlin_qwen3_dense_w4a4` | `sglang/qwen3_dense_w4a4/`（主 clone + 子模块） | [#23795](https://github.com/sgl-project/sglang/pull/23795) | OPEN，LLM Dense W4A4 MXFP4，A5 已验证在线（双级）+离线 |
 | `junlin_qwen3_moe_w8a8` | `sglang/qwen3_moe_w8a8/`（派生 worktree） | [#30768](https://github.com/sgl-project/sglang/pull/30768) | WIP OPEN，LLM MoE W8A8 MXFP8，在线 A5 已验证、离线待验证 |
+| `junlin_qwen3_moe_w4a8` | `sglang/qwen3_moe_w4a8/`（派生 worktree） | 待创建 | 🚧 WIP，LLM MoE W4A8 MXFP（MXFP4 权重 + FP8 激活），在线+离线已实现，A5 待验证 |
 | `junlin_qwen3.5_dense_w8a8` | `sglang/qwen3.5_dense_w8a8/`（派生 worktree） | 待创建 | 🚧 WIP，Qwen3.5 Dense W8A8 MXFP8 实验/验证（代码已合入 upstream/main，此分支用于 A5 在线+离线验证、跑分、模型适配） |
 
 ### 已合并 PR（代码已在 upstream/main）
@@ -33,18 +34,19 @@ Diffusion 与 Dense W8A8/W4A8 侧功能已合入上游 `sgl-project/sglang`（�
 
 ## SGLang worktree 目录规则
 
-SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，只有 3 个目录，**共享同一个 `.git`**：`sglang/qwen3_dense_w4a4/` 是主 clone（持有独立 `.git` 目录）**且是主仓子模块**（GitHub 上可点击跳转到 fork 的 `junlin_qwen3_dense_w4a4`）；`qwen3_moe_w8a8/` 和 `qwen3.5_dense_w8a8/` 是从它派生的 worktree，被 `.gitignore` 忽略（纯本地、非子模块）。**需要修改哪个分支，就直接进入对应目录修改；不要在现有目录里用 `git checkout` 切分支。**
+SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，只有 4 个目录，**共享同一个 `.git`**：`sglang/qwen3_dense_w4a4/` 是主 clone（持有独立 `.git` 目录）**且是主仓子模块**（GitHub 上可点击跳转到 fork 的 `junlin_qwen3_dense_w4a4`）；`qwen3_moe_w8a8/`、`qwen3_moe_w4a8/` 和 `qwen3.5_dense_w8a8/` 是从它派生的 worktree，被 `.gitignore` 忽略（纯本地、非子模块）。**需要修改哪个分支，就直接进入对应目录修改；不要在现有目录里用 `git checkout` 切分支。**
 
 | 路径 | 对应分支 | 用途 |
 | ---- | -------- | ---- |
 | `sglang/qwen3_dense_w4a4/` | `junlin_qwen3_dense_w4a4` | **主 clone + 主仓子模块**；LLM Dense W4A4 MXFP4（PR #23795）。 |
 | `sglang/qwen3_moe_w8a8/` | `junlin_qwen3_moe_w8a8` | 派生 worktree（gitignore、纯本地）；LLM MoE W8A8 MXFP8（PR #30768）。 |
+| `sglang/qwen3_moe_w4a8/` | `junlin_qwen3_moe_w4a8` | 派生 worktree（gitignore、纯本地）；LLM MoE W4A8 MXFP（MXFP4 权重 + FP8 激活）。 |
 | `sglang/qwen3.5_dense_w8a8/` | `junlin_qwen3.5_dense_w8a8` | 派生 worktree（gitignore、纯本地）；Qwen3.5 Dense W8A8 MXFP8 实验/验证。 |
 
 开发约定：
-- 改 Dense W4A4：进入 `sglang/qwen3_dense_w4a4/`；改 MoE W8A8：进入 `sglang/qwen3_moe_w8a8/`；改 Qwen3.5 Dense W8A8：进入 `sglang/qwen3.5_dense_w8a8/`。
+- 改 Dense W4A4：进入 `sglang/qwen3_dense_w4a4/`；改 MoE W8A8：进入 `sglang/qwen3_moe_w8a8/`；改 MoE W4A8：进入 `sglang/qwen3_moe_w4a8/`；改 Qwen3.5 Dense W8A8：进入 `sglang/qwen3.5_dense_w8a8/`。
 - 已合并的 Diffusion / Dense W8A8 / W4A8 代码都在 upstream/main（两个 worktree rebase 后均含），无需单独 checkout。如需基于某已合并 PR 再开发，从主 clone（`sglang/qwen3_dense_w4a4`）用 `git worktree add` 新建独立目录，不要复用已有 worktree。
-- **`sglang/qwen3_dense_w4a4/` 是主仓子模块**（主仓跟踪其 commit 指针，见 `.gitmodules`）；`qwen3_moe_w8a8/` 和 `qwen3.5_dense_w8a8/` 被 `.gitignore` 忽略、主仓不跟踪。旧 `sglang/diffusion_w8a8` 子模块随 Diffusion 合并上游后已移除。
+- **`sglang/qwen3_dense_w4a4/` 是主仓子模块**（主仓跟踪其 commit 指针，见 `.gitmodules`）；`qwen3_moe_w8a8/`、`qwen3_moe_w4a8/` 和 `qwen3.5_dense_w8a8/` 被 `.gitignore` 忽略、主仓不跟踪。旧 `sglang/diffusion_w8a8` 子模块随 Diffusion 合并上游后已移除。
 
 > **命名与陷阱**：本地分支名对齐 `junlin_<文件夹>`；fork（`TallMessiWu/sglang`）默认分支为 `junlin_diffusion_w8a8`。注意：跨 fork 重命名 **未合并** PR 的 head 分支会关闭对应 PR（已踩坑），已合并后改名才安全。
 
@@ -63,7 +65,7 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，只有 3 个目录�
 | LLM (Qwen3 & 3.5) Dense W4A8 (MXFP4/8) | 已合并 #23650          | ✅ 在线（`mxfp_w4a8`，单级真 W4A8/MXFP8 激活） | ✅ 离线（`W4A8_MXFP` → `ModelSlimMXFP4W4A8Scheme`，权重格式同 MXFP8：`float8_e4m3fn`） |
 | LLM (Qwen3 & 3.5) Dense W4A4 (MXFP4)   | `junlin_qwen3_dense_w4a4`（#23795 OPEN） | ✅ 在线已实现（`mxfp4`，NPU 设备分发，**双级 MXFP4** `NPUDualLevelMXFP4LinearMethod`；A5 e2e 已验证，双级修复了单级 RTN 贪心死循环） | ✅ 离线已实现（`W4A4_MXFP4` → `ModelSlimMXFP4Scheme` → `NPUSingleLevelMXFP4OfflineLinearMethod`，单级真 MXFP4，权重 fp8 容器 `float8_e4m3fn`） |
 | LLM (Qwen3 & 3.5) MoE W8A8 (MXFP8)     | `junlin_qwen3_moe_w8a8`（#30768 WIP） | ✅ 在线已实现（`mxfp8`，`NPUMXFP8FusedMoEMethod`，A5 e2e 已验证） | ✅ 离线已实现（`W8A8_MXFP8` → `ModelSlimMXFP8MoEScheme` → `NPUMXFP8FusedMoEMethod` 离线分支，e2e 待验证） |
-| LLM (Qwen3 & 3.5) MoE W4A8 (MXFP4/8)   | 待定                   | ❌ 待实现               | ❌ 待实现               |
+| LLM (Qwen3 & 3.5) MoE W4A8 (MXFP4/8)   | `junlin_qwen3_moe_w4a8`（待创建 PR） | ✅ 在线（`mxfp_w4a8`，NPU 设备分发，`NPUMXFP4W4A8FusedMoEMethod`，A5 e2e 待验证） | ✅ 离线（`W4A8_MXFP` → `ModelSlimMXFP4W4A8MoEScheme` → `NPUMXFP4W4A8MoEMethod`，权重 packed fp4 uint8，A5 e2e 待验证） |
 | LLM (Qwen3 & 3.5) MoE W4A4 (MXFP4)     | 待定                   | ❌ 待实现               | ❌ 待实现               |
 
 ## 关键代码路径
@@ -97,6 +99,7 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，只有 3 个目录�
 在线量化：
 - `--quantization mxfp8` → `linear_method_npu.py` → `NPUMXFP8LinearMethod`（Linear 层）
 - `--quantization mxfp8` (MoE 层) → `fp8.py:351` → `NPUMXFP8FusedMoEMethod`（在线 MXFP8，三段式 `create_weights` / `process_weights_after_loading` / `apply`，仅 FusedMoE/TP）
+- `--quantization mxfp_w4a8` (MoE 层) → `npu_mxfp4.py:113` → `NPUMXFP4W4A8FusedMoEMethod`（在线 MXFP4 W4A8，三段式，仅 FusedMoE/TP）
 - `--quantization mxfp_w4a8` → `layers/quantization/npu_mxfp4.py` → `NPUMxfp4Config` → `NPUMXFP4W4A8LinearMethod`（真 W4A8：单级 FP8 激活 + FP4 权重，apply 复用离线 `npu_quant_matmul(x2_dtype=fp4)`；权重在线 `npu_dynamic_mx_quant(dst=float4_e2m1fn_x2)`）
 - `--quantization mxfp4`（NPU 设备分发，`is_npu()` 块注册 `Mxfp4W4A4Config`；非 NPU 为上游 `Mxfp4Config`/MoE）→ `layers/quantization/npu_mxfp4_w4a4.py` → `Mxfp4W4A4Config` → **`NPUDualLevelMXFP4LinearMethod`（在线唯一路径，双级 MXFP4：细 FP8 E4M3 L0 scale + 粗 L1 scale，`npu_dynamic_dual_level_mx_quant` + `npu_dual_level_quant_matmul`，权重 FRACTAL_NZ，仅 A5/Ascend 950）**。单级 `NPUSingleLevelMXFP4LinearMethod` 仅作离线基类保留（离线 `W4A4_MXFP4` → `ModelSlimMXFP4Scheme` → `NPUSingleLevelMXFP4OfflineLinearMethod`，单级）。移植自 Diffusion `NPUMXFP4DiffusionLinearMethod`/MindIE-SD `W4A4MXFP4DualQuantLinear`
 
@@ -104,7 +107,10 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，只有 3 个目录�
 
 - `srt/models/qwen3.py` — Qwen3 / 3.5 模型定义，`EntryClass = Qwen3ForCausalLM`
 - `srt/models/qwen3_moe.py` — Qwen3 MoE 模型定义，`EntryClass = Qwen3MoeForCausalLM`
-- `srt/hardware_backend/npu/quantization/fused_moe_method_npu.py` — MoE NPU kernel 函数集 + 所有 MoE method 类（`npu_fused_experts_mxfp8`、`npu_fused_experts_w4a4`、`npu_fused_experts` 等；`NPUMXFP8FusedMoEMethod`、`NPUW8A8Int8DynamicMoEMethod`、`NPUW4A4Int4DynamicMoEMethod` 等）
+- `srt/hardware_backend/npu/quantization/moe_methods.py` — MoE NPU kernel 函数集 + 所有 MoE method 类（`NPUMXFP8MoEMethod` / `NPUMXFP8FusedMoEMethod`、`NPUMXFP4W4A8MoEMethod` / `NPUMXFP4W4A8FusedMoEMethod`、`NPUW4A4Int4MoEMethod`、`NPUW8A8Int8MoEMethod`、`NPUW4A8Int8MoEMethod` 等）
+- `srt/hardware_backend/npu/moe/activation.py` — MoE 激活函数库（`NPUSwiglu`、`NPUSwigluQuant`、`NPUSwigluMXFP8Quant`、`NPUSwigluDeepEPKernel` 等）
+- `srt/layers/moe/moe_runner/ascend.py` — Ascend MoE runner 编排（gmm1→activation→gmm2），含 W4A8 MXFP 非融合分支
+- `srt/layers/quantization/modelslim/schemes/modelslim_mxfp4_w4a8_moe.py` — `ModelSlimMXFP4W4A8MoEScheme`（离线 W4A8_MXFP MoE）
 - `srt/models/registry.py` — `ModelRegistry`，扫描 `sglang.srt.models` 注册所有 `EntryClass`
 - `srt/layers/rotary_embedding/base.py` — RoPE 实现，NPU 路径 import `sgl_kernel_npu`
 - `srt/model_loader/loader.py` — `DefaultModelLoader`：`_get_quantization_config` → `_initialize_model`

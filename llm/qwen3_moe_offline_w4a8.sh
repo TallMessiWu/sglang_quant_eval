@@ -1,0 +1,47 @@
+#!/bin/bash
+
+# ================= 1. 确定目标卡号 =================
+if [ $# -eq 0 ]; then
+    echo "⚠️ 未传入 NPU 卡号，将默认unset ASCEND_RT_VISIBLE_DEVICES"
+    unset ASCEND_RT_VISIBLE_DEVICES
+fi
+
+# ================= 2. 联动清理脚本 =================
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+CLEANER_PATH="$SCRIPT_DIR/npu-cleaner.sh"
+
+if [ -x "$CLEANER_PATH" ]; then
+    echo "🧹 [前置任务] 准备释放 NPU ($@) 的资源..."
+    "$CLEANER_PATH" "$@"
+    sleep 1
+    echo "✅ [前置任务] 清理完毕！"
+else
+    echo "⚠️ 警告：未找到可执行的清理脚本 $CLEANER_PATH，将跳过清理直接启动。"
+fi
+
+# ================= 3. 参数转换与环境变量挂载 =================
+OLD_IFS="$IFS"
+IFS=","
+export ASCEND_RT_VISIBLE_DEVICES="$*"
+IFS="$OLD_IFS"
+
+echo "🚀 [启动任务] 当前设备可见性: ASCEND_RT_VISIBLE_DEVICES=$ASCEND_RT_VISIBLE_DEVICES"
+
+# ========== Qwen3 MoE W4A8 MXFP 离线量化 ==========
+# 加载 msmodelslim 预量化的 W4A8_MXFP checkpoint（packed-fp4 uint8 权重）
+
+# TODO: 替换为实际的 msmodelslim W4A8_MXFP 预量化模型路径
+# 导出命令参考: msmodelslim --quant-type W4A8_MXFP --model Qwen3-30B-A3B ...
+# sglang serve \
+#     --model-path /home/weights/Qwen3-30B-A3B-w4a8_mxfp \
+#     --host 127.0.0.1 \
+#     --port $VLLM_PORT \
+#     --quantization modelslim \
+#     --device npu \
+#     --tp 1 \
+#     --reasoning-parser qwen3 \
+#     --context-length 5000 \
+#     --trust-remote-code
+
+echo "❌ 离线 W4A8_MXFP MoE 量化权重尚未导出，请在获得 msmodelslim 量化 checkpoint 后取消注释上方 sglang serve 块。"
+echo "   模型路径需在 quant_model_description.json 中包含 'W4A8_MXFP' scheme 标记。"

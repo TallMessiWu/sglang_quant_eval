@@ -114,6 +114,56 @@ def _gmm2(g1_out, per_token_scale, expert_tokens, w2, w2_scale):
     )[0]
 
 
+def probe_dense_linear():
+    """Does the DENSE MXFP8 matmul care where its e8m0 dtype comes from?
+
+    ``NPUMXFP8LinearMethod.apply`` (upstream-merged, used by every attention
+    linear -- including in a MoE model) passes ``scale_dtype`` /
+    ``pertoken_scale_dtype`` as ``getattr(torch, "float8_e8m0fnu")``, i.e. the
+    torch dtype object, not torch_npu's int enum. The grouped matmuls reject
+    that loudly; if npu_quant_matmul instead *accepts* it and reads the block
+    scales as something else, every attention projection quietly returns
+    garbage -- which looks exactly like garbled generation with a numerically
+    perfect MoE path.
+    """
+    print("=" * 100)
+    print("DENSE npu_quant_matmul: e8m0 from torch vs torch_npu")
+    M, K, N = 128, H, 2 * I
+    x = torch.randn(M, K, device=DEVICE, dtype=DTYPE)
+    w = torch.randn(N, K, device=DEVICE, dtype=DTYPE) * 0.05  # [out, in]
+    ref = x @ w.t()
+
+    qx, x_scale = torch.ops.npu.npu_dynamic_mx_quant(x, dst_type=E4M3)
+    qw, w_scale = torch.ops.npu.npu_dynamic_mx_quant(w, dst_type=E4M3)
+    # Strided transpose views, exactly like process_weights_after_loading.
+    qw_t, w_scale_t = qw.transpose(0, 1), w_scale.transpose(0, 1)
+
+    torch_e8m0 = getattr(torch, "float8_e8m0fnu", None)
+    npu_e8m0 = getattr(torch_npu, "float8_e8m0fnu", None)
+    for label, dtype in (("torch.float8_e8m0fnu  (production today)", torch_e8m0),
+                         ("torch_npu.float8_e8m0fnu (int enum)     ", npu_e8m0)):
+        if dtype is None:
+            print(f"    {label}: dtype unavailable, skipped")
+            continue
+        try:
+            y = torch.ops.npu.npu_quant_matmul(
+                qx,
+                qw_t,
+                w_scale_t,
+                scale_dtype=dtype,
+                pertoken_scale=x_scale,
+                pertoken_scale_dtype=dtype,
+                bias=None,
+                output_dtype=DTYPE,
+                group_sizes=[1, 1, 32],
+            )
+            cos = _cos(ref, y)
+            verdict = "PASS" if cos > 0.97 else "FAIL (garbage -> dense path is the bug)"
+            print(f"    {label}: cos={cos:.5f}  => {verdict}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"    {label}: RAISED {type(exc).__name__}: {exc}")
+
+
 def main():
     print("=" * 100)
     print("ENV")
@@ -194,6 +244,8 @@ def main():
     print("If RAW fails and NORM passes -> apply_fused_gmm1_swiglu must normalize")
     print("its returned scale before it reaches gmm2. If both pass, the garbling")
     print("is elsewhere (routing / finalize / weight layout).")
+
+    probe_dense_linear()
 
 
 if __name__ == "__main__":

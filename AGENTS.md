@@ -13,7 +13,7 @@ Diffusion、Dense W8A8/W4A8 及 **Dense W4A4（PR #23795，2026-07-17 合入）*
 
 | 分支 | 目录 | PR | 状态 |
 | ---- | ---- | -- | ---- |
-| `junlin_qwen3_moe_w8a8` | `sglang/qwen3_moe_w8a8/`（派生 worktree） | [#30768](https://github.com/sgl-project/sglang/pull/30768) | WIP OPEN，LLM MoE W8A8 MXFP8，在线+离线 A5 已 e2e 验证；OrangeRedeng 评审 8 条已处理（7 接纳 + 1 待 A5 实测） |
+| `junlin_qwen3_moe_w8a8` | `sglang/qwen3_moe_w8a8/`（派生 worktree） | [#30768](https://github.com/sgl-project/sglang/pull/30768) | WIP OPEN，LLM MoE W8A8 MXFP8，在线+离线 A5 已 e2e 验证；OrangeRedeng 评审 8 条已逐条落地（7 接纳已 resolve + ⑧ NZ 待 A5 实测，thread 保持 open）。HEAD `ea24f248d` |
 | `junlin_qwen3_moe_w4a8` | `sglang/qwen3_moe_w4a8/`（派生 worktree） | 待创建 | 🚧 WIP，LLM MoE W4A8 MXFP（MXFP4 权重 + FP8 激活），在线+离线已实现，A5 待验证 |
 | `junlin_qwen3.5_dense_w8a8` | `sglang/qwen3.5_dense_w8a8/`（派生 worktree） | 待创建 | 🚧 WIP，Qwen3.5 Dense W8A8 MXFP8 实验/验证（代码已合入 upstream/main，此分支用于 A5 在线+离线验证、跑分、模型适配） |
 
@@ -158,6 +158,11 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，只有 4 个目录�
   - **融合激活量化（quant_mode=3，已 A5 探针验证 Q9 + e2e 验证）**：`npu_moe_init_routing_v2` 直接在 routing 内做 MXFP8 激活量化——`quant_mode=3` → 排序输出 e4m3、第 4 返回值给 e8m0 block scale，省掉单独一次 `npu_dynamic_mx_quant`（对齐 vllm-ascend A5：原生 v2，非 v3/custom op）。`npu_fused_experts_mxfp8` **唯一路径**就是融合（无两步 fallback、无 env 开关——A5 e2e 验证通过后已移除，简化维护）。**Q9 实测（torch_npu 2.10.0.post2 + A5）**：`quant_mode=3` 接受且 **x_dtype 传 None**（不需要）；ret[3] scale 是 **2D `[N, K/32]` float8_e8m0fnu**（与 `npu_dynamic_mx_quant` 直出 3D 不同）→ **必须 `_normalize_mxfp_scale` 2D→3D `[N,K/64,2]`**；融合 vs 两步 **cos=1.0、qx 字节完全一致**（非近似），在线/离线 e2e 均可跑。
 - **DeepEP 没有 mxfp8 dispatch dtype**：`token_dispatcher/deepep.py` 的 `config_map` 只有 BF16/FP8/INT8/NVFP4，把 `dispatcher_output_dtype` 设成 `"mxfp8"` 会 **KeyError**。所以 `NPUMXFP8MoEMethod.process_weights_after_loading` 对 w13 按 `get_moe_a2a_backend().is_deepep()` 分流：DeepEP 设 `"bf16"`（dispatcher 不量化），`apply_fused_gmm1_swiglu` 里 `pertoken_scale is None` 时用 `HiddenStatesDynamicQuant(float8_e4m3fn)` 自己量化再进 gmm1；ascend_tp 才设 `"mxfp8"` 走融合路由量化。**DeepEP 路径代码上已打通但未在 A5 上 e2e 验证**（尤其 low-latency 的 3D hidden_states 是否被融合 gmm1 接受未知）。
 
+- **`--quantization mxfp8` 会强制 flashinfer runner → w1/w3 shard swap（静默乱码）**：`arg_groups/overrides.py::_moe_runner_backend_quant_constraints` 见到 `mxfp8` 就把 `moe_runner_backend` 从 `auto` 顶成 `flashinfer_trtllm`，**不看平台**。这个值不只选 runner：`fused_moe_triton/layer.py:939` 的 **w1/w3 shard swap**（"flashinfer assumes w31 format"）和 `:253` 的 128 对齐 round-up 都挂在它上面。shard swap 的触发名单是 `ModelOptNvFp4FusedMoEMethod` / `Fp8MoEMethod` / **`UnquantizedFusedMoEMethod`** / `CompressedTensorsMxInt4MoE` —— 一旦 MoE method 继承了 `UnquantizedFusedMoEMethod`（本 PR 评审第 ③ 条要求），就命中名单，**每个 expert 的 gate/up 被交换**，gmm1 融合 swiglu 算成 `silu(up)*gate`：**不报错，只是退化重复输出**。若尚未继承（继承自 `FusedMoEMethodBase`）则表现为响亮的 `TypeError: Unexpected quant_info type for flashinfer_trtllm: AscendQuantInfo`。修复：`if view.quantization == "mxfp8" and not is_npu():`，让 backend 停在 `auto` 由 `create_moe_runner` 解析成 ASCEND；并在 `create_moe_runner` 里对非 `auto`/`ascend` 的 backend 显式 raise，堵住手动 `--moe-runner-backend`。
+- **MoE 侧 e8m0 dtype 必须取 `torch_npu`，dense 侧 `torch` 也行**：`npu_grouped_matmul*` 按 torch_npu 自己的枚举（A5 上 293）校验 scale dtype 参数，torch 的 dtype 对象会被拒（`weight_scale_dtype only supports float8_e8m0fnu or None, but the actual value is Float8_e8m0fnu`）→ 每次 gmm1 直接死。dense 的 `npu_quant_matmul` 两种都吃，所以 `linear_method_npu.py::_get_float8_e8m0fnu_dtype`（只读 torch）**不能**给 MoE 复用；`moe_methods.py::_require_e8m0_dtype` 需 torch_npu 优先 + lazy import + 模块级缓存。
+- **离线 MXFP8 MoE 必须注册空 `weight_offset`**：`modelslim.py::ModelSlimMoEMethod.apply` 照 int8 scheme 无条件读 `layer.{w13,w2}_weight_offset` 来建 `AscendQuantInfo`。MXFP8 是纯 scale 格式（e8m0 block 指数即全部，无零点），scheme 不会创建它 → `AttributeError: 'FusedMoE' object has no attribute 'w13_weight_offset'`。修复：`layer.register_parameter(f"{prefix}_weight_offset", None)`（`AscendQuantInfo` 该字段本就是 `Optional`；None 参数不出现在 `named_parameters()`，无 loader 会找它）。
+- **上游大 merge 会静默重写 NPU MoE 层**：2026-07-16 那次 merge 删掉 `fused_moe_method_npu.py`（-1581 行）、新建 `quantization/moe_methods.py`（+994）/ `moe_runner/ascend.py`（+338）/ `npu/moe/*.py`，本仓库的 MXFP8 MoE 实现是**在 merge commit 内部被重新移植的**。上面三条回归全部出自这次移植。**教训：大 merge 后必须先单独跑一遍 A5 e2e 校准 baseline，再往上叠任何改动**，否则后续每一步的验证都被污染、无法二分。
+
 > 详细根因分析、调试过程、代码示例、修复方法见 [docs/known-pitfalls.md](docs/known-pitfalls.md)。
 
 ## 开发工具
@@ -172,7 +177,8 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，只有 4 个目录�
 
 **Claude 的 Bash 环境到 github.com 的网络不稳定**：TLS 握手会间歇性失败（`gnutls_handshake() failed` / `SSL_ERROR_SYSCALL`），**大传输尤其容易失败**（实测：fork 的大 merge push 连续失败、`curl`/`fetch` 也失败；但主仓的小 commit push 一次成功）。所以这不是硬封锁，而是按传输大小/运气波动的不稳定连接。因此：
 
-- **push 失败先重试几次**；持续失败（尤其是 fork 的大体量 push）就交给用户在自己的终端执行（用户侧网络稳定）。Claude 侧 `git push` 报 TLS 错 **不代表推送真的失败**——用户那边往往已成功；可用 `git log origin/<branch>`（依赖本地 remote-tracking ref）核对，但 TLS 不稳时 `fetch` 也可能刷新不了。
+- **push 是 Claude 的活，不要甩给用户**（用户 2026-07-20 明确要求）。失败就挂后台重试循环（`git push` → 拿 `git rev-parse refs/remotes/origin/<branch>` 和 HEAD 比对 → `sleep 20` → 重来，60~90 次），期间继续干别的活。实测断网可持续 10+ 分钟，但重试到第 2~5 次成功是常态。只有循环耗尽才告诉用户，并说明试了多少次。同理适用于 `gh api`（发评论、resolve thread、改 PR 正文）。
+- Claude 侧 `git push` 报 TLS 错 **不代表推送真的失败**——先用 `git rev-parse refs/remotes/origin/<branch>` 核对再下结论（注意 `git rev-parse --short A B` 一次传两个 ref 在 ref 不存在时会报 `Needed a single revision`，分开查）。
 - **CI 日志 / GitHub Actions**：`gh` CLI **已认证可用**（account TallMessiWu），CI 失败时**先用 gh 拉真实日志再动手**，不要凭本地复现或臆测下结论：`gh pr checks <N> --repo sgl-project/sglang`、`gh run view --job <id> --log-failed`、`gh run watch <run-id> --exit-status`。注意 CI 跑的是 `pre-commit run --all-files`，ruff 的实际 autofix（如 UP037 给带 `from __future__ import annotations` 的文件去引号）可能与本地裸 `ruff --select=...` 不一致，会以「files were modified by this hook」失败。
 - 需要联网（搜索、抓网页）时走 `web-access` skill，不要用裸 curl。
 

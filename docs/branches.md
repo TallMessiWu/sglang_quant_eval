@@ -22,11 +22,28 @@
 
 ## `junlin_qwen3_moe_w8a8` — LLM MoE W8A8 (MXFP8) 🚧 PR [#30768](https://github.com/sgl-project/sglang/pull/30768) WIP OPEN
 
-LLM 侧，Qwen3/3.5 MoE W8A8 MXFP8（FusedMoE/TP，`--quantization mxfp8`）；EPMoE 待实现。此目录（`sglang/qwen3_moe_w8a8/`）是从主 clone `sglang/qwen3_dense_w4a4/` 派生的 worktree（gitignore、纯本地，主仓不跟踪）。
+LLM 侧，Qwen3/3.5 MoE W8A8 MXFP8（FusedMoE，`--quantization mxfp8`）；EPMoE 待实现。此目录（`sglang/qwen3_moe_w8a8/`）是从主 clone `sglang/qwen3_dense_w4a4/` 派生的 worktree（gitignore、纯本地，主仓不跟踪）。当前 HEAD `ea24f248d`。
 
-- 在线：`NPUMXFP8FusedMoEMethod`（三段式 `create_weights` / `process_weights_after_loading` / `apply`），A5 e2e 已验证。
-- 离线：`W8A8_MXFP8` → `ModelSlimMXFP8MoEScheme` → `NPUMXFP8FusedMoEMethod` 离线分支，e2e **待验证**。
+- 在线：`NPUMXFP8OnlineMoEMethod`（`online_moe_methods.py`，继承 `UnquantizedFusedMoEMethod`，只 override `create_moe_runner`），A5 e2e 已验证。
+- 离线：`W8A8_MXFP8` → `ModelSlimMXFP8MoEScheme` → `NPUMXFP8MoEMethod` 离线分支，A5 e2e 已验证。
 - MXFP8 MoE kernel 契约（torch_npu 2.10.0.post2 + A5 已探针验证）详见 [known-pitfalls.md](known-pitfalls.md) 与 AGENTS.md「已知陷阱」。
+
+### OrangeRedeng 评审落地（2026-07-20，逐条增量）
+
+首次以单个大 commit（`6bd7056`）应用全部 8 条，A5 上乱码且无法二分，遂 reset 重来：**每条（或每小组）一个 commit + push + A5 验证**，通过后才做下一条。
+
+| # | 内容 | commit |
+| - | ---- | ------ |
+| ⑥ | 离线 flagless，文档去掉 `--quantization` | `9efe9998d` |
+| ⑦ | `hidden_states_quant.py` → `quant.py` + mxfp8 dtype | `efe50dfa3` |
+| ②⑤ | `GroupedMatmulSwigluQuant` wrapper + 按 `weight_prefix` 选 matmul | `2d06d61a5` |
+| ① | DeepEP 不再硬拒，dispatcher 发 bf16 时 gmm1 自量化 | `1efd2ca35` |
+| ③④ | 继承 `UnquantizedFusedMoEMethod` + 改名 `NPUMXFP8OnlineMoEMethod` | `ea24f248d` |
+| ⑧ | NZ `npu_format_cast` | **未做**，待 A5 A/B 数据；PR thread 保持 open |
+
+⑥⑦②⑤①③④ 七条的 review thread 已 resolve。**顺带查出三条与评审无关的 merge 移植回归**（`e9b36bb5d` e8m0 dtype / `9ac21f5ff` flashinfer runner override / `969087364` 离线空 weight offset），根因见 AGENTS.md「已知陷阱」。
+
+待办：⑧ 的 NZ A/B；重跑 GSM8K + benchmark 对齐 PR 正文数字（现有 +32% 吞吐 / 95.9 GSM8K 是重构前测的）。
 
 ---
 

@@ -164,7 +164,17 @@ per_token_scale_dtype=_FLOAT8_E8M0FNU_DTYPE,
 
 ## MoE MXFP8 的 weight + scale 必须 `.transpose(1, 2)` 但 _不要_ `.contiguous()`
 
-`npu_grouped_matmul` (mx case) 通过 strides 感知 block-scale 布局；`.contiguous()` 会物理重排内存，但 kernel 仍按 strided-view 假设索引 → block-scale 映射错位 → 输出乱码。
+**真实机制是内核断言，不是带宽效应**（2026-07-21 A5 探针 `llm/probe_mxfp8_moe_nz.py` 实测更正）。`npu_grouped_matmul_swiglu_quant_v2` 有一条 `CheckMXTranspose`：**weight 与 weight_scale 的 transpose 标志必须一致**。只给 weight 加 `.contiguous()`（或转 NZ）而 scale 仍是 transpose view，会**直接报错**，不是静默乱码：
+
+```
+AclNN_Parameter_Error(EZ1001): The transposition of weightScale/weight
+should be equal, but actual transpositions are true/false.
+CheckMXTranspose failed.
+```
+
+**两边一起 `.contiguous()` 数值是正确的**（cos 与 strided view 完全一致），只是更慢：128-expert 下 decode −6.2%、prefill −0.5%。所以结论「不要 contiguous」成立，但理由是实测更慢 + 容易踩标志不一致，而非早先写的「block-scale 映射错位 → 乱码」。
+
+> ⚠️ 小 expert 数的 micro-benchmark 会给出完全相反的结论：E=4/top_k=2 时 contiguous 反而快 58%。定 layout 必须用真实 expert 数（128）测。
 
 正确做法（对齐 vllm-ascend `AscendW8A8MXFP8DynamicFusedMoEMethod.process_weights_after_loading`，`w8a8_mxfp8.py:332-339`）：
 
@@ -179,7 +189,25 @@ layer.w13_weight_scale = Parameter(s13.transpose(1, 2), requires_grad=False)    
 
 注意：dense linear 路径 (`NPUMXFP8LinearMethod`) 用 `.transpose(0, 1).contiguous()` 是 OK 的，因为 `npu_quant_matmul` 接受 contig 布局；MoE 的 `npu_grouped_matmul` 不接受。
 
-踩坑历史：早先版本错误地加了 `.contiguous()`，跑通但输出乱码——纠正回 vllm-ascend 的 strided-view 布局后修复。
+踩坑历史：早先版本错误地加了 `.contiguous()`，跑通但输出乱码——纠正回 vllm-ascend 的 strided-view 布局后修复。（当时归因为「映射错位」，2026-07-21 探针证明真实约束是上面的 `CheckMXTranspose` 断言。）
+
+### FRACTAL_NZ：cast 必须在 transpose _之前_
+
+同一条断言决定了 NZ 怎么加。`npu_format_cast` 返回的是物理重排后的张量，transpose 标志为 false，所以**先 transpose 再 cast 会让 weight 与 scale 标志不一致而报错**——同文件 int8 MoE 方法（`moe_methods.py:378`/`:485`）的 `npu_format_cast(w.transpose(1, 2))` 写法**不能照抄到 MXFP8**（int8 没有 MX scale 要同步）。正确顺序与 dense W4A8（`linear_method_npu.py:443`/`:578`）一致：
+
+```python
+weight = npu_format_cast(weight)                 # [E, N, K] ND -> FRACTAL_NZ
+Parameter(weight.transpose(1, 2), ...)           # 再 transpose，标志与 scale 一致
+Parameter(scale.transpose(1, 2), ...)            # scale 保持 strided view，不动
+```
+
+A5 实测（Qwen3-30B-A3B，128 experts，torch_npu 2.10.0.post2）：**decode +1.4%、prefill +3.8%**，噪声底噪 0.2~0.3%，输出与改前完全一致。远不及 int8 路径报告的 ~10%，但两个 shape 方向一致。分支 `junlin_qwen3_moe_w8a8_nz`（commit `d419aa41f`）。
+
+其他实测结论：
+
+- `npu_format_cast` **直接接受 `float8_e4m3fn`**；vllm-ascend `fp8.py` 的 `uint8 view + customize_dtype` 写法在此 build 上失败（`Cannot find bin of op TransData ... FRACTAL_NZ_C0_32`）。
+- NZ 权重配 ND 的 e8m0 block scale 数值正确，不会静默读错 scale。
+- `_is_nz_aligned` 原先对 fp8 落到兜底 `return True`；已补 int8 同款规则（`k%16, n%32`，fp8 同为单字节）。
 
 ---
 

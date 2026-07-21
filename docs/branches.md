@@ -22,7 +22,7 @@
 
 ## `junlin_qwen3_moe_w8a8` — LLM MoE W8A8 (MXFP8) 🚧 PR [#30768](https://github.com/sgl-project/sglang/pull/30768) WIP OPEN
 
-LLM 侧，Qwen3/3.5 MoE W8A8 MXFP8（FusedMoE，`--quantization mxfp8`）；EPMoE 待实现。此目录（`sglang/qwen3_moe_w8a8/`）是从主 clone `sglang/qwen3_dense_w4a4/` 派生的 worktree（gitignore、纯本地，主仓不跟踪）。当前 HEAD `d419aa41f`。
+LLM 侧，Qwen3/3.5 MoE W8A8 MXFP8（FusedMoE，`--quantization mxfp8`）；EPMoE 待实现。此目录（`sglang/qwen3_moe_w8a8/`）是从主 clone `sglang/qwen3_dense_w4a4/` 派生的 worktree（gitignore、纯本地，主仓不跟踪）。当前 HEAD `e22b7bef8`（2026-07-21 merge `upstream/main` @ `c0ed009f5`，178 commit）。
 
 - 在线：`NPUMXFP8OnlineMoEMethod`（`online_moe_methods.py`，继承 `UnquantizedFusedMoEMethod`，只 override `create_moe_runner`），A5 e2e 已验证。
 - 离线：`W8A8_MXFP8` → `ModelSlimMXFP8MoEScheme` → `NPUMXFP8MoEMethod` 离线分支，A5 e2e 已验证。
@@ -54,7 +54,18 @@ LLM 侧，Qwen3/3.5 MoE W8A8 MXFP8（FusedMoE，`--quantization mxfp8`）；EPMo
 
 PR 正文的性能表（+44% 吞吐 / −30% 延迟）与 GSM8K（在线 95.93 / 离线 95.78 / 基线 95.91）已于 2026-07-21 更新为重构后 + NZ 的数据。
 
-> 派生分支 `junlin_qwen3_moe_w8a8_nz`（`sglang/qwen3_moe_w8a8_nz/`）额外含一个 **NZ 生效日志** commit `30a563a96`（`_log_mxfp8_weight_format`，启动后 grep `MXFP8 MoE` 即可确认 NZ 是否生效），**刻意未并入 PR**——排查时可 cherry-pick。
+> 曾用派生分支 `junlin_qwen3_moe_w8a8_nz` 承载一个 NZ 生效日志 commit（`_log_mxfp8_weight_format`），未并入 PR，2026-07-21 已连同 worktree 一并删除。
+
+### 2026-07-21 merge upstream/main（`c0ed009f5`，178 commit）
+
+PR 出现冲突后合并上游，选 merge 而非 rebase——分支历史已有两次 merge，且 PR body / 本文件大量引用具体 commit hash，rebase 会全部失效。
+
+- **仅一处冲突**：`modelslim/schemes/__init__.py` 的 `__all__`，我方 `ModelSlimMXFP8MoEScheme` 与上游 `ModelSlimMXFP4Scheme`（dense W4A4 线）互不冲突，两者都留、按 import 顺序排。
+- 上游对 `moe_methods.py` 只加了 11 行且仅涉及 `NPUW4A8Int8MoEMethod`（int8 W4A8 的 `_update_bias`），**未触碰 MXFP8**；`utils.py` / `online_moe_methods.py` / `moe_runner/ascend.py` 均无改动。这次不是 2026-07-16 那种整层重写。
+- merge 后已核对：NZ cast、`_is_nz_aligned` fp8 分支、`overrides.py` NPU 豁免、`fp8.py` dispatch、离线 scheme 注册、`unquant.py` 那处删除**全部完好**；相对上游净改动 18 文件 / +627 −42，全是 MXFP8 MoE 相关。
+- PR 状态回到 `MERGEABLE`（`BLOCKED` 只是缺 `run-ci` label）。
+
+> ⚠️ **A5 e2e 尚未在 merge 后重跑**。按本仓库教训（见 AGENTS.md「上游大 merge 会静默重写 NPU MoE 层」），大 merge 后应先跑一遍 `llm/verify_moe_w8a8.sh` 校准 baseline 再叠改动。当前 PR 正文的性能/精度数字测自 merge 前的 `d419aa41f`。
 
 ---
 

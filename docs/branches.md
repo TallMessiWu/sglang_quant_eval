@@ -22,7 +22,7 @@
 
 ## `junlin_qwen3_moe_w8a8` — LLM MoE W8A8 (MXFP8) 🚧 PR [#30768](https://github.com/sgl-project/sglang/pull/30768) WIP OPEN
 
-LLM 侧，Qwen3/3.5 MoE W8A8 MXFP8（FusedMoE，`--quantization mxfp8`）；EPMoE 待实现。此目录（`sglang/qwen3_moe_w8a8/`）是从主 clone `sglang/qwen3_dense_w4a4/` 派生的 worktree（gitignore、纯本地，主仓不跟踪）。当前 HEAD `ea24f248d`。
+LLM 侧，Qwen3/3.5 MoE W8A8 MXFP8（FusedMoE，`--quantization mxfp8`）；EPMoE 待实现。此目录（`sglang/qwen3_moe_w8a8/`）是从主 clone `sglang/qwen3_dense_w4a4/` 派生的 worktree（gitignore、纯本地，主仓不跟踪）。当前 HEAD `d419aa41f`。
 
 - 在线：`NPUMXFP8OnlineMoEMethod`（`online_moe_methods.py`，继承 `UnquantizedFusedMoEMethod`，只 override `create_moe_runner`），A5 e2e 已验证。
 - 离线：`W8A8_MXFP8` → `ModelSlimMXFP8MoEScheme` → `NPUMXFP8MoEMethod` 离线分支，A5 e2e 已验证。
@@ -39,11 +39,22 @@ LLM 侧，Qwen3/3.5 MoE W8A8 MXFP8（FusedMoE，`--quantization mxfp8`）；EPMo
 | ②⑤ | `GroupedMatmulSwigluQuant` wrapper + 按 `weight_prefix` 选 matmul | `2d06d61a5` |
 | ① | DeepEP 不再硬拒，dispatcher 发 bf16 时 gmm1 自量化 | `1efd2ca35` |
 | ③④ | 继承 `UnquantizedFusedMoEMethod` + 改名 `NPUMXFP8OnlineMoEMethod` | `ea24f248d` |
-| ⑧ | NZ `npu_format_cast` | **未做**，待 A5 A/B 数据；PR thread 保持 open |
+| ⑧ | NZ `npu_format_cast` | `d419aa41f`（2026-07-21） |
 
-⑥⑦②⑤①③④ 七条的 review thread 已 resolve。**顺带查出三条与评审无关的 merge 移植回归**（`e9b36bb5d` e8m0 dtype / `9ac21f5ff` flashinfer runner override / `969087364` 离线空 weight offset），根因见 AGENTS.md「已知陷阱」。
+⑥⑦②⑤①③④ 七条的 review thread 已 resolve；⑧ 已在 thread 内回复数据（[discussion_r3620392948](https://github.com/sgl-project/sglang/pull/30768#discussion_r3620392948)），由 OrangeRedeng 决定是否 resolve。**顺带查出三条与评审无关的 merge 移植回归**（`e9b36bb5d` e8m0 dtype / `9ac21f5ff` flashinfer runner override / `969087364` 离线空 weight offset），根因见 AGENTS.md「已知陷阱」。
 
-待办：⑧ 的 NZ A/B；重跑 GSM8K + benchmark 对齐 PR 正文数字（现有 +32% 吞吐 / 95.9 GSM8K 是重构前测的）。
+### ⑧ FRACTAL_NZ 实测（2026-07-21）
+
+探针 `llm/probe_mxfp8_moe_nz.py`（四轮迭代）+ A5 e2e 双跑（ND / NZ × 在线 / 离线）：
+
+- **kernel 级**（gmm1+gmm2，128 experts）：decode **+1.4%**、prefill **+3.8%**，噪声底噪 0.2~0.3%，cos 与 ND 完全一致。
+- **e2e**：吞吐在线 **+2.0%**、离线 **+3.0%**；mean TTFT 两者均 **−6.5%** 左右；P99 TPOT −3.8% / −5.5%。
+- 远不及 OrangeRedeng 提到的 int case ~10%，但方向一致，故采纳。
+- **cast 必须在 transpose 之前**（`CheckMXTranspose` 断言）；**别用小 expert 数测 layout**（E=4 会给出相反结论）。两条均记入 [known-pitfalls.md](known-pitfalls.md)。
+
+PR 正文的性能表（+44% 吞吐 / −30% 延迟）与 GSM8K（在线 95.93 / 离线 95.78 / 基线 95.91）已于 2026-07-21 更新为重构后 + NZ 的数据。
+
+> 派生分支 `junlin_qwen3_moe_w8a8_nz`（`sglang/qwen3_moe_w8a8_nz/`）额外含一个 **NZ 生效日志** commit `30a563a96`（`_log_mxfp8_weight_format`，启动后 grep `MXFP8 MoE` 即可确认 NZ 是否生效），**刻意未并入 PR**——排查时可 cherry-pick。
 
 ---
 

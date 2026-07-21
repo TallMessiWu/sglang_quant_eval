@@ -13,8 +13,8 @@ Diffusion、Dense W8A8/W4A8 及 **Dense W4A4（PR #23795，2026-07-17 合入）*
 
 | 分支 | 目录 | PR | 状态 |
 | ---- | ---- | -- | ---- |
-| `junlin_qwen3_moe_w8a8` | `sglang/qwen3_moe_w8a8/`（派生 worktree） | [#30768](https://github.com/sgl-project/sglang/pull/30768) | WIP OPEN，LLM MoE W8A8 MXFP8，在线+离线 A5 已 e2e 验证；OrangeRedeng 评审 8 条已逐条落地（7 接纳已 resolve + ⑧ NZ 已实测，见下行候选分支）。HEAD `ea24f248d` |
-| `junlin_qwen3_moe_w8a8_nz` | `sglang/qwen3_moe_w8a8_nz/`（派生 worktree） | 待定（评审 ⑧ 候选） | 🚧 从 `junlin_qwen3_moe_w8a8` 派生，MoE MXFP8 权重转 FRACTAL_NZ（cast→transpose）。A5 kernel 级实测 decode +1.4% / prefill +3.8%（噪声 0.2~0.3%），**e2e 待用户实测后决定是否并入 #30768**。HEAD `d419aa41f` |
+| `junlin_qwen3_moe_w8a8` | `sglang/qwen3_moe_w8a8/`（派生 worktree） | [#30768](https://github.com/sgl-project/sglang/pull/30768) | WIP OPEN，LLM MoE W8A8 MXFP8，在线+离线 A5 已 e2e 验证；OrangeRedeng 评审 **8 条全部落地**（⑧ NZ 已合入并回复，2026-07-21）。PR body 性能/精度数据已更新为 NZ 版。HEAD `d419aa41f` |
+| `junlin_qwen3_moe_w8a8_nz` | `sglang/qwen3_moe_w8a8_nz/`（派生 worktree） | 无（已合入上行） | ✅ NZ 本体 `d419aa41f` 已快进合入 `junlin_qwen3_moe_w8a8`。此分支仅额外多一个 **NZ 生效日志** commit `30a563a96`（`_log_mxfp8_weight_format`，grep `MXFP8 MoE` 可确认 NZ 是否生效），**未合入 PR**。不需要就可删；要排查 NZ 时再 cherry-pick。 |
 | `junlin_qwen3_moe_w4a8` | `sglang/qwen3_moe_w4a8/`（派生 worktree） | 待创建 | 🚧 WIP，LLM MoE W4A8 MXFP（MXFP4 权重 + FP8 激活），在线+离线已实现，A5 待验证 |
 | `junlin_qwen3.5_dense_w8a8` | `sglang/qwen3.5_dense_w8a8/`（派生 worktree） | 待创建 | 🚧 WIP，Qwen3.5 Dense W8A8 MXFP8 实验/验证（代码已合入 upstream/main，此分支用于 A5 在线+离线验证、跑分、模型适配） |
 
@@ -45,12 +45,12 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享�
 | ---- | -------- | ---- |
 | `sglang/qwen3_dense_w4a4/` | `junlin_qwen3_dense_w4a4` | **主 clone + 主仓子模块**（其余 3 个 worktree 共享此处 `.git`）；LLM Dense W4A4 MXFP4，**PR #23795 已合并（2026-07-17）**，此目录作为 worktree 基础设施保留，不再是活跃开发分支。 |
 | `sglang/qwen3_moe_w8a8/` | `junlin_qwen3_moe_w8a8` | 派生 worktree（gitignore、纯本地）；LLM MoE W8A8 MXFP8（PR #30768）。 |
-| `sglang/qwen3_moe_w8a8_nz/` | `junlin_qwen3_moe_w8a8_nz` | 派生 worktree（gitignore、纯本地）；从上一行派生，MoE MXFP8 权重 FRACTAL_NZ 候选（评审 ⑧），待 e2e 后决定是否并入 #30768。 |
+| `sglang/qwen3_moe_w8a8_nz/` | `junlin_qwen3_moe_w8a8_nz` | 派生 worktree（gitignore、纯本地）；NZ 本体已合入上行，此处只多一个 NZ 生效日志 commit，未进 PR。 |
 | `sglang/qwen3_moe_w4a8/` | `junlin_qwen3_moe_w4a8` | 派生 worktree（gitignore、纯本地）；LLM MoE W4A8 MXFP（MXFP4 权重 + FP8 激活）。 |
 | `sglang/qwen3.5_dense_w8a8/` | `junlin_qwen3.5_dense_w8a8` | 派生 worktree（gitignore、纯本地）；Qwen3.5 Dense W8A8 MXFP8 实验/验证。 |
 
 开发约定：
-- 改 MoE W8A8：进入 `sglang/qwen3_moe_w8a8/`；改 MoE W8A8 的 NZ 候选：进入 `sglang/qwen3_moe_w8a8_nz/`；改 MoE W4A8：进入 `sglang/qwen3_moe_w4a8/`；改 Qwen3.5 Dense W8A8：进入 `sglang/qwen3.5_dense_w8a8/`。`sglang/qwen3_dense_w4a4/`（Dense W4A4，PR #23795）已合并，日常开发不再进入，仅作为其余 3 个 worktree 的 `.git` 宿主保留。
+- 改 MoE W8A8：进入 `sglang/qwen3_moe_w8a8/`（NZ 已在其中）；改 MoE W4A8：进入 `sglang/qwen3_moe_w4a8/`；改 Qwen3.5 Dense W8A8：进入 `sglang/qwen3.5_dense_w8a8/`。`sglang/qwen3_dense_w4a4/`（Dense W4A4，PR #23795）已合并，日常开发不再进入，仅作为其余 3 个 worktree 的 `.git` 宿主保留。
 - 已合并的 Diffusion / Dense W8A8/W4A8/W4A4 代码都在 upstream/main（各 worktree rebase 后均含），无需单独 checkout。如需基于某已合并 PR 再开发，从主 clone（`sglang/qwen3_dense_w4a4`）用 `git worktree add` 新建独立目录，不要复用已有 worktree。
 - **`sglang/qwen3_dense_w4a4/` 是主仓子模块**（主仓跟踪其 commit 指针，见 `.gitmodules`）；`qwen3_moe_w8a8/`、`qwen3_moe_w4a8/` 和 `qwen3.5_dense_w8a8/` 被 `.gitignore` 忽略、主仓不跟踪。旧 `sglang/diffusion_w8a8` 子模块随 Diffusion 合并上游后已移除。
 

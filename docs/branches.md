@@ -45,7 +45,7 @@ LLM 侧，Qwen3/3.5 MoE W8A8 MXFP8（FusedMoE，`--quantization mxfp8`）；EPMo
 
 ### ⑧ FRACTAL_NZ 实测（2026-07-21）
 
-探针 `llm/probe_mxfp8_moe_nz.py`（四轮迭代）+ A5 e2e 双跑（ND / NZ × 在线 / 离线）：
+一次性 kernel 探针（四轮迭代，脚本已删）+ A5 e2e 双跑（ND / NZ × 在线 / 离线）：
 
 - **kernel 级**（gmm1+gmm2，128 experts）：decode **+1.4%**、prefill **+3.8%**，噪声底噪 0.2~0.3%，cos 与 ND 完全一致。
 - **e2e**：吞吐在线 **+2.0%**、离线 **+3.0%**；mean TTFT 两者均 **−6.5%** 左右；P99 TPOT −3.8% / −5.5%。
@@ -65,7 +65,7 @@ PR 出现冲突后合并上游，选 merge 而非 rebase——分支历史已有
 - merge 后已核对：NZ cast、`_is_nz_aligned` fp8 分支、`overrides.py` NPU 豁免、`fp8.py` dispatch、离线 scheme 注册、`unquant.py` 那处删除**全部完好**；相对上游净改动 18 文件 / +627 −42，全是 MXFP8 MoE 相关。
 - PR 状态回到 `MERGEABLE`（`BLOCKED` 只是缺 `run-ci` label）。
 
-> ⚠️ **A5 e2e 尚未在 merge 后重跑**。按本仓库教训（见 AGENTS.md「上游大 merge 会静默重写 NPU MoE 层」），大 merge 后应先跑一遍 `llm/verify_moe_w8a8.sh` 校准 baseline 再叠改动。当前 PR 正文的性能/精度数字测自 merge 前的 `d419aa41f`。
+> ⚠️ **A5 e2e 尚未在 merge 后重跑**。按本仓库教训（见 AGENTS.md「上游大 merge 会静默重写 NPU MoE 层」），大 merge 后应先用 `llm/qwen3_moe_online_w8a8.sh` / `llm/qwen3_moe_offline_w8a8.sh` 起服务跑一遍 e2e 校准 baseline 再叠改动。当前 PR 正文的性能/精度数字测自 merge 前的 `d419aa41f`。
 
 ---
 

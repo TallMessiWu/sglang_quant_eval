@@ -164,7 +164,7 @@ per_token_scale_dtype=_FLOAT8_E8M0FNU_DTYPE,
 
 ## MoE MXFP8 的 weight + scale 必须 `.transpose(1, 2)` 但 _不要_ `.contiguous()`
 
-**真实机制是内核断言，不是带宽效应**（2026-07-21 A5 探针 `llm/probe_mxfp8_moe_nz.py` 实测更正）。`npu_grouped_matmul_swiglu_quant_v2` 有一条 `CheckMXTranspose`：**weight 与 weight_scale 的 transpose 标志必须一致**。只给 weight 加 `.contiguous()`（或转 NZ）而 scale 仍是 transpose view，会**直接报错**，不是静默乱码：
+**真实机制是内核断言，不是带宽效应**（2026-07-21 A5 一次性 kernel 探针实测更正，脚本已删）。`npu_grouped_matmul_swiglu_quant_v2` 有一条 `CheckMXTranspose`：**weight 与 weight_scale 的 transpose 标志必须一致**。只给 weight 加 `.contiguous()`（或转 NZ）而 scale 仍是 transpose view，会**直接报错**，不是静默乱码：
 
 ```
 AclNN_Parameter_Error(EZ1001): The transposition of weightScale/weight

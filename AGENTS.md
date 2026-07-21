@@ -150,7 +150,7 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享�
 - **MoE `npu_grouped_matmul` 需显式 `x_dtype` + `weight_dtype`**：缺少则 kernel 走错 dequant 路径 → 乱码。dense `npu_quant_matmul` 不需要（有 `group_sizes`）。
 - **MoE gmm1 用 fused `npu_grouped_matmul_swiglu_quant_v2`**：勿拆三步；`group_list` 需 count→cumulative 转换。
 - **MoE weight+scale `.transpose(1,2)` 不要 `.contiguous()`**：真实机制是 gmm1 的 `CheckMXTranspose` 断言——**weight 与 weight_scale 的 transpose 标志必须一致**，只动一边直接报错（非乱码）。两边都 contiguous 数值正确但更慢（128-expert decode −6.2%）。dense 路径 contig 则 OK。**注意小 expert 数 micro-bench 结论相反**（E=4 时 contiguous 快 58%），定 layout 必须用真实 expert 数。
-- **MoE MXFP8 转 FRACTAL_NZ 必须 cast 在 transpose 之前**：`npu_format_cast` 产出非 transposed 张量，先 transpose 再 cast 会触发上条断言。正确顺序同 dense W4A8（`linear_method_npu.py:443`/`:578`），**不能**照抄同文件 int8 MoE 的 `npu_format_cast(w.transpose(1,2))`（int8 无 MX scale 要同步）。A5 实测 decode +1.4% / prefill +3.8%，探针 `llm/probe_mxfp8_moe_nz.py`。
+- **MoE MXFP8 转 FRACTAL_NZ 必须 cast 在 transpose 之前**：`npu_format_cast` 产出非 transposed 张量，先 transpose 再 cast 会触发上条断言。正确顺序同 dense W4A8（`linear_method_npu.py:443`/`:578`），**不能**照抄同文件 int8 MoE 的 `npu_format_cast(w.transpose(1,2))`（int8 无 MX scale 要同步）。A5 实测 decode +1.4% / prefill +3.8%（一次性 kernel 探针跑出，脚本已删）。
 - **strided-view 在 w4a8 上变慢**：已恢复 `.contiguous()`。`.contiguous()` 去留是硬件相关的，勿跨分支照搬。
 - **MXFP8 MoE kernel 契约（torch_npu 2.10.0.post2 + A5，已探针验证）**：
   - `npu_dynamic_mx_quant(x[N,K], dst=float8_e4m3fn)` → scale `[N, K//64, 2]` uint8（**3D pair-split**，无需 normalize）；**3D 输入 [E,N,K] 被 kernel 直接接受** → 免逐 expert 循环 + uint8 stack。

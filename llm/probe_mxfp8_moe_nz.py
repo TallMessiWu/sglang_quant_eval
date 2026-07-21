@@ -15,14 +15,34 @@ Our MXFP8 path instead keeps the weights as *strided transpose views* (no
 K-major reduction stride. NZ is a physical re-tiling, so it is mutually
 exclusive with the strided view: to try NZ we must go contiguous first.
 
-Three unknowns this probe answers, in order:
-  1. Does npu_format_cast accept a float8_e4m3fn tensor at all (directly, or
-     only through the uint8-view + customize_dtype form vllm-ascend's fp8.py
-     uses)?
-  2. Do npu_grouped_matmul_swiglu_quant_v2 (gmm1) and npu_grouped_matmul (gmm2)
-     accept an NZ weight while the e8m0 block scale stays ND -- and stay
-     numerically correct (cos vs the bf16 per-expert reference)?
-  3. Is it actually faster than today's strided-ND view?
+Run 1 on A5 (torch_npu 2.10.0.post2, Ascend950PR) settled two questions and
+raised the real one:
+
+  * npu_format_cast DOES accept a float8_e4m3fn tensor directly and really
+    produces FRACTAL_NZ. (The uint8-view + customize_dtype form vllm-ascend's
+    fp8.py uses fails here: no TransData bin for FRACTAL_NZ_C0_32.)
+  * But every non-strided weight variant died before reaching the matmul::
+
+        CheckMXTranspose failed. The transposition of weightScale/weight
+        should be equal, but actual transpositions are true/false.
+
+    gmm1 asserts that weight and weight_scale carry the SAME transpose flag.
+    Run 1 varied only the weight (contiguous / NZ => false) while the scale
+    stayed a transpose view (true), so it never tested NZ at all. This is also
+    the real mechanism behind the "don't .contiguous() the MoE weight+scale"
+    pitfall -- an explicit kernel assertion, not a bandwidth effect.
+
+So the question is how to get NZ and the transpose flag to coexist. The
+variants below pair each weight layout with a scale layout that matches it,
+and try both orderings: transpose-then-cast (vllm-ascend w8a8_dynamic.py, the
+int8 path OrangeRedeng cited, which has no MX scale to keep in sync) and
+cast-then-transpose (vllm-ascend fp8.py:109-121, which does).
+
+What is still unknown:
+  1. Which (weight, scale) layout pairs pass CheckMXTranspose.
+  2. Of those, which stay numerically correct -- an NZ weight against an ND
+     e8m0 block scale may pass the assertion and still read scales wrong.
+  3. Whether any of them actually beats today's strided-ND view.
 
 Run on the A5 box:  python llm/probe_mxfp8_moe_nz.py
 """
@@ -84,41 +104,9 @@ def _swiglu_ref(gate_up):
 # ---------------------------------------------------------------- NZ variants
 
 
-def _to_nz_direct(w):
-    """Cast the e4m3 tensor straight to NZ."""
+def _to_nz(w):
+    """Cast an e4m3 tensor to NZ. Confirmed working on A5 (run 1)."""
     return torch.ops.npu.npu_format_cast(w.contiguous(), ACL_FORMAT_FRACTAL_NZ)
-
-
-def _to_nz_via_uint8(w):
-    """vllm-ascend fp8.py form: feed the uint8 view, declare the real dtype."""
-    return torch.ops.npu.npu_format_cast(
-        w.contiguous().view(torch.uint8),
-        ACL_FORMAT_FRACTAL_NZ,
-        customize_dtype=E4M3,
-    )
-
-
-def probe_format_cast_support(qw13):
-    """Unknown #1: which npu_format_cast spelling accepts fp8, if any."""
-    print("=" * 100)
-    print("1) npu_format_cast on float8_e4m3fn  [E, K, N] transposed weight")
-    w = qw13.transpose(1, 2)
-    working = {}
-    for label, fn in (
-        ("direct (e4m3 tensor)     ", _to_nz_direct),
-        ("uint8 view + customize   ", _to_nz_via_uint8),
-    ):
-        try:
-            out = fn(w)
-            print(f"    {label}: OK")
-            _stat(f"      -> {label}", out)
-            if torch_npu.get_npu_format(out) != ACL_FORMAT_FRACTAL_NZ:
-                print("      !! format is NOT 29 -- the cast silently no-op'd")
-            else:
-                working[label.strip()] = fn
-        except Exception as exc:  # noqa: BLE001
-            print(f"    {label}: RAISED {type(exc).__name__}: {exc}")
-    return working
 
 
 # ------------------------------------------------------------------- pipeline
@@ -194,11 +182,6 @@ def main():
     qw13, s13 = torch.ops.npu.npu_dynamic_mx_quant(w13_bf, dst_type=E4M3)
     qw2, s2 = torch.ops.npu.npu_dynamic_mx_quant(w2_bf, dst_type=E4M3)
 
-    working = probe_format_cast_support(qw13)
-    if not working:
-        print("\nNo npu_format_cast spelling works for e4m3 -> NZ is a dead end here.")
-        return
-
     hidden = torch.randn(NUM_TOKENS, H, device=DEVICE, dtype=DTYPE)
     topk_ids = torch.randint(
         0, E, (NUM_TOKENS, TOP_K), device=DEVICE, dtype=torch.int32
@@ -221,37 +204,46 @@ def main():
     expert_tokens = expert_tokens.to(torch.int64)
     x_scale = _normalize_scale(x_scale_raw)
 
-    # Scales stay ND transposed views in every variant -- only the weight layout
-    # changes. If a variant needs a contiguous scale too, that shows up as a raise.
-    s13_t, s2_t = s13.transpose(1, 2), s2.transpose(1, 2)
-
+    # Each variant pairs a weight layout with the scale layout that matches its
+    # transpose flag -- run 1 proved gmm1 rejects a mismatched pair outright.
+    # Naming: T = transpose view, C = contiguous, NZ = FRACTAL_NZ.
     variants = {
-        "A  ND strided view (production today)": (
-            qw13.transpose(1, 2),
-            qw2.transpose(1, 2),
+        # Production today. Both sides transposed => flags agree.
+        "A  w=T        s=T   (production)   ": (
+            (qw13.transpose(1, 2), qw2.transpose(1, 2)),
+            (s13.transpose(1, 2), s2.transpose(1, 2)),
         ),
-        "B  ND contiguous                     ": (
-            qw13.transpose(1, 2).contiguous(),
-            qw2.transpose(1, 2).contiguous(),
+        # Run 1's B, with the scale made contiguous too so the flags agree.
+        # Isolates what contiguity alone costs, before NZ enters the picture.
+        "B  w=T.C      s=T.C                ": (
+            (qw13.transpose(1, 2).contiguous(), qw2.transpose(1, 2).contiguous()),
+            (s13.transpose(1, 2).contiguous(), s2.transpose(1, 2).contiguous()),
+        ),
+        # vllm-ascend w8a8_dynamic.py order (the int8 path OrangeRedeng cited):
+        # transpose, contiguous, then cast. NZ weight vs contiguous ND scale.
+        "C  w=NZ(T.C)  s=T.C  (int8 order)  ": (
+            (_to_nz(qw13.transpose(1, 2)), _to_nz(qw2.transpose(1, 2))),
+            (s13.transpose(1, 2).contiguous(), s2.transpose(1, 2).contiguous()),
+        ),
+        # vllm-ascend fp8.py order: cast on [E, N, K] FIRST, transpose after, so
+        # the weight keeps a transpose flag of true and matches a T scale.
+        "D  w=NZ().T   s=T    (fp8.py order)": (
+            (_to_nz(qw13).transpose(1, 2), _to_nz(qw2).transpose(1, 2)),
+            (s13.transpose(1, 2), s2.transpose(1, 2)),
         ),
     }
-    for label, fn in working.items():
-        variants[f"C  NZ via {label:<24}"] = (
-            fn(qw13.transpose(1, 2)),
-            fn(qw2.transpose(1, 2)),
-        )
 
     print("=" * 100)
-    print("2+3) correctness and latency per weight layout")
+    print("1+2+3) CheckMXTranspose / correctness / latency per (weight, scale) pair")
     baseline = None
-    for label, (w13, w2) in variants.items():
+    for label, ((w13, w2), (sc13, sc2)) in variants.items():
         try:
-            y = _run_moe(qx, x_scale, expert_tokens, w13, s13_t, w2, s2_t)
+            y = _run_moe(qx, x_scale, expert_tokens, w13, sc13, w2, sc2)
             cos = _cos(y_ref, y)
             ok = cos > 0.97
             ms = _bench(
-                lambda w13=w13, w2=w2: _run_moe(
-                    qx, x_scale, expert_tokens, w13, s13_t, w2, s2_t
+                lambda w13=w13, w2=w2, sc13=sc13, sc2=sc2: _run_moe(
+                    qx, x_scale, expert_tokens, w13, sc13, w2, sc2
                 )
             )
             if baseline is None:
@@ -259,16 +251,17 @@ def main():
             delta = (baseline - ms) / baseline * 100
             verdict = "PASS" if ok else "FAIL (numerically wrong -- unusable)"
             print(
-                f"    {label}: cos={cos:.5f} {verdict:<38} "
-                f"{ms:7.3f} ms  ({delta:+5.1f}% vs A)"
+                f"    {label}: fmt={torch_npu.get_npu_format(w13)!s:<12} "
+                f"cos={cos:.5f} {verdict:<38} {ms:7.3f} ms ({delta:+5.1f}% vs A)"
             )
         except Exception as exc:  # noqa: BLE001
             print(f"    {label}: RAISED {type(exc).__name__}: {exc}")
 
     print("=" * 100)
-    print("Read it as: a NZ variant is worth landing only if it both PASSes and")
-    print("beats A by more than run-to-run noise. If NZ passes for gmm2 but not")
-    print("gmm1 (or vice versa), rerun with per-gmm variants before concluding.")
+    print("A NZ variant is worth landing only if it PASSes AND beats A by more")
+    print("than run-to-run noise. Watch for a variant that passes CheckMXTranspose")
+    print("but scores a low cos -- that is NZ silently misreading the block scales,")
+    print("the same failure mode as the .contiguous() pitfall, and is NOT safe.")
 
 
 if __name__ == "__main__":

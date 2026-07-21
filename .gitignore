@@ -1,8 +1,6 @@
 .vscode
 .idea
 .claude/settings.local.json
-# sglang: qwen3_dense_w4a4 是主仓子模块(见 .gitmodules,主 clone);
-# 其余为派生 worktree,纯本地不跟踪
-sglang/qwen3_moe_w8a8/
-sglang/qwen3.5_dense_w8a8/
-sglang/qwen3_moe_w4a8/
+# sglang: 全部 worktree 纯本地不跟踪(主仓不再有 sglang 子模块)
+# qwen3_moe_w8a8 是主 clone(持有共享 .git),qwen3.5_dense_w8a8 由它派生
+sglang/

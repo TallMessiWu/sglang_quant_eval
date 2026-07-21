@@ -9,15 +9,19 @@
 
 ## 分支规则
 
-Diffusion、Dense W8A8/W4A8 及 **Dense W4A4（PR #23795，2026-07-17 合入）** 侧功能均已合入上游 `sgl-project/sglang`（见下「已合并 PR」）。后续分支都基于 upstream/main rebase，**已含全部已合并代码**，故本地只保留 **3 个活跃工作分支**（各对应一个未合并 PR）：
+Diffusion、Dense W8A8/W4A8 及 **Dense W4A4（PR #23795，2026-07-17 合入）** 侧功能均已合入上游 `sgl-project/sglang`（见下「已合并 PR」）。后续分支都基于 upstream/main rebase，**已含全部已合并代码**，故本地只保留 **2 个活跃工作目录**：
 
 | 分支 | 目录 | PR | 状态 |
 | ---- | ---- | -- | ---- |
-| `junlin_qwen3_moe_w8a8` | `sglang/qwen3_moe_w8a8/`（派生 worktree） | [#30768](https://github.com/sgl-project/sglang/pull/30768) | WIP OPEN，LLM MoE W8A8 MXFP8，在线+离线 A5 已 e2e 验证；OrangeRedeng 评审 **8 条全部落地**（⑧ NZ 已合入并回复，2026-07-21）。PR body 性能/精度数据已更新为 NZ 版。**2026-07-21 merge upstream/main（178 commit，`c0ed009f5`）解冲突，PR 已回到 MERGEABLE——⚠️ merge 后 A5 e2e 尚未重跑**。HEAD `e22b7bef8` |
-| `junlin_qwen3_moe_w4a8` | `sglang/qwen3_moe_w4a8/`（派生 worktree） | 待创建 | 🚧 WIP，LLM MoE W4A8 MXFP（MXFP4 权重 + FP8 激活），在线+离线已实现，A5 待验证 |
+| `junlin_qwen3_moe_w8a8` | `sglang/qwen3_moe_w8a8/`（**主 clone**） | [#30768](https://github.com/sgl-project/sglang/pull/30768) | WIP OPEN，LLM MoE W8A8 MXFP8，在线+离线 A5 已 e2e 验证；OrangeRedeng 评审 **8 条全部落地**（⑧ NZ 已合入并回复，2026-07-21）。PR body 性能/精度数据已更新为 NZ 版。**2026-07-21 merge upstream/main（178 commit，`c0ed009f5`）解冲突，PR 已回到 MERGEABLE——⚠️ merge 后 A5 e2e 尚未重跑**。HEAD `e22b7bef8` |
 | `junlin_qwen3.5_dense_w8a8` | `sglang/qwen3.5_dense_w8a8/`（派生 worktree） | 待创建 | 🚧 WIP，Qwen3.5 Dense W8A8 MXFP8 实验/验证（代码已合入 upstream/main，此分支用于 A5 在线+离线验证、跑分、模型适配）。**2026-07-21 rebase 到 `junlin_qwen3_moe_w8a8`（`e22b7bef8`）**，故也含未合并的 MoE W8A8 PR #30768 代码。HEAD `3ee602835` |
 
-> `junlin_qwen3_dense_w4a4` 的 PR #23795 已合并，但 `sglang/qwen3_dense_w4a4/` 目录**不能删除**——它是 worktree 主 clone（持有共享 `.git`）+ 主仓子模块，其余 3 个 worktree 都挂在它下面，删除会破坏整个 worktree 结构。详见下文「SGLang worktree 目录规则」。
+### 只存在于 fork 远程的分支（本地无目录）
+
+| 分支 | 远程 HEAD | 说明 |
+| ---- | --------- | ---- |
+| `junlin_qwen3_moe_w4a8` | `924fea916` | LLM MoE W4A8 MXFP（MXFP4 权重 + FP8 激活），在线+离线已实现、**A5 未验证、PR 未创建**。2026-07-21 本地目录与分支已删，代码仅存于 fork。需要继续时从主 clone `git worktree add sglang/qwen3_moe_w4a8 junlin_qwen3_moe_w4a8` 拉回。 |
+| `junlin_qwen3_dense_w4a4` | `ac07c7f9f` | PR #23795 已合并，代码已在 upstream/main。原为主 clone + 主仓子模块，2026-07-21 目录已删、子模块条目已从 `.gitmodules` 移除，无需再拉回。 |
 
 ### 已合并 PR（代码已在 upstream/main）
 
@@ -36,21 +40,17 @@ Diffusion、Dense W8A8/W4A8 及 **Dense W4A4（PR #23795，2026-07-17 合入）*
 
 ## SGLang worktree 目录规则
 
-SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享同一个 `.git`**：`sglang/qwen3_dense_w4a4/` 是主 clone（持有独立 `.git` 目录）**且是主仓子模块**（GitHub 上可点击跳转到 fork 的 `junlin_qwen3_dense_w4a4`）；其余目录是从它派生的 worktree，被 `.gitignore` 忽略（纯本地、非子模块）。**需要修改哪个分支，就直接进入对应目录修改；不要在现有目录里用 `git checkout` 切分支。**
-
-> ⚠️ **2026-07-21 实况与下表不符，尚未处理**：主仓 `git status` 显示 `sglang/qwen3_dense_w4a4` 为 deleted，`git worktree list` 只列出 `qwen3_moe_w8a8`（现为**主 worktree**，列在首行）和 `qwen3.5_dense_w8a8`——主 clone 和 `qwen3_moe_w4a8` 均不在其中。`.git` 仍可用，各 worktree 的 git 命令正常，`qwen3_moe_w8a8_nz` 即从 `qwen3_moe_w8a8` 派生成功。动 worktree 前先跑 `git worktree list` 确认实际状态，别照下表假设。
+SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享同一个 `.git`**：`sglang/qwen3_moe_w8a8/` 是**主 clone**（持有真正的 `.git` 目录），`sglang/qwen3.5_dense_w8a8/` 是从它派生的 worktree。**整个 `sglang/` 目录已被 `.gitignore` 忽略——主仓不再跟踪任何 sglang 子模块**（旧的 `sglang/qwen3_dense_w4a4` 子模块已于 2026-07-21 移除）。**需要修改哪个分支，就直接进入对应目录修改；不要在现有目录里用 `git checkout` 切分支。**
 
 | 路径 | 对应分支 | 用途 |
 | ---- | -------- | ---- |
-| `sglang/qwen3_dense_w4a4/` | `junlin_qwen3_dense_w4a4` | **主 clone + 主仓子模块**（其余 3 个 worktree 共享此处 `.git`）；LLM Dense W4A4 MXFP4，**PR #23795 已合并（2026-07-17）**，此目录作为 worktree 基础设施保留，不再是活跃开发分支。 |
-| `sglang/qwen3_moe_w8a8/` | `junlin_qwen3_moe_w8a8` | 派生 worktree（gitignore、纯本地）；LLM MoE W8A8 MXFP8（PR #30768）。 |
-| `sglang/qwen3_moe_w4a8/` | `junlin_qwen3_moe_w4a8` | 派生 worktree（gitignore、纯本地）；LLM MoE W4A8 MXFP（MXFP4 权重 + FP8 激活）。 |
-| `sglang/qwen3.5_dense_w8a8/` | `junlin_qwen3.5_dense_w8a8` | 派生 worktree（gitignore、纯本地）；Qwen3.5 Dense W8A8 MXFP8 实验/验证。 |
+| `sglang/qwen3_moe_w8a8/` | `junlin_qwen3_moe_w8a8` | **主 clone**（持有共享 `.git`）；LLM MoE W8A8 MXFP8（PR #30768）。 |
+| `sglang/qwen3.5_dense_w8a8/` | `junlin_qwen3.5_dense_w8a8` | 派生 worktree；Qwen3.5 Dense W8A8 MXFP8 实验/验证。 |
 
 开发约定：
-- 改 MoE W8A8：进入 `sglang/qwen3_moe_w8a8/`（NZ 已在其中）；改 MoE W4A8：进入 `sglang/qwen3_moe_w4a8/`；改 Qwen3.5 Dense W8A8：进入 `sglang/qwen3.5_dense_w8a8/`。`sglang/qwen3_dense_w4a4/`（Dense W4A4，PR #23795）已合并，日常开发不再进入，仅作为其余 3 个 worktree 的 `.git` 宿主保留。
-- 已合并的 Diffusion / Dense W8A8/W4A8/W4A4 代码都在 upstream/main（各 worktree rebase 后均含），无需单独 checkout。如需基于某已合并 PR 再开发，从主 clone（`sglang/qwen3_dense_w4a4`）用 `git worktree add` 新建独立目录，不要复用已有 worktree。
-- **`sglang/qwen3_dense_w4a4/` 是主仓子模块**（主仓跟踪其 commit 指针，见 `.gitmodules`）；`qwen3_moe_w8a8/`、`qwen3_moe_w4a8/` 和 `qwen3.5_dense_w8a8/` 被 `.gitignore` 忽略、主仓不跟踪。旧 `sglang/diffusion_w8a8` 子模块随 Diffusion 合并上游后已移除。
+- 改 MoE W8A8：进入 `sglang/qwen3_moe_w8a8/`（NZ 已在其中）；改 Qwen3.5 Dense W8A8：进入 `sglang/qwen3.5_dense_w8a8/`。
+- 已合并的 Diffusion / Dense W8A8/W4A8/W4A4 代码都在 upstream/main（两个目录 rebase 后均含），无需单独 checkout。要基于某个远程分支（如 `junlin_qwen3_moe_w4a8`）继续开发，从主 clone 用 `git worktree add sglang/<名字> <分支>` 新建独立目录，不要复用已有 worktree。
+- **动 worktree 前先跑 `git worktree list` 确认实际状态**，别照本表假设——本表曾因目录被手工删除而失真（2026-07-21 已订正）。注意 `git worktree list` 必须在 `sglang/` 下的目录里跑，在主仓跑只会列出主仓自己。旧 `sglang/diffusion_w8a8` 子模块随 Diffusion 合并上游后已移除。
 
 > **命名与陷阱**：本地分支名对齐 `junlin_<文件夹>`；fork（`TallMessiWu/sglang`）默认分支为 `junlin_diffusion_w8a8`。注意：跨 fork 重命名 **未合并** PR 的 head 分支会关闭对应 PR（已踩坑），已合并后改名才安全。
 
@@ -69,7 +69,7 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享�
 | LLM (Qwen3 & 3.5) Dense W4A8 (MXFP4/8) | 已合并 #23650          | ✅ 在线（`mxfp_w4a8`，单级真 W4A8/MXFP8 激活） | ✅ 离线（`W4A8_MXFP` → `ModelSlimMXFP4W4A8Scheme`，权重格式同 MXFP8：`float8_e4m3fn`） |
 | LLM (Qwen3 & 3.5) Dense W4A4 (MXFP4)   | 已合并 #23795          | ✅ 在线已实现（`mxfp4`，NPU 设备分发，**双级 MXFP4** `NPUDualLevelMXFP4LinearMethod`；A5 e2e 已验证，双级修复了单级 RTN 贪心死循环） | ✅ 离线已实现（`W4A4_MXFP4` → `ModelSlimMXFP4Scheme` → `NPUSingleLevelMXFP4OfflineLinearMethod`，单级真 MXFP4，权重 fp8 容器 `float8_e4m3fn`） |
 | LLM (Qwen3 & 3.5) MoE W8A8 (MXFP8)     | `junlin_qwen3_moe_w8a8`（#30768 WIP） | ✅ 在线已实现（`mxfp8`，`NPUMXFP8OnlineMoEMethod`（继承 `UnquantizedFusedMoEMethod`），A5 e2e 已验证） | ✅ 离线已实现（`W8A8_MXFP8` → `ModelSlimMXFP8MoEScheme` → `NPUMXFP8MoEMethod` 离线分支，A5 e2e 已验证） |
-| LLM (Qwen3 & 3.5) MoE W4A8 (MXFP4/8)   | `junlin_qwen3_moe_w4a8`（待创建 PR） | ✅ 在线（`mxfp_w4a8`，NPU 设备分发，`NPUMXFP4W4A8FusedMoEMethod`，A5 e2e 待验证） | ✅ 离线（`W4A8_MXFP` → `ModelSlimMXFP4W4A8MoEScheme` → `NPUMXFP4W4A8MoEMethod`，权重 packed fp4 uint8，A5 e2e 待验证） |
+| LLM (Qwen3 & 3.5) MoE W4A8 (MXFP4/8)   | `junlin_qwen3_moe_w4a8`（**仅存于 fork 远程**，`924fea916`；本地无目录） | ✅ 在线（`mxfp_w4a8`，NPU 设备分发，`NPUMXFP4W4A8FusedMoEMethod`，A5 e2e 待验证） | ✅ 离线（`W4A8_MXFP` → `ModelSlimMXFP4W4A8MoEScheme` → `NPUMXFP4W4A8MoEMethod`，权重 packed fp4 uint8，A5 e2e 待验证） |
 | LLM (Qwen3 & 3.5) MoE W4A4 (MXFP4)     | 待定                   | ❌ 待实现               | ❌ 待实现               |
 
 ## 关键代码路径
@@ -124,6 +124,7 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享�
 - `MindIE-SD/mindiesd/quantization/layer.py` — NPU 量化参考实现 (Diffusion)
 - `vllm-ascend/vllm_ascend/quantization/methods/w8a8_mxfp8.py` — NPU 量化参考实现 (LLM)
 - `msmodelslim/.../save/ascendv1.py` — MXFP4 权重导出格式
+- `sgl-kernel-npu/` — 上游 NPU kernel 仓（`sgl_kernel_npu`，RoPE / triton norm 等；2026-07-21 起为主仓子模块，跟踪 `main`）。缺 kernel 会导致 import 失败 → 静默 fallback HF Transformers → 乱码，见「已知陷阱」首条。
 - `docs/npu-api/DualLevelQuantBatchMatmul.md`、`docs/npu-api/DynamicDualLevelMxQuant.md` — Ascend 双级量化 kernel API 参考（原在根目录，现归入 `docs/npu-api/`）
 
 ## 注意事项
@@ -189,9 +190,9 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享�
 代码提交时必须使用gitmoji-commit这个skill。每次提交代码后，更新 AGENTS.md 或相关 agent 指导文档。
 
 ### 子模块 / worktree 提交流程
-1. **sglang 代码改动**：进入对应 worktree（见上「SGLang worktree 目录规则」）提交，并更新该 worktree 内的 agent 指导文档；推送到 fork（https://github.com/TallMessiWu/sglang）。`sglang/qwen3_dense_w4a4/` 是主 clone + 主仓子模块，**主仓跟踪其 commit 指针**——在该 worktree 提交推送后，回到主仓 `git add sglang/qwen3_dense_w4a4` 更新指针快照即可。`qwen3_moe_w8a8/` 和 `qwen3.5_dense_w8a8/` 被 gitignore、非子模块，主仓不跟踪。
+1. **sglang 代码改动**：进入对应 worktree（见上「SGLang worktree 目录规则」）提交，并更新该 worktree 内的 agent 指导文档；推送到 fork（https://github.com/TallMessiWu/sglang）。**`sglang/` 整个目录被 gitignore、主仓不跟踪任何 sglang 子模块**，所以推完 fork 就结束，主仓侧不需要更新指针快照。
 2. 回到主仓，更新主仓 AGENTS.md（记录相关变更摘要）。
-3. **参考子模块（MindIE-SD / msmodelslim / vllm-ascend）**：`.gitmodules` 已为各自配 `branch=`（dev / master / main）。需要同步上游时在主仓跑 `git submodule update --remote <name>`，再提交主仓记录新指针快照——git 子模块始终记录具体 commit，`branch=` 只是声明跟踪哪条上游分支、供 `--remote` 使用。
+3. **参考子模块（MindIE-SD / msmodelslim / vllm-ascend / sgl-kernel-npu）**：`.gitmodules` 已为各自配 `branch=`（dev / master / main / main）。需要同步上游时在主仓跑 `git submodule update --remote <name>`，再提交主仓记录新指针快照——git 子模块始终记录具体 commit，`branch=` 只是声明跟踪哪条上游分支、供 `--remote` 使用。
 
 ## Agent Team 协作模式（本分支：**禁用**）
 

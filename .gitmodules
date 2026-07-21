@@ -6,11 +6,11 @@
 	path = msmodelslim
 	url = https://gitcode.com/Ascend/msmodelslim.git
 	branch = master
-[submodule "sglang/qwen3_dense_w4a4"]
-	path = sglang/qwen3_dense_w4a4
-	url = https://github.com/TallMessiWu/sglang.git
-	branch = junlin_qwen3_dense_w4a4
 [submodule "vllm-ascend"]
 	path = vllm-ascend
 	url = https://github.com/vllm-project/vllm-ascend.git
+	branch = main
+[submodule "sgl-kernel-npu"]
+	path = sgl-kernel-npu
+	url = https://github.com/sgl-project/sgl-kernel-npu.git
 	branch = main

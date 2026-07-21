@@ -13,10 +13,11 @@ This repository (`sglang_quant_eval`) researches and implements **MXFP8 / MXFP4*
 
 ## 📁 Repository Structure
 
-- `sglang/` — Local `git worktree` container for the SGLang fork, checked out across **3 active branches** sharing one `.git`. `qwen3_dense_w4a4/` is the main clone **and a submodule** (clickable on GitHub → fork's `junlin_qwen3_dense_w4a4`); `qwen3_moe_w8a8/` and `qwen3.5_dense_w8a8/` are derived worktrees (local-only, gitignored). Merged features (Diffusion MXFP8/MXFP4, Dense W8A8/W4A8) already live in `upstream/main`. See `AGENTS.md` for the worktree↔branch map and merged-PR list.
+- `sglang/` — Local `git worktree` container for the SGLang fork, checked out across **2 active branches** sharing one `.git`. `qwen3_moe_w8a8/` is the main clone; `qwen3.5_dense_w8a8/` is a derived worktree. The whole directory is **local-only and gitignored** — no SGLang submodule is tracked here anymore. Merged features (Diffusion MXFP8/MXFP4, Dense W8A8/W4A8/W4A4) already live in `upstream/main`. See `AGENTS.md` for the worktree↔branch map and merged-PR list.
 - `MindIE-SD/` — Huawei's MindIE-SD source (submodule, tracks `dev`); primary reference for Ascend NPU MXFP8/FP8 operations on the **Diffusion** side.
 - `msmodelslim/` — Huawei's msmodelslim source (submodule, tracks `master`); reference for the **offline** MXFP4/MXFP8 weight export format.
 - `vllm-ascend/` — vLLM Ascend backend (submodule, tracks `main`); primary reference for **LLM**-side MXFP adaptation.
+- `sgl-kernel-npu/` — Upstream NPU kernel repo (submodule, tracks `main`); supplies `sgl_kernel_npu` (RoPE, triton norm, …) that the quantized paths import at runtime.
 - `diffusion/` & `llm/` — Run scripts, quant-description JSONs, and PR notes for Diffusion (Wan2.2) and LLM (Qwen3/3.5) inference & quantization.
 - `docs/` — Project docs: `branches.md` (branch/PR status), `known-pitfalls.md`, `sgl-kernel-npu-build.md`, `npu-api/` (Ascend kernel API references — `DualLevelQuantBatchMatmul`, `DynamicDualLevelMxQuant`), and `agents/` (agent workflow docs).
 - `AGENTS.md` — AI-assistant instructions & project context; the **single source of truth** (`CLAUDE.md` is a symlink to it).

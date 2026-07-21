@@ -13,10 +13,11 @@
 
 ## 📁 仓库结构
 
-- `sglang/` — SGLang fork 的本地 `git worktree` 容器，将 **3 个活跃分支** 同时 checkout、共享同一个 `.git`。`qwen3_dense_w4a4/` 是主 clone **且是子模块** (GitHub 上可点击跳转至 fork 的 `junlin_qwen3_dense_w4a4`)；`qwen3_moe_w8a8/` 和 `qwen3.5_dense_w8a8/` 是派生 worktree (纯本地、gitignore)。已合并功能 (Diffusion MXFP8/MXFP4、Dense W8A8/W4A8) 都在 `upstream/main`。worktree 与分支的对应关系、已合并 PR 清单见 `AGENTS.md`。
+- `sglang/` — SGLang fork 的本地 `git worktree` 容器，将 **2 个活跃分支** 同时 checkout、共享同一个 `.git`。`qwen3_moe_w8a8/` 是主 clone，`qwen3.5_dense_w8a8/` 是派生 worktree。整个目录**纯本地、gitignore**——主仓不再跟踪任何 sglang 子模块。已合并功能 (Diffusion MXFP8/MXFP4、Dense W8A8/W4A8/W4A4) 都在 `upstream/main`。worktree 与分支的对应关系、已合并 PR 清单见 `AGENTS.md`。
 - `MindIE-SD/` — 华为 MindIE-SD 源码 (子模块，跟踪 `dev`)；**Diffusion** 侧 Ascend NPU MXFP8/FP8 操作的主要参考实现。
 - `msmodelslim/` — 华为 msmodelslim 源码 (子模块，跟踪 `master`)；**离线** MXFP4/MXFP8 权重导出格式的参考。
 - `vllm-ascend/` — vLLM Ascend 后端 (子模块，跟踪 `main`)；**LLM** 侧 MXFP 量化实现的主要参考标准。
+- `sgl-kernel-npu/` — 上游 NPU kernel 仓 (子模块，跟踪 `main`)；提供量化路径运行时 import 的 `sgl_kernel_npu` (RoPE、triton norm 等)。
 - `diffusion/` & `llm/` — Diffusion (Wan2.2) 与 LLM (Qwen3/3.5) 推理及量化的运行脚本、量化描述 JSON 和 PR 说明。
 - `docs/` — 项目文档：`branches.md` (分支/PR 状态)、`known-pitfalls.md`、`sgl-kernel-npu-build.md`、`npu-api/` (Ascend kernel API 参考——`DualLevelQuantBatchMatmul`、`DynamicDualLevelMxQuant`)、`agents/` (agent 工作流文档)。
 - `AGENTS.md` — AI 助手指令及项目上下文；**唯一内容源** (`CLAUDE.md` 为指向它的软链接)。

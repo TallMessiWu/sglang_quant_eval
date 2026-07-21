@@ -2,7 +2,7 @@
 
 > 本文档记录活跃分支的开发历史、commit hash、A5 验证节点、调试过程。
 > 已合并 PR 的代码都在 upstream/main，概览见 [AGENTS.md](../AGENTS.md#已合并-pr代码已在-upstreammain)，此处不再展开。
-> `junlin_qwen3_moe_w4a8` 尚无独立小节，现状见根 [AGENTS.md](../AGENTS.md#实现进度) 的实现进度表。
+> `junlin_qwen3_moe_w4a8` 尚无独立小节，现状见根 [AGENTS.md](../AGENTS.md#实现进度) 的实现进度表。**2026-07-21 起该分支只存在于 fork 远程（`924fea916`），本地无目录**，需要时用 `git worktree add` 从主 clone 拉回。
 
 ## 已合并 PR（速查）
 
@@ -16,13 +16,13 @@
 | [#23795](https://github.com/sgl-project/sglang/pull/23795) | Qwen3 Dense W4A4 MXFP4（在线双级 `NPUDualLevelMXFP4LinearMethod` + 离线单级 `ModelSlimMXFP4Scheme`；双级修复了单级 RTN 贪心死循环，跑分 GSM8K 在线 93.76/离线 93.48 vs BF16 95.32） | `junlin_qwen3_dense_w4a4` | 2026-07-17 | 见备份表 |
 
 > W4A8 曾从 PR 中摘除越界的 INT4 `W4A8_DYNAMIC` 离线 scheme（`ModelSlimW4A8Int8` + `NPUW4A8DynamicLinearMethod`），完整存于备份分支 `backup-w4a8-with-int4-dynamic-20260622`；日后要还原直接 cherry-pick/checkout。
-> W4A4 rebase 前的旧历史（diff 重含已合并 W8A8/W4A8 代码）存于 `backup-w4a4-pre-rebase-20260707`。**`sglang/qwen3_dense_w4a4/` 目录本身不删**——它是 worktree 主 clone + 主仓子模块，其余 3 个 worktree 的 `.git` 都挂在它下面。
+> W4A4 rebase 前的旧历史（diff 重含已合并 W8A8/W4A8 代码）存于 `backup-w4a4-pre-rebase-20260707`。**`sglang/qwen3_dense_w4a4/` 目录已于 2026-07-21 删除**，主仓子模块条目同步移除；主 clone 角色已转由 `sglang/qwen3_moe_w8a8/` 承担。分支仍在 fork 远程（`ac07c7f9f`），代码也已在 upstream/main。
 
 ---
 
 ## `junlin_qwen3_moe_w8a8` — LLM MoE W8A8 (MXFP8) 🚧 PR [#30768](https://github.com/sgl-project/sglang/pull/30768) WIP OPEN
 
-LLM 侧，Qwen3/3.5 MoE W8A8 MXFP8（FusedMoE，`--quantization mxfp8`）；EPMoE 待实现。此目录（`sglang/qwen3_moe_w8a8/`）是从主 clone `sglang/qwen3_dense_w4a4/` 派生的 worktree（gitignore、纯本地，主仓不跟踪）。当前 HEAD `e22b7bef8`（2026-07-21 merge `upstream/main` @ `c0ed009f5`，178 commit）。
+LLM 侧，Qwen3/3.5 MoE W8A8 MXFP8（FusedMoE，`--quantization mxfp8`）；EPMoE 待实现。此目录（`sglang/qwen3_moe_w8a8/`）**现为主 clone**（持有共享 `.git`，2026-07-21 起；gitignore、纯本地，主仓不跟踪）。当前 HEAD `e22b7bef8`（2026-07-21 merge `upstream/main` @ `c0ed009f5`，178 commit）。
 
 - 在线：`NPUMXFP8OnlineMoEMethod`（`online_moe_methods.py`，继承 `UnquantizedFusedMoEMethod`，只 override `create_moe_runner`），A5 e2e 已验证。
 - 离线：`W8A8_MXFP8` → `ModelSlimMXFP8MoEScheme` → `NPUMXFP8MoEMethod` 离线分支，A5 e2e 已验证。
@@ -71,7 +71,7 @@ PR 出现冲突后合并上游，选 merge 而非 rebase——分支历史已有
 
 ## `junlin_qwen3.5_dense_w8a8` — Qwen3.5 Dense W8A8 (MXFP8) 🚧
 
-Qwen3.5 Dense W8A8 MXFP8 实验/验证分支。此目录（`sglang/qwen3.5_dense_w8a8/`）是从主 clone `sglang/qwen3_dense_w4a4/` 派生的 worktree（gitignore、纯本地，主仓不跟踪）。
+Qwen3.5 Dense W8A8 MXFP8 实验/验证分支。此目录（`sglang/qwen3.5_dense_w8a8/`）是从主 clone `sglang/qwen3_moe_w8a8/` 派生的 worktree（gitignore、纯本地，主仓不跟踪）。
 
 - **2026-07-21 rebase 到 `junlin_qwen3_moe_w8a8`（`e22b7bef8`）**，前进 385 个 commit，无冲突。基线 = upstream/main（`c0ed009f5`）+ MoE W8A8 PR #30768 全部实现，故本分支现在**同时含未合并的 MoE W8A8 代码**。分支自身只有 2 个 commit（GemmaRMSNorm A5 修复），HEAD `3ee602835`，已 force-push 到 fork。
 - 原基线 upstream/main（`4cec9ef9d`，2026-07-13），已含全部已合并 MXFP8/W8A8/W4A8 量化代码。

@@ -61,14 +61,19 @@ ACL_FORMAT_FRACTAL_NZ = 29
 DEVICE = f"npu:{torch.npu.current_device()}"
 DTYPE = torch.bfloat16
 
-# Qwen3-30B-A3B-ish shapes, shrunk but NZ-alignable (fp8 needs k%16, n%32).
-H = 2048  # hidden_size
-I = 768  # moe_intermediate_size
-E = 4  # experts
-NUM_TOKENS = 512  # large enough that the matmuls, not the launch, dominate
-TOP_K = 2
+# (label, hidden, moe_intermediate, experts, tokens, top_k). Run 2 measured only
+# the first row and saw contiguous beat the strided view by 52%; with 4 experts
+# and top_k 2 each group is huge and long-strided, which is exactly the regime
+# that flatters contiguity, so the real Qwen3-30B-A3B expert count has to
+# confirm it before the number means anything. K dims stay divisible by 64 so
+# the block count K/32 is even (pair-split needs it).
+SHAPES = [
+    ("micro   E=4   tokens=512 ", 2048, 768, 4, 512, 2),
+    ("decode  E=128 tokens=32  ", 2048, 768, 128, 32, 8),
+    ("prefill E=128 tokens=2048", 2048, 768, 128, 2048, 8),
+]
 
-WARMUP, ITERS = 5, 30
+WARMUP, ITERS, ROUNDS = 10, 50, 3
 
 torch.manual_seed(0)
 
@@ -112,15 +117,15 @@ def _to_nz(w):
 # ------------------------------------------------------------------- pipeline
 
 
-def _init_routing(hidden, topk_ids, quant_mode):
+def _init_routing(hidden, topk_ids, quant_mode, *, experts, tokens, top_k):
     return torch.ops.npu.npu_moe_init_routing_v2(
         hidden,
         topk_ids,
-        active_num=NUM_TOKENS * TOP_K,
-        expert_num=E,
+        active_num=tokens * top_k,
+        expert_num=experts,
         expert_tokens_num_type=1,  # COUNT
         expert_tokens_num_flag=True,
-        active_expert_range=[0, E],
+        active_expert_range=[0, experts],
         quant_mode=quant_mode,
     )
 
@@ -159,23 +164,23 @@ def _run_moe(qx, x_scale, expert_tokens, w13, w13_scale, w2, w2_scale):
 
 
 def _bench(fn):
+    """Min over ROUNDS of the mean over ITERS -- min rejects scheduler noise."""
     for _ in range(WARMUP):
         fn()
     torch.npu.synchronize()
-    t0 = time.perf_counter()
-    for _ in range(ITERS):
-        fn()
-    torch.npu.synchronize()
-    return (time.perf_counter() - t0) / ITERS * 1e3  # ms
+    best = float("inf")
+    for _ in range(ROUNDS):
+        t0 = time.perf_counter()
+        for _ in range(ITERS):
+            fn()
+        torch.npu.synchronize()
+        best = min(best, (time.perf_counter() - t0) / ITERS * 1e3)  # ms
+    return best
 
 
-def main():
+def run_shape(label, H, I, E, NUM_TOKENS, TOP_K):
     print("=" * 100)
-    print("ENV")
-    print(f"    torch     = {torch.__version__}")
-    print(f"    torch_npu = {getattr(torch_npu, '__version__', '?')}")
-    print(f"    soc       = {torch_npu.npu.get_device_name()}")
-    print(f"    shapes: H={H} I={I} E={E} tokens={NUM_TOKENS} top_k={TOP_K}")
+    print(f"SHAPE {label}  H={H} I={I} E={E} tokens={NUM_TOKENS} top_k={TOP_K}")
 
     w13_bf = torch.randn(E, 2 * I, H, device=DEVICE, dtype=DTYPE) * 0.05
     w2_bf = torch.randn(E, H, I, device=DEVICE, dtype=DTYPE) * 0.05
@@ -186,9 +191,12 @@ def main():
     topk_ids = torch.randint(
         0, E, (NUM_TOKENS, TOP_K), device=DEVICE, dtype=torch.int32
     )
+    routing = dict(experts=E, tokens=NUM_TOKENS, top_k=TOP_K)
 
     # bf16 per-expert reference over the same permutation.
-    ref_states, _, ref_counts, _ = _init_routing(hidden, topk_ids, quant_mode=-1)
+    ref_states, _, ref_counts, _ = _init_routing(
+        hidden, topk_ids, quant_mode=-1, **routing
+    )
     ref_counts = ref_counts.to(torch.int64)
     parts, off = [], 0
     for e in range(E):
@@ -200,7 +208,9 @@ def main():
         off += n
     y_ref = torch.cat(parts, 0)
 
-    qx, _, expert_tokens, x_scale_raw = _init_routing(hidden, topk_ids, quant_mode=3)
+    qx, _, expert_tokens, x_scale_raw = _init_routing(
+        hidden, topk_ids, quant_mode=3, **routing
+    )
     expert_tokens = expert_tokens.to(torch.int64)
     x_scale = _normalize_scale(x_scale_raw)
 
@@ -233,10 +243,8 @@ def main():
         ),
     }
 
-    print("=" * 100)
-    print("1+2+3) CheckMXTranspose / correctness / latency per (weight, scale) pair")
     baseline = None
-    for label, ((w13, w2), (sc13, sc2)) in variants.items():
+    for vlabel, ((w13, w2), (sc13, sc2)) in variants.items():
         try:
             y = _run_moe(qx, x_scale, expert_tokens, w13, sc13, w2, sc2)
             cos = _cos(y_ref, y)
@@ -251,17 +259,33 @@ def main():
             delta = (baseline - ms) / baseline * 100
             verdict = "PASS" if ok else "FAIL (numerically wrong -- unusable)"
             print(
-                f"    {label}: fmt={torch_npu.get_npu_format(w13)!s:<12} "
+                f"    {vlabel}: fmt={torch_npu.get_npu_format(w13)!s:<12} "
                 f"cos={cos:.5f} {verdict:<38} {ms:7.3f} ms ({delta:+5.1f}% vs A)"
             )
         except Exception as exc:  # noqa: BLE001
-            print(f"    {label}: RAISED {type(exc).__name__}: {exc}")
+            print(f"    {vlabel}: RAISED {type(exc).__name__}: {exc}")
+
+
+def main():
+    print("=" * 100)
+    print("ENV")
+    print(f"    torch     = {torch.__version__}")
+    print(f"    torch_npu = {getattr(torch_npu, '__version__', '?')}")
+    print(f"    soc       = {torch_npu.npu.get_device_name()}")
+    print(f"    bench: warmup={WARMUP} iters={ITERS} rounds={ROUNDS} (min of means)")
+
+    for shape in SHAPES:
+        try:
+            run_shape(*shape)
+        except Exception as exc:  # noqa: BLE001
+            print(f"    SHAPE {shape[0]} RAISED {type(exc).__name__}: {exc}")
 
     print("=" * 100)
-    print("A NZ variant is worth landing only if it PASSes AND beats A by more")
-    print("than run-to-run noise. Watch for a variant that passes CheckMXTranspose")
-    print("but scores a low cos -- that is NZ silently misreading the block scales,")
-    print("the same failure mode as the .contiguous() pitfall, and is NOT safe.")
+    print("Run 2 (micro, E=4) said the win is contiguity, not NZ: B and C tie at")
+    print("+52% while D -- NZ but still transposed -- sits at A's latency. If that")
+    print("holds at E=128 the fix is to drop the strided views, and NZ is a no-op")
+    print("worth reporting as such. If it collapses at E=128, the micro shape was")
+    print("the artefact and production layout stays as is.")
 
 
 if __name__ == "__main__":

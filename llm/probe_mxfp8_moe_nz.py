@@ -68,12 +68,11 @@ DTYPE = torch.bfloat16
 # confirm it before the number means anything. K dims stay divisible by 64 so
 # the block count K/32 is even (pair-split needs it).
 SHAPES = [
-    ("micro   E=4   tokens=512 ", 2048, 768, 4, 512, 2),
     ("decode  E=128 tokens=32  ", 2048, 768, 128, 32, 8),
     ("prefill E=128 tokens=2048", 2048, 768, 128, 2048, 8),
 ]
 
-WARMUP, ITERS, ROUNDS = 10, 50, 3
+WARMUP, ITERS, ROUNDS = 20, 100, 10
 
 torch.manual_seed(0)
 
@@ -164,18 +163,25 @@ def _run_moe(qx, x_scale, expert_tokens, w13, w13_scale, w2, w2_scale):
 
 
 def _bench(fn):
-    """Min over ROUNDS of the mean over ITERS -- min rejects scheduler noise."""
+    """Return (best, worst) round mean in ms.
+
+    Run 3 left the NZ candidate at +1.9%/+3.5%, the same order as the -5.9% a
+    losing variant scored on another shape -- so a single number cannot say
+    whether that is signal. Reporting the spread across rounds makes the noise
+    floor visible: a gap smaller than a variant's own best-to-worst spread is
+    not a result.
+    """
     for _ in range(WARMUP):
         fn()
     torch.npu.synchronize()
-    best = float("inf")
+    rounds = []
     for _ in range(ROUNDS):
         t0 = time.perf_counter()
         for _ in range(ITERS):
             fn()
         torch.npu.synchronize()
-        best = min(best, (time.perf_counter() - t0) / ITERS * 1e3)  # ms
-    return best
+        rounds.append((time.perf_counter() - t0) / ITERS * 1e3)  # ms
+    return min(rounds), max(rounds)
 
 
 def run_shape(label, H, I, E, NUM_TOKENS, TOP_K):
@@ -249,7 +255,7 @@ def run_shape(label, H, I, E, NUM_TOKENS, TOP_K):
             y = _run_moe(qx, x_scale, expert_tokens, w13, sc13, w2, sc2)
             cos = _cos(y_ref, y)
             ok = cos > 0.97
-            ms = _bench(
+            ms, worst = _bench(
                 lambda w13=w13, w2=w2, sc13=sc13, sc2=sc2: _run_moe(
                     qx, x_scale, expert_tokens, w13, sc13, w2, sc2
                 )
@@ -257,10 +263,12 @@ def run_shape(label, H, I, E, NUM_TOKENS, TOP_K):
             if baseline is None:
                 baseline = ms
             delta = (baseline - ms) / baseline * 100
+            spread = (worst - ms) / ms * 100
             verdict = "PASS" if ok else "FAIL (numerically wrong -- unusable)"
             print(
                 f"    {vlabel}: fmt={torch_npu.get_npu_format(w13)!s:<12} "
-                f"cos={cos:.5f} {verdict:<38} {ms:7.3f} ms ({delta:+5.1f}% vs A)"
+                f"cos={cos:.5f} {verdict:<10} {ms:7.3f} ms "
+                f"({delta:+5.1f}% vs A, own spread {spread:4.1f}%)"
             )
         except Exception as exc:  # noqa: BLE001
             print(f"    {vlabel}: RAISED {type(exc).__name__}: {exc}")
@@ -281,11 +289,13 @@ def main():
             print(f"    SHAPE {shape[0]} RAISED {type(exc).__name__}: {exc}")
 
     print("=" * 100)
-    print("Run 2 (micro, E=4) said the win is contiguity, not NZ: B and C tie at")
-    print("+52% while D -- NZ but still transposed -- sits at A's latency. If that")
-    print("holds at E=128 the fix is to drop the strided views, and NZ is a no-op")
-    print("worth reporting as such. If it collapses at E=128, the micro shape was")
-    print("the artefact and production layout stays as is.")
+    print("Run 3 killed the micro shape: at E=4 contiguity looked like a +58% win,")
+    print("at the real 128 experts the same variant turns NEGATIVE (-5.9% decode).")
+    print("So the strided views production uses are fine, and NZ shows nothing like")
+    print("the ~10% the int path saw -- the best case, D, was +1.9%/+3.5%.")
+    print("The only question left is whether D clears the noise floor: compare each")
+    print("delta against that variant's own best-to-worst spread. If it does not,")
+    print("the answer to the review is simply 'no measurable gain on A5'.")
 
 
 if __name__ == "__main__":

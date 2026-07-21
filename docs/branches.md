@@ -73,7 +73,8 @@ PR 出现冲突后合并上游，选 merge 而非 rebase——分支历史已有
 
 Qwen3.5 Dense W8A8 MXFP8 实验/验证分支。此目录（`sglang/qwen3.5_dense_w8a8/`）是从主 clone `sglang/qwen3_dense_w4a4/` 派生的 worktree（gitignore、纯本地，主仓不跟踪）。
 
-- 基于 upstream/main（`4cec9ef9d`，2026-07-13），已含全部已合并 MXFP8/W8A8/W4A8 量化代码。
+- **2026-07-21 rebase 到 `junlin_qwen3_moe_w8a8`（`e22b7bef8`）**，前进 385 个 commit，无冲突。基线 = upstream/main（`c0ed009f5`）+ MoE W8A8 PR #30768 全部实现，故本分支现在**同时含未合并的 MoE W8A8 代码**。分支自身只有 2 个 commit（GemmaRMSNorm A5 修复），HEAD `3ee602835`，已 force-push 到 fork。
+- 原基线 upstream/main（`4cec9ef9d`，2026-07-13），已含全部已合并 MXFP8/W8A8/W4A8 量化代码。
 - Qwen3.5 与 Qwen3 在 SGLang 内部共用底层 Linear/MoE 算子，故量化实现代码完全一致；此分支仅需验证 Qwen3.5-8B 模型在 A5 上的在线 + 离线 W8A8 效果、跑分。
 - 启动脚本：`llm/qwen3.5_dense_bf16.sh`（BF16 基线）。
 

@@ -61,7 +61,7 @@ MoE 在线量化需自实现：online quant 参考 dense `NPUMXFP8LinearMethod`�
 
 ## W4A8_MXFP checkpoint 权重格式
 
-`qwen3-8b-dense-w4a8` 检查点的权重存储为 `float8_e4m3fn`（非 packed FP4 uint8），shape 为 `[out, in]`，与 MXFP8 完全相同。这是 msmodelslim 旧版本导出格式（新版 `ascendv1.py` 会 `pack_fp4_to_uint8` → `uint8` shape `[out, in//2]`）。因此 `ModelSlimMXFP4W4A8Scheme` 的 `create_weights` 与 `ModelSlimMXFP8Scheme` 实现一致。
+当前 msmodelslim `ascendv1.py` 使用 `pack_fp4_to_uint8` 导出 W4A8_MXFP 权重，物理格式为 packed FP4 `uint8 [out,in//2]`；SGLang `ModelSlimMXFP4W4A8Scheme.create_weights` 必须使用相同 shape/dtype，post-load 只做 FRACTAL_NZ layout 转换和 transpose。旧 `qwen3-8b-dense-w4a8` checkpoint 可能仍是早期 `float8_e4m3fn [out,in]` 格式，它不代表当前导出契约，需重新导出或转换后再由当前 scheme 加载。
 
 ---
 

@@ -69,7 +69,7 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享�
 | Diffusion MXFP8                        | 已合并 #20922          | ✅                      | ✅                      |
 | Diffusion MXFP4                        | 已合并 #22338          | ✅                      | ✅                      |
 | LLM (Qwen3 & 3.5) Dense W8A8 (MXFP8)   | 已合并 #22352 / #28505 | ✅ (已对齐 vllm-ascend) | ✅ (已对齐 vllm-ascend) |
-| LLM (Qwen3 & 3.5) Dense W4A8 (MXFP4/8) | 已合并 #23650          | ✅ 在线（`mxfp_w4a8`，单级真 W4A8/MXFP8 激活） | ✅ 离线（`W4A8_MXFP` → `ModelSlimMXFP4W4A8Scheme`，权重格式同 MXFP8：`float8_e4m3fn`） |
+| LLM (Qwen3 & 3.5) Dense W4A8 (MXFP4/8) | 已合并 #23650          | ✅ 在线（`mxfp_w4a8`，单级真 W4A8/MXFP8 激活） | ✅ 离线（`W4A8_MXFP` → `ModelSlimMXFP4W4A8Scheme`，权重为 packed FP4：`uint8 [out,in/2]`） |
 | LLM (Qwen3 & 3.5) Dense W4A4 (MXFP4)   | 已合并 #23795；packed 修复进行中 | ✅ 在线已实现（`mxfp4`，NPU 设备分发，**双级 MXFP4** `NPUDualLevelMXFP4LinearMethod`；A5 e2e 已验证，双级修复了单级 RTN 贪心死循环） | 🚧 原实现兼容旧版 `float8_e4m3fn [out,in]` checkpoint；当前 ModelSlim 导出为 packed `uint8 [out,in/2]`。`codex/fix-modelslim-mxfp4-packed-weight` 已修 placeholder 与 post-load 二次打包，A5 e2e 待验证。 |
 | LLM (Qwen3 & 3.5) MoE W8A8 (MXFP8)     | `junlin_qwen3_moe_w8a8`（#30768 WIP） | ✅ 在线已实现（`mxfp8`，`NPUMXFP8OnlineMoEMethod`（继承 `UnquantizedFusedMoEMethod`），A5 e2e 已验证） | ✅ 离线已实现（`W8A8_MXFP8` → `ModelSlimMXFP8MoEScheme` → `NPUMXFP8MoEMethod` 离线分支，A5 e2e 已验证） |
 | LLM (Qwen3 & 3.5) MoE W4A8 (MXFP4/8)   | `junlin_qwen3_moe_w4a8`（**仅存于 fork 远程**，`924fea916`；本地无目录） | ✅ 在线（`mxfp_w4a8`，NPU 设备分发，`NPUMXFP4W4A8FusedMoEMethod`，A5 e2e 待验证） | ✅ 离线（`W4A8_MXFP` → `ModelSlimMXFP4W4A8MoEScheme` → `NPUMXFP4W4A8MoEMethod`，权重 packed fp4 uint8，A5 e2e 待验证） |
@@ -101,7 +101,7 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享�
 | `modelslim.py`                      | `ModelSlimConfig`：`get_quant_method` 分发、注册       |
 | `schemes/modelslim_mxfp8.py`        | ModelSlim MXFP8 离线 scheme（W8A8）                    |
 | `schemes/modelslim_mxfp4.py`        | ModelSlim W4A4_MXFP4 离线 scheme（packed `uint8 [out,in/2]`；激活 MXFP4） |
-| `schemes/modelslim_mxfp4_w4a8.py`  | ModelSlim W4A8_MXFP 离线 scheme（权重 `float8_e4m3fn`，激活 FP8 动态量化） |
+| `schemes/modelslim_mxfp4_w4a8.py`  | ModelSlim W4A8_MXFP 离线 scheme（packed FP4 权重 `uint8 [out,in/2]`，激活 FP8 动态量化） |
 | `schemes/modelslim_w8a8_int8.py`    | ModelSlim W8A8 Int8 离线 scheme                        |
 
 在线量化：
@@ -147,7 +147,7 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享�
 - **transpose 不加 `.contiguous()`**：`npu_grouped_matmul` 靠 strides 感知 block-scale 布局，`.contiguous()` 物理重排 → 乱码。dense 路径 `.contiguous()` 则 OK。
 - **vllm-ascend MoE 量化均为 offline**：无 BF16→FP 在线转换，MoE 在线量化需自实现。
 - **FusedMoE vs EPMoE dispatch_output 类型不同**：当前仅支持 `StandardDispatchOutput`（TP-only）。
-- **W4A8_MXFP 权重格式同 MXFP8**：`float8_e4m3fn`（非 packed uint8），`create_weights` 实现一致。
+- **W4A8_MXFP 权重是 packed FP4**：当前 ModelSlim `ascendv1.py` 用 `pack_fp4_to_uint8` 导出 `uint8 [out,in/2]`；`ModelSlimMXFP4W4A8Scheme.create_weights` 必须按相同物理 shape/dtype 注册，post-load 只做 FRACTAL_NZ layout 转换和 transpose，不能再次打包。
 - **离线 W4A8 A5 两报错**：① prefill NZ format 错 → 升级 torch_npu 到 `2.10.0.post1` 解决；② decode ATB 段错误 → 与量化无关，别加 `--disable-cuda-graph`（或用 `ASCEND_USE_FIA=1`）。
 - **A5 默认 ATB 注意力算子崩溃（warmup 固定挂，与量化无关）**：`--device npu` 在 A5(Ascend 950) 上默认 prefill 走 ATB `SelfAttentionOperation`（`_npu_flash_attention_qlens`，`ascend_backend.py:1472`）；服务起来后 SGLang 自动 warmup 请求（一次 prefill）触发 `RuntimeError: SelfAttentionOperation CreateOperation failed!`。`CreateOperation` 是 ATB 按 SoC 能力表构图/校验的步骤，A5 不支持该算子（decode 默认 `_npu_paged_attention` 同源）；A2/A3(910B/C) 支持故不受影响——**崩溃是 A5 特有**。修复：`export ASCEND_USE_FIA=1`，让 prefill+decode 都走 A5 原生 FIA 算子 `npu_fused_infer_attention_score`（`forward_extend` 走 `use_fia` 分支，永不到达 `_npu_flash_attention_qlens`）。`llm/` 全部 serve 脚本已默认带此 env。**别**用注释掉 `qk_head_dim<=128 and ...` 条件强制 `False`→native SDPA 的脏改（慢、无融合 kernel、且只补 prefill）。与上条 decode ATB 段错误同根。
 - **在线 W4A8 FP4 dtype 来源**：fp4 dtype 参数必须来自 `torch_npu.float4_e2m1fn_x2`（int 296），**不能**用 `torch.float4_e2m1fn_x2`（torch dtype 对象会被 op 拒绝）。`_get_float4_e2m1fn_x2_dtype()` 在 NPU 时优先 `getattr(torch_npu, ...)`。

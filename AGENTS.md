@@ -9,12 +9,13 @@
 
 ## 分支规则
 
-Diffusion、Dense W8A8/W4A8 及 **Dense W4A4（PR #23795，2026-07-17 合入）** 侧功能均已合入上游 `sgl-project/sglang`（见下「已合并 PR」）。后续分支都基于 upstream/main rebase，**已含全部已合并代码**，故本地只保留 **2 个活跃工作目录**：
+Diffusion、Dense W8A8/W4A8 及 **Dense W4A4（PR #23795，2026-07-17 合入）** 侧功能均已合入上游 `sgl-project/sglang`（见下「已合并 PR」）。后续分支都基于 upstream/main rebase，**已含全部已合并代码**。当前本地有 **3 个活跃工作目录**：
 
 | 分支 | 目录 | PR | 状态 |
 | ---- | ---- | -- | ---- |
 | `junlin_qwen3_moe_w8a8` | `sglang/qwen3_moe_w8a8/`（**主 clone**） | [#30768](https://github.com/sgl-project/sglang/pull/30768) | WIP OPEN，LLM MoE W8A8 MXFP8，在线+离线 A5 已 e2e 验证；OrangeRedeng 评审 **8 条全部落地**（⑧ NZ 已合入并回复，2026-07-21）。PR body 性能/精度数据已更新为 NZ 版。**2026-07-21 merge upstream/main（178 commit，`c0ed009f5`）解冲突，PR 已回到 MERGEABLE——⚠️ merge 后 A5 e2e 尚未重跑**。HEAD `e22b7bef8` |
 | `junlin_qwen3.5_dense_w8a8` | `sglang/qwen3.5_dense_w8a8/`（派生 worktree） | 待创建 | 🚧 WIP，Qwen3.5 Dense W8A8 MXFP8 实验/验证（代码已合入 upstream/main，此分支用于 A5 在线+离线验证、跑分、模型适配）。**2026-07-21 rebase 到 `junlin_qwen3_moe_w8a8`（`e22b7bef8`）**，故也含未合并的 MoE W8A8 PR #30768 代码。HEAD `3ee602835` |
+| `codex/fix-modelslim-mxfp4-packed-weight` | `sglang/fix_modelslim_mxfp4_packed/`（派生 worktree） | 待创建 | 🚧 基于 `upstream/main` `93cb9a548` 修复 Dense W4A4 offline ModelSlim 新版 packed checkpoint：`uint8 [out,in/2]` placeholder，移除 post-load 二次打包；CPU 回归测试已补，A5 e2e 待验证。HEAD `d875f6684`。 |
 
 ### 只存在于 fork 远程的分支（本地无目录）
 
@@ -40,15 +41,17 @@ Diffusion、Dense W8A8/W4A8 及 **Dense W4A4（PR #23795，2026-07-17 合入）*
 
 ## SGLang worktree 目录规则
 
-SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享同一个 `.git`**：`sglang/qwen3_moe_w8a8/` 是**主 clone**（持有真正的 `.git` 目录），`sglang/qwen3.5_dense_w8a8/` 是从它派生的 worktree。**整个 `sglang/` 目录已被 `.gitignore` 忽略——主仓不再跟踪任何 sglang 子模块**（旧的 `sglang/qwen3_dense_w4a4` 子模块已于 2026-07-21 移除）。**需要修改哪个分支，就直接进入对应目录修改；不要在现有目录里用 `git checkout` 切分支。**
+SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享同一个 `.git`**：`sglang/qwen3_moe_w8a8/` 是**主 clone**（持有真正的 `.git` 目录），其余目录是从它派生的 worktree。**整个 `sglang/` 目录已被 `.gitignore` 忽略——主仓不再跟踪任何 sglang 子模块**（旧的 `sglang/qwen3_dense_w4a4` 子模块已于 2026-07-21 移除）。**需要修改哪个分支，就直接进入对应目录修改；不要在现有目录里用 `git checkout` 切分支。**
 
 | 路径 | 对应分支 | 用途 |
 | ---- | -------- | ---- |
 | `sglang/qwen3_moe_w8a8/` | `junlin_qwen3_moe_w8a8` | **主 clone**（持有共享 `.git`）；LLM MoE W8A8 MXFP8（PR #30768）。 |
 | `sglang/qwen3.5_dense_w8a8/` | `junlin_qwen3.5_dense_w8a8` | 派生 worktree；Qwen3.5 Dense W8A8 MXFP8 实验/验证。 |
+| `sglang/fix_modelslim_mxfp4_packed/` | `codex/fix-modelslim-mxfp4-packed-weight` | 派生 worktree；修复 Dense W4A4 offline 新版 ModelSlim packed checkpoint 加载。 |
 
 开发约定：
 - 改 MoE W8A8：进入 `sglang/qwen3_moe_w8a8/`（NZ 已在其中）；改 Qwen3.5 Dense W8A8：进入 `sglang/qwen3.5_dense_w8a8/`。
+- 改 Dense W4A4 offline packed checkpoint 修复：进入 `sglang/fix_modelslim_mxfp4_packed/`。
 - 已合并的 Diffusion / Dense W8A8/W4A8/W4A4 代码都在 upstream/main（两个目录 rebase 后均含），无需单独 checkout。要基于某个远程分支（如 `junlin_qwen3_moe_w4a8`）继续开发，从主 clone 用 `git worktree add sglang/<名字> <分支>` 新建独立目录，不要复用已有 worktree。
 - **动 worktree 前先跑 `git worktree list` 确认实际状态**，别照本表假设——本表曾因目录被手工删除而失真（2026-07-21 已订正）。注意 `git worktree list` 必须在 `sglang/` 下的目录里跑，在主仓跑只会列出主仓自己。旧 `sglang/diffusion_w8a8` 子模块随 Diffusion 合并上游后已移除。
 
@@ -67,7 +70,7 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享�
 | Diffusion MXFP4                        | 已合并 #22338          | ✅                      | ✅                      |
 | LLM (Qwen3 & 3.5) Dense W8A8 (MXFP8)   | 已合并 #22352 / #28505 | ✅ (已对齐 vllm-ascend) | ✅ (已对齐 vllm-ascend) |
 | LLM (Qwen3 & 3.5) Dense W4A8 (MXFP4/8) | 已合并 #23650          | ✅ 在线（`mxfp_w4a8`，单级真 W4A8/MXFP8 激活） | ✅ 离线（`W4A8_MXFP` → `ModelSlimMXFP4W4A8Scheme`，权重格式同 MXFP8：`float8_e4m3fn`） |
-| LLM (Qwen3 & 3.5) Dense W4A4 (MXFP4)   | 已合并 #23795          | ✅ 在线已实现（`mxfp4`，NPU 设备分发，**双级 MXFP4** `NPUDualLevelMXFP4LinearMethod`；A5 e2e 已验证，双级修复了单级 RTN 贪心死循环） | ✅ 离线已实现（`W4A4_MXFP4` → `ModelSlimMXFP4Scheme` → `NPUSingleLevelMXFP4OfflineLinearMethod`，单级真 MXFP4，权重 fp8 容器 `float8_e4m3fn`） |
+| LLM (Qwen3 & 3.5) Dense W4A4 (MXFP4)   | 已合并 #23795；packed 修复进行中 | ✅ 在线已实现（`mxfp4`，NPU 设备分发，**双级 MXFP4** `NPUDualLevelMXFP4LinearMethod`；A5 e2e 已验证，双级修复了单级 RTN 贪心死循环） | 🚧 原实现兼容旧版 `float8_e4m3fn [out,in]` checkpoint；当前 ModelSlim 导出为 packed `uint8 [out,in/2]`。`codex/fix-modelslim-mxfp4-packed-weight` 已修 placeholder 与 post-load 二次打包，A5 e2e 待验证。 |
 | LLM (Qwen3 & 3.5) MoE W8A8 (MXFP8)     | `junlin_qwen3_moe_w8a8`（#30768 WIP） | ✅ 在线已实现（`mxfp8`，`NPUMXFP8OnlineMoEMethod`（继承 `UnquantizedFusedMoEMethod`），A5 e2e 已验证） | ✅ 离线已实现（`W8A8_MXFP8` → `ModelSlimMXFP8MoEScheme` → `NPUMXFP8MoEMethod` 离线分支，A5 e2e 已验证） |
 | LLM (Qwen3 & 3.5) MoE W4A8 (MXFP4/8)   | `junlin_qwen3_moe_w4a8`（**仅存于 fork 远程**，`924fea916`；本地无目录） | ✅ 在线（`mxfp_w4a8`，NPU 设备分发，`NPUMXFP4W4A8FusedMoEMethod`，A5 e2e 待验证） | ✅ 离线（`W4A8_MXFP` → `ModelSlimMXFP4W4A8MoEScheme` → `NPUMXFP4W4A8MoEMethod`，权重 packed fp4 uint8，A5 e2e 待验证） |
 | LLM (Qwen3 & 3.5) MoE W4A4 (MXFP4)     | 待定                   | ❌ 待实现               | ❌ 待实现               |
@@ -97,6 +100,7 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享�
 | ------------------------------------- | ------------------------------------------------------ |
 | `modelslim.py`                      | `ModelSlimConfig`：`get_quant_method` 分发、注册       |
 | `schemes/modelslim_mxfp8.py`        | ModelSlim MXFP8 离线 scheme（W8A8）                    |
+| `schemes/modelslim_mxfp4.py`        | ModelSlim W4A4_MXFP4 离线 scheme（packed `uint8 [out,in/2]`；激活 MXFP4） |
 | `schemes/modelslim_mxfp4_w4a8.py`  | ModelSlim W4A8_MXFP 离线 scheme（权重 `float8_e4m3fn`，激活 FP8 动态量化） |
 | `schemes/modelslim_w8a8_int8.py`    | ModelSlim W8A8 Int8 离线 scheme                        |
 

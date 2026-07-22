@@ -20,6 +20,16 @@
 
 ---
 
+## `codex/fix-modelslim-mxfp4-packed-weight` — Dense W4A4 offline packed checkpoint 修复 🚧
+
+目录：`sglang/fix_modelslim_mxfp4_packed/`。2026-07-22 从最新 `upstream/main` `93cb9a548` 创建。
+
+- 根因：PR #23795 按旧版 ModelSlim `float8_e4m3fn [out,in]` checkpoint 实现并用旧模型完成 e2e；ModelSlim 自 `4557940` 起改为 `pack_fp4_to_uint8`，当前 checkpoint 物理格式为 `uint8 [out,in/2]`。
+- 修复：`ModelSlimMXFP4Scheme.create_weights` 按 packed shape/dtype 注册参数；`NPUSingleLevelMXFP4OfflineLinearMethod` 直接 transpose 已 packed 权重，移除 `npu_dtype_cast` 二次打包。
+- 验证：新增 CPU 回归测试覆盖 placeholder shape/dtype 和 post-load 不二次打包；静态检查已通过，A5 新版 checkpoint e2e 待跑。Commit `d875f6684`。
+
+---
+
 ## `junlin_qwen3_moe_w8a8` — LLM MoE W8A8 (MXFP8) 🚧 PR [#30768](https://github.com/sgl-project/sglang/pull/30768) WIP OPEN
 
 LLM 侧，Qwen3/3.5 MoE W8A8 MXFP8（FusedMoE，`--quantization mxfp8`）；EPMoE 待实现。此目录（`sglang/qwen3_moe_w8a8/`）**现为主 clone**（持有共享 `.git`，2026-07-21 起；gitignore、纯本地，主仓不跟踪）。当前 HEAD `e22b7bef8`（2026-07-21 merge `upstream/main` @ `c0ed009f5`，178 commit）。

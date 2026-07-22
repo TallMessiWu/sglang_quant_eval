@@ -120,7 +120,7 @@ output = output.reshape(output_shape)
 
 | 字段 | dtype | shape | 说明 |
 |------|-------|-------|------|
-| `weight` | `float8_e4m3fn`（FP4 打包容器） | `[out, in/2]` | 推理时 `npu_dtype_cast` 到 `float4_e2m1fn_x2` |
+| `weight` | `uint8`（两个 FP4 nibble/byte） | `[out, in/2]` | checkpoint 已由 `pack_fp4_to_uint8` 打包；推理前直接 transpose，禁止再次 `npu_dtype_cast` |
 | `weight_scale` | `uint8` | `[out, in/32]` | e8m0 偏移 +127，还原：`.to(int16) - 127` |
 | `weight_dual_scale` | `bfloat16` | `[in/512, out]` | L0 scale，已经是转置后的 shape |
 | `bias`（可选） | `float32` | `[out]` | |

@@ -221,3 +221,7 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享�
 ### Domain docs
 
 单上下文布局：根 `CONTEXT.md` + `docs/adr/`。详见 `docs/agents/domain.md`。
+
+## 启动脚本权重路径
+
+`llm/` 下的 Qwen3/Qwen3.5 启动脚本使用当前共享存储上的模型路径；offline 脚本依赖自动检测量化 scheme，不显式传 `--quantization modelslim`。Qwen3 MoE W4A8 启动脚本已移除。

@@ -39,7 +39,7 @@ export ASCEND_USE_FIA=1
 
 # ========== 下方是原有的模型启动命令 ==========
 sglang serve \
-    --model-path /home/weights/Qwen3-30B-A3B \
+    --model-path /mnt/share/weights/Qwen3-30B-A3B \
     --host 127.0.0.1 \
     --port $VLLM_PORT \
     --quantization mxfp8 \

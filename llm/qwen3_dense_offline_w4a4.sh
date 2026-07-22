@@ -39,10 +39,9 @@ export ASCEND_USE_FIA=1
 
 # ========== 下方是原有的模型启动命令 ==========
 sglang serve \
-    --model-path /home/weights/qwen3-8b-dense-w4a4-041302 \
+    --model-path /mnt/share/weight/Qwen3-32B-mxw4a4 \
     --host 127.0.0.1 \
     --port $VLLM_PORT \
-    --quantization modelslim \
     --device npu \
     --tp 1 \
     --reasoning-parser qwen3 \

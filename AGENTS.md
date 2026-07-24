@@ -9,12 +9,13 @@
 
 ## 分支规则
 
-Diffusion、Dense W8A8/W4A8 及 **Dense W4A4（PR #23795，2026-07-17 合入）** 侧功能均已合入上游 `sgl-project/sglang`（见下「已合并 PR」）。后续分支都基于 upstream/main rebase，**已含全部已合并代码**。当前本地有 **3 个活跃工作目录**：
+Diffusion、Dense W8A8/W4A8 及 **Dense W4A4（PR #23795，2026-07-17 合入）** 侧功能均已合入上游 `sgl-project/sglang`（见下「已合并 PR」）。后续分支都基于 upstream/main rebase，**已含全部已合并代码**。当前本地有 **4 个活跃功能工作目录**：
 
 | 分支 | 目录 | PR | 状态 |
 | ---- | ---- | -- | ---- |
 | `junlin_qwen3_moe_w8a8` | `sglang/qwen3_moe_w8a8/`（**主 clone**） | [#30768](https://github.com/sgl-project/sglang/pull/30768) | WIP OPEN，LLM MoE W8A8 MXFP8，在线+离线 A5 已 e2e 验证；OrangeRedeng 评审 **8 条全部落地**（⑧ NZ 已合入并回复，2026-07-21）。PR body 性能/精度数据已更新为 NZ 版。**2026-07-21 merge upstream/main（178 commit，`c0ed009f5`）解冲突，PR 已回到 MERGEABLE——⚠️ merge 后 A5 e2e 尚未重跑**。HEAD `e22b7bef8` |
-| `junlin_qwen3.5_dense_w8a8` | `sglang/qwen3.5_dense_w8a8/`（派生 worktree） | 待创建 | 🚧 WIP，Qwen3.5 Dense W8A8 MXFP8 实验/验证（代码已合入 upstream/main，此分支用于 A5 在线+离线验证、跑分、模型适配）。**2026-07-21 rebase 到 `junlin_qwen3_moe_w8a8`（`e22b7bef8`）**，故也含未合并的 MoE W8A8 PR #30768 代码。HEAD `3ee602835` |
+| `junlin_qwen3.5_moe_w8a8` | `sglang/qwen3.5_moe_w8a8/`（派生 worktree） | [#32155](https://github.com/sgl-project/sglang/pull/32155) | 🚧 DRAFT，Qwen3.5 Dense/MoE W8A8 MXFP8 实验/验证。在线 Qwen3.5 MoE W8A8 A5 精度正常；离线 ModelSlim 的 Qwen3.5 GDN packed mapping 修复 `e6ffbc02a` 已经 A5 文本+图片 e2e 验证正常。视觉塔量化配置修复 `ccc9d841a` 已推 fork；首次 A5 图片请求暴露 K=4304 的 MXFP8 scale floor/pair 布局错误，`ceil(K/32)` 占位并补齐奇数 scale 的修复 `fc9cd5bad` 与 CPU 回归测试已推 fork，待重跑图片 e2e。PR 当前 stacked on #30768，待其合入后 rebase 清理 diff。**2026-07-21 rebase 到 `junlin_qwen3_moe_w8a8`（`e22b7bef8`）**，故也含未合并的 MoE W8A8 PR #30768 代码。HEAD `fc9cd5bad` |
+| `junlin_qwen3.5_moe_w4a8` | `sglang/qwen3.5_moe_w4a8/`（派生 worktree） | 待创建 | 🚧 WIP，基于 `junlin_qwen3.5_moe_w8a8` `fc9cd5bad` 创建；已移植 Qwen3 MoE W4A8 在线+离线能力，并按当前基线让在线入口继承 `UnquantizedFusedMoEMethod`、为离线纯 scale scheme 注册空 offset。CPU 回归测试已补，A5 e2e 待验证；提交 `2691db027` 已推 fork。HEAD `2691db027`。 |
 | `codex/fix-modelslim-mxfp4-packed-weight` | `sglang/fix_modelslim_mxfp4_packed/`（派生 worktree） | 待创建 | 🚧 基于 `upstream/main` `93cb9a548` 修复 Dense W4A4 offline ModelSlim 新版 packed checkpoint：`uint8 [out,in/2]` placeholder，移除 post-load 二次打包；CPU 回归测试已补，A5 e2e 待验证。HEAD `d875f6684`。 |
 
 ### 只存在于 fork 远程的分支（本地无目录）
@@ -46,11 +47,12 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享�
 | 路径 | 对应分支 | 用途 |
 | ---- | -------- | ---- |
 | `sglang/qwen3_moe_w8a8/` | `junlin_qwen3_moe_w8a8` | **主 clone**（持有共享 `.git`）；LLM MoE W8A8 MXFP8（PR #30768）。 |
-| `sglang/qwen3.5_dense_w8a8/` | `junlin_qwen3.5_dense_w8a8` | 派生 worktree；Qwen3.5 Dense W8A8 MXFP8 实验/验证。 |
+| `sglang/qwen3.5_moe_w8a8/` | `junlin_qwen3.5_moe_w8a8` | 派生 worktree；Qwen3.5 Dense/MoE W8A8 MXFP8 实验/验证。 |
+| `sglang/qwen3.5_moe_w4a8/` | `junlin_qwen3.5_moe_w4a8` | 派生 worktree；Qwen3/Qwen3.5 共享 MoE W4A8 MXFP 在线+离线适配。 |
 | `sglang/fix_modelslim_mxfp4_packed/` | `codex/fix-modelslim-mxfp4-packed-weight` | 派生 worktree；修复 Dense W4A4 offline 新版 ModelSlim packed checkpoint 加载。 |
 
 开发约定：
-- 改 MoE W8A8：进入 `sglang/qwen3_moe_w8a8/`（NZ 已在其中）；改 Qwen3.5 Dense W8A8：进入 `sglang/qwen3.5_dense_w8a8/`。
+- 改 MoE W8A8：进入 `sglang/qwen3_moe_w8a8/`（NZ 已在其中）；改 Qwen3.5 Dense/MoE W8A8：进入 `sglang/qwen3.5_moe_w8a8/`；改 Qwen3/Qwen3.5 MoE W4A8：进入 `sglang/qwen3.5_moe_w4a8/`。
 - 改 Dense W4A4 offline packed checkpoint 修复：进入 `sglang/fix_modelslim_mxfp4_packed/`。
 - 已合并的 Diffusion / Dense W8A8/W4A8/W4A4 代码都在 upstream/main（两个目录 rebase 后均含），无需单独 checkout。要基于某个远程分支（如 `junlin_qwen3_moe_w4a8`）继续开发，从主 clone 用 `git worktree add sglang/<名字> <分支>` 新建独立目录，不要复用已有 worktree。
 - **动 worktree 前先跑 `git worktree list` 确认实际状态**，别照本表假设——本表曾因目录被手工删除而失真（2026-07-21 已订正）。注意 `git worktree list` 必须在 `sglang/` 下的目录里跑，在主仓跑只会列出主仓自己。旧 `sglang/diffusion_w8a8` 子模块随 Diffusion 合并上游后已移除。
@@ -72,7 +74,7 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享�
 | LLM (Qwen3 & 3.5) Dense W4A8 (MXFP4/8) | 已合并 #23650          | ✅ 在线（`mxfp_w4a8`，单级真 W4A8/MXFP8 激活） | ✅ 离线（`W4A8_MXFP` → `ModelSlimMXFP4W4A8Scheme`，权重为 packed FP4：`uint8 [out,in/2]`） |
 | LLM (Qwen3 & 3.5) Dense W4A4 (MXFP4)   | 已合并 #23795；packed 修复进行中 | ✅ 在线已实现（`mxfp4`，NPU 设备分发，**双级 MXFP4** `NPUDualLevelMXFP4LinearMethod`；A5 e2e 已验证，双级修复了单级 RTN 贪心死循环） | 🚧 原实现兼容旧版 `float8_e4m3fn [out,in]` checkpoint；当前 ModelSlim 导出为 packed `uint8 [out,in/2]`。`codex/fix-modelslim-mxfp4-packed-weight` 已修 placeholder 与 post-load 二次打包，A5 e2e 待验证。 |
 | LLM (Qwen3 & 3.5) MoE W8A8 (MXFP8)     | `junlin_qwen3_moe_w8a8`（#30768 WIP） | ✅ 在线已实现（`mxfp8`，`NPUMXFP8OnlineMoEMethod`（继承 `UnquantizedFusedMoEMethod`），A5 e2e 已验证） | ✅ 离线已实现（`W8A8_MXFP8` → `ModelSlimMXFP8MoEScheme` → `NPUMXFP8MoEMethod` 离线分支，A5 e2e 已验证） |
-| LLM (Qwen3 & 3.5) MoE W4A8 (MXFP4/8)   | `junlin_qwen3_moe_w4a8`（**仅存于 fork 远程**，`924fea916`；本地无目录） | ✅ 在线（`mxfp_w4a8`，NPU 设备分发，`NPUMXFP4W4A8FusedMoEMethod`，A5 e2e 待验证） | ✅ 离线（`W4A8_MXFP` → `ModelSlimMXFP4W4A8MoEScheme` → `NPUMXFP4W4A8MoEMethod`，权重 packed fp4 uint8，A5 e2e 待验证） |
+| LLM (Qwen3 & 3.5) MoE W4A8 (MXFP4/8)   | `junlin_qwen3.5_moe_w4a8`（HEAD `2691db027`，基于 `fc9cd5bad`；旧实现来源 `origin/junlin_qwen3_moe_w4a8` `924fea916`） | ✅ 在线（`mxfp_w4a8` → `NPUMXFP4W4A8FusedMoEMethod`，继承 `UnquantizedFusedMoEMethod` 并换入 W4A8 per-GMM kernel；A5 e2e 待验证） | ✅ 离线（`W4A8_MXFP` → `ModelSlimMXFP4W4A8MoEScheme` → `NPUMXFP4W4A8MoEMethod`，packed FP4 `uint8` 权重且无 offset；A5 e2e 待验证） |
 | LLM (Qwen3 & 3.5) MoE W4A4 (MXFP4)     | 待定                   | ❌ 待实现               | ❌ 待实现               |
 
 ## 关键代码路径
@@ -107,7 +109,7 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享�
 在线量化：
 - `--quantization mxfp8` → `linear_method_npu.py` → `NPUMXFP8LinearMethod`（Linear 层）
 - `--quantization mxfp8` (MoE 层) → `fp8.py` → `hardware_backend/npu/quantization/online_moe_methods.py` → `NPUMXFP8OnlineMoEMethod`（在线 MXFP8；**继承 `UnquantizedFusedMoEMethod`**，只 override `create_moe_runner` 换上 `NPUMXFP8MoEMethod("w13"/"w2")` kernel，`create_weights` / `process_weights_after_loading` / `apply` 全部继承）。单独成文件是因为 `unquant.py` 顶层 import 了 `moe_methods.py`，放同一文件会成 import 环
-- `--quantization mxfp_w4a8` (MoE 层) → `npu_mxfp4.py:113` → `NPUMXFP4W4A8FusedMoEMethod`（在线 MXFP4 W4A8，三段式，仅 FusedMoE/TP）
+- `--quantization mxfp_w4a8` (MoE 层) → `npu_mxfp4.py` → `hardware_backend/npu/quantization/online_moe_methods.py` → `NPUMXFP4W4A8FusedMoEMethod`（继承 `UnquantizedFusedMoEMethod`，只替换为 `NPUMXFP4W4A8MoEMethod` per-GMM kernel；三段式，仅 FusedMoE/TP）
 - `--quantization mxfp_w4a8` → `layers/quantization/npu_mxfp4.py` → `NPUMxfp4Config` → `NPUMXFP4W4A8LinearMethod`（真 W4A8：单级 FP8 激活 + FP4 权重，apply 复用离线 `npu_quant_matmul(x2_dtype=fp4)`；权重在线 `npu_dynamic_mx_quant(dst=float4_e2m1fn_x2)`）
 - `--quantization mxfp4`（NPU 设备分发，`is_npu()` 块注册 `Mxfp4W4A4Config`；非 NPU 为上游 `Mxfp4Config`/MoE）→ `layers/quantization/npu_mxfp4_w4a4.py` → `Mxfp4W4A4Config` → **`NPUDualLevelMXFP4LinearMethod`（在线唯一路径，双级 MXFP4：细 FP8 E4M3 L0 scale + 粗 L1 scale，`npu_dynamic_dual_level_mx_quant` + `npu_dual_level_quant_matmul`，权重 FRACTAL_NZ，仅 A5/Ascend 950）**。单级 `NPUSingleLevelMXFP4LinearMethod` 仅作离线基类保留（离线 `W4A4_MXFP4` → `ModelSlimMXFP4Scheme` → `NPUSingleLevelMXFP4OfflineLinearMethod`，单级）。移植自 Diffusion `NPUMXFP4DiffusionLinearMethod`/MindIE-SD `W4A4MXFP4DualQuantLinear`
 
@@ -116,7 +118,7 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享�
 - `srt/models/qwen3.py` — Qwen3 / 3.5 模型定义，`EntryClass = Qwen3ForCausalLM`
 - `srt/models/qwen3_moe.py` — Qwen3 MoE 模型定义，`EntryClass = Qwen3MoeForCausalLM`
 - `srt/hardware_backend/npu/quantization/moe_methods.py` — 所有 per-gmm MoE kernel 类（`NPUUnquantMoEMethod`、`NPUMXFP8MoEMethod`、`NPUMXFP4W4A8MoEMethod` / `NPUMXFP4W4A8FusedMoEMethod`、`NPUW4A4Int4MoEMethod`、`NPUW8A8Int8MoEMethod`、`NPUW4A8Int8MoEMethod` 等）
-- `srt/hardware_backend/npu/quantization/online_moe_methods.py` — 在线量化 FusedMoE 入口类（`NPUMXFP8OnlineMoEMethod`），与 `moe_methods.py` 分开以避开 `unquant.py` 的 import 环
+- `srt/hardware_backend/npu/quantization/online_moe_methods.py` — 在线量化 FusedMoE 入口类（`NPUMXFP8OnlineMoEMethod`、`NPUMXFP4W4A8FusedMoEMethod`），与 `moe_methods.py` 分开以避开 `unquant.py` 的 import 环
 - `srt/hardware_backend/npu/moe/matmul.py` — MoE matmul kernel wrapper（`GroupedMatmul`、`GroupedMatmulSwigluQuant`（gmm1 融合 gate/up+swiglu+requant，返回 (激活, block scale)））
 - `srt/hardware_backend/npu/moe/quant.py` — MoE 量化 kernel wrapper（`HiddenStatesDynamicQuant`：int8/quint4x2 走 `npu_dynamic_quant`，`float8_e4m3fn` 走 `npu_dynamic_mx_quant`）。**原名 `hidden_states_quant.py`，按评审建议改名**
 - `srt/hardware_backend/npu/moe/activation.py` — MoE 激活函数库（`NPUSwiglu`、`NPUSwigluQuant`、`NPUSwigluMXFP8Quant`、`NPUSwigluDeepEPKernel` 等）
@@ -168,7 +170,10 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享�
 
 - **`--quantization mxfp8` 会强制 flashinfer runner → w1/w3 shard swap（静默乱码）**：`arg_groups/overrides.py::_moe_runner_backend_quant_constraints` 见到 `mxfp8` 就把 `moe_runner_backend` 从 `auto` 顶成 `flashinfer_trtllm`，**不看平台**。这个值不只选 runner：`fused_moe_triton/layer.py:939` 的 **w1/w3 shard swap**（"flashinfer assumes w31 format"）和 `:253` 的 128 对齐 round-up 都挂在它上面。shard swap 的触发名单是 `ModelOptNvFp4FusedMoEMethod` / `Fp8MoEMethod` / **`UnquantizedFusedMoEMethod`** / `CompressedTensorsMxInt4MoE` —— 一旦 MoE method 继承了 `UnquantizedFusedMoEMethod`（本 PR 评审第 ③ 条要求），就命中名单，**每个 expert 的 gate/up 被交换**，gmm1 融合 swiglu 算成 `silu(up)*gate`：**不报错，只是退化重复输出**。若尚未继承（继承自 `FusedMoEMethodBase`）则表现为响亮的 `TypeError: Unexpected quant_info type for flashinfer_trtllm: AscendQuantInfo`。修复：`if view.quantization == "mxfp8" and not is_npu():`，让 backend 停在 `auto` 由 `create_moe_runner` 解析成 ASCEND；并在 `create_moe_runner` 里对非 `auto`/`ascend` 的 backend 显式 raise，堵住手动 `--moe-runner-backend`。
 - **MoE 侧 e8m0 dtype 必须取 `torch_npu`，dense 侧 `torch` 也行**：`npu_grouped_matmul*` 按 torch_npu 自己的枚举（A5 上 293）校验 scale dtype 参数，torch 的 dtype 对象会被拒（`weight_scale_dtype only supports float8_e8m0fnu or None, but the actual value is Float8_e8m0fnu`）→ 每次 gmm1 直接死。dense 的 `npu_quant_matmul` 两种都吃，所以 `linear_method_npu.py::_get_float8_e8m0fnu_dtype`（只读 torch）**不能**给 MoE 复用；`moe_methods.py::_require_e8m0_dtype` 需 torch_npu 优先 + lazy import + 模块级缓存。
-- **离线 MXFP8 MoE 必须注册空 `weight_offset`**：`modelslim.py::ModelSlimMoEMethod.apply` 照 int8 scheme 无条件读 `layer.{w13,w2}_weight_offset` 来建 `AscendQuantInfo`。MXFP8 是纯 scale 格式（e8m0 block 指数即全部，无零点），scheme 不会创建它 → `AttributeError: 'FusedMoE' object has no attribute 'w13_weight_offset'`。修复：`layer.register_parameter(f"{prefix}_weight_offset", None)`（`AscendQuantInfo` 该字段本就是 `Optional`；None 参数不出现在 `named_parameters()`，无 loader 会找它）。
+- **离线 MXFP8 / MXFP4 W4A8 MoE 必须注册空 `weight_offset`**：`modelslim.py::ModelSlimMoEMethod.apply` 照 int8 scheme 无条件读 `layer.{w13,w2}_weight_offset` 来建 `AscendQuantInfo`。两种 MXFP 都是纯 scale 格式（e8m0 block 指数即全部，无零点），scheme 不创建 offset 就会触发 `AttributeError: 'FusedMoE' object has no attribute 'w13_weight_offset'`。修复：`layer.register_parameter(f"{prefix}_weight_offset", None)`（`AscendQuantInfo` 该字段本就是 `Optional`；None 参数不出现在 `named_parameters()`，无 loader 会找它）。
+- **Qwen3.5 离线 ModelSlim 必须保留模型专属 packed mapping**：NPU loader 会在 `packed_modules_mapping` 中加入 scoped `model`/`visual` 映射，但 Qwen3.5 的 `in_proj_qkvz` → `in_proj_qkv`+`in_proj_z`、`in_proj_ba` → `in_proj_b`+`in_proj_a` 位于顶层。若 `ModelSlimConfig.get_quant_method` 只读取 scoped mapping，这两个 GDN 投影会静默回退到 unquantized Linear，checkpoint 的 `weight_scale` 随后因参数未注册而被忽略，服务不报错但输出乱码/复读。修复：先收集顶层 list mapping，再用对应 scoped mapping 覆盖；回归测试见 `test_modelslim_config.py`。Qwen3.5 在线 MXFP8 不走 ModelSlim，故精度正常。
+- **Qwen3.5 视觉塔也必须接收离线量化配置**：`Qwen3VLForConditionalGeneration` 若构造视觉塔时硬编码 `quant_config=None`，视觉 blocks 的 QKV/proj/MLP 和 merger 会按 BF16 Linear 注册，checkpoint 中 110 个 `visual.*.weight_scale` 随后全部告警并被跳过。vLLM 的 Qwen3-VL 直接把同一个 `quant_config` 传给视觉塔；SGLang 的 blocks/attention/MLP/merger 也已完整透传该参数，因此修复入口应在 `qwen3_vl.py`，并同时验证视觉 packed QKV 映射和图片 e2e，不能仅静默过滤告警。
+- **ModelSlim MXFP8 必须保留 K 维末尾的 partial block scale**：scale placeholder 应按 `ceil(K/32)` 注册，不能用 `K//32`。Qwen3-VL 视觉 FC2 的 K=4304，checkpoint 有 135 个 scale；旧 placeholder 只有 134 个，row-parallel loader 会据此静默截断，post-load 再配对成 67，而 `npu_quant_matmul` 要求 `ceil(4304/64)=68`，最终报 `k_x2Scale is 67`。应对奇数 scale count 末尾补零后 reshape 为 pair 布局（135 → 136 → 68），与 vllm-ascend 实现一致。
 - **上游大 merge 会静默重写 NPU MoE 层**：2026-07-16 那次 merge 删掉 `fused_moe_method_npu.py`（-1581 行）、新建 `quantization/moe_methods.py`（+994）/ `moe_runner/ascend.py`（+338）/ `npu/moe/*.py`，本仓库的 MXFP8 MoE 实现是**在 merge commit 内部被重新移植的**。上面三条回归全部出自这次移植。**教训：大 merge 后必须先单独跑一遍 A5 e2e 校准 baseline，再往上叠任何改动**，否则后续每一步的验证都被污染、无法二分。
 
 > 详细根因分析、调试过程、代码示例、修复方法见 [docs/known-pitfalls.md](docs/known-pitfalls.md)。
@@ -224,4 +229,4 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享�
 
 ## 启动脚本权重路径
 
-`llm/` 下的 Qwen3/Qwen3.5 启动脚本使用当前共享存储上的模型路径；offline 脚本依赖自动检测量化 scheme，不显式传 `--quantization modelslim`。Qwen3 MoE W4A8 启动脚本已移除。
+`llm/` 下的 Qwen3/Qwen3.5 启动脚本使用当前共享存储上的模型路径；offline 脚本依赖自动检测量化 scheme，不显式传 `--quantization modelslim`。Qwen3 MoE W4A8 启动脚本已移除；Qwen3.5 MoE W4A8 使用 `qwen3.5_moe_online_w4a8.sh`（BF16 权重 + `--quantization mxfp_w4a8`）和 `qwen3.5_moe_offline_w4a8.sh`（ModelSlim 权重自动检测）。

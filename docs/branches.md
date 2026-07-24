@@ -2,7 +2,7 @@
 
 > 本文档记录活跃分支的开发历史、commit hash、A5 验证节点、调试过程。
 > 已合并 PR 的代码都在 upstream/main，概览见 [AGENTS.md](../AGENTS.md#已合并-pr代码已在-upstreammain)，此处不再展开。
-> `junlin_qwen3_moe_w4a8` 尚无独立小节，现状见根 [AGENTS.md](../AGENTS.md#实现进度) 的实现进度表。**2026-07-21 起该分支只存在于 fork 远程（`924fea916`），本地无目录**，需要时用 `git worktree add` 从主 clone 拉回。
+> Qwen MoE W4A8 的旧实现仍保存在 fork 远程 `junlin_qwen3_moe_w4a8`（`924fea916`）；当前开发已转到本地 `junlin_qwen3.5_moe_w4a8` worktree，并以最新 Qwen3.5 W8A8 分支为基线。
 
 ## 已合并 PR（速查）
 
@@ -79,19 +79,25 @@ PR 出现冲突后合并上游，选 merge 而非 rebase——分支历史已有
 
 ---
 
-## `junlin_qwen3.5_dense_w8a8` — Qwen3.5 Dense W8A8 (MXFP8) 🚧
+## `junlin_qwen3.5_moe_w8a8` — Qwen3.5 Dense/MoE W8A8 (MXFP8) 🚧
 
-Qwen3.5 Dense W8A8 MXFP8 实验/验证分支。此目录（`sglang/qwen3.5_dense_w8a8/`）是从主 clone `sglang/qwen3_moe_w8a8/` 派生的 worktree（gitignore、纯本地，主仓不跟踪）。
+Qwen3.5 Dense/MoE W8A8 MXFP8 实验/验证分支。此目录（`sglang/qwen3.5_moe_w8a8/`）是从主 clone `sglang/qwen3_moe_w8a8/` 派生的 worktree（gitignore、纯本地，主仓不跟踪）。
 
-- **2026-07-21 rebase 到 `junlin_qwen3_moe_w8a8`（`e22b7bef8`）**，前进 385 个 commit，无冲突。基线 = upstream/main（`c0ed009f5`）+ MoE W8A8 PR #30768 全部实现，故本分支现在**同时含未合并的 MoE W8A8 代码**。分支自身只有 2 个 commit（GemmaRMSNorm A5 修复），HEAD `3ee602835`，已 force-push 到 fork。
+- **2026-07-21 rebase 到 `junlin_qwen3_moe_w8a8`（`e22b7bef8`）**，基线 = upstream/main（`c0ed009f5`）+ MoE W8A8 PR #30768 全部实现，故本分支现在**同时含未合并的 MoE W8A8 代码**。随后加入 Qwen3.5 ModelSlim packed mapping、视觉量化配置和 partial scale 修复，当前 HEAD `fc9cd5bad`，已推 fork。
 - 原基线 upstream/main（`4cec9ef9d`，2026-07-13），已含全部已合并 MXFP8/W8A8/W4A8 量化代码。
-- Qwen3.5 与 Qwen3 在 SGLang 内部共用底层 Linear/MoE 算子，故量化实现代码完全一致；此分支仅需验证 Qwen3.5-8B 模型在 A5 上的在线 + 离线 W8A8 效果、跑分。
-- 启动脚本：`llm/qwen3.5_dense_bf16.sh`（BF16 基线）。
+- Qwen3.5 与 Qwen3 在 SGLang 内部共用底层 Linear/MoE 算子，故量化实现代码完全一致；在线 Qwen3.5 MoE W8A8 A5 精度正常，离线文本+图片 e2e 已验证，partial scale 修复后的图片 e2e 待重跑。
+- 启动脚本：`llm/qwen3.5_{dense,moe}_{bf16,online_w8a8,offline_w8a8}.sh`（实际文件名见 `llm/`）。
 
-**状态**：
-- 在线 W8A8：待验证
-- 离线 W8A8：待验证
-- 跑分：待进行
+## `junlin_qwen3.5_moe_w4a8` — Qwen3/3.5 MoE W4A8 (MXFP4/8) 🚧
+
+从 `junlin_qwen3.5_moe_w8a8` `fc9cd5bad` 创建，worktree 为 `sglang/qwen3.5_moe_w4a8/`。Qwen3 与 Qwen3.5 共用 `qwen3_moe.py` 和底层 FusedMoE，因此没有新增模型专属量化类。
+
+- 旧 `origin/junlin_qwen3_moe_w4a8` 的在线+离线 W4A8 两个提交已移植到新基线，保留后续 4D pair-split scale 修复。
+- 在线入口 `NPUMXFP4W4A8FusedMoEMethod` 继承当前通用 `UnquantizedFusedMoEMethod`，只负责安装 W4A8 per-GMM kernel 和固定 Ascend runner。
+- 离线 `W4A8_MXFP` 复用同一 `NPUMXFP4W4A8MoEMethod`；补注册空 `weight_offset`，避免共享 ModelSlim apply 构造 `AscendQuantInfo` 时抛 `AttributeError`。
+- CPU 回归测试覆盖 Qwen 标准 expert scheme 分发、packed weight/scale placeholder、空 offset，以及 3D/4D scale 归一化；本机 Python 无 `torch`，测试逻辑待有依赖环境运行。A5 在线/离线 e2e 待验证。
+- 启动脚本：`llm/qwen3.5_moe_online_w4a8.sh` 从 `/mnt/share/weight/Qwen3.5-35B-A3B` 在线量化；`llm/qwen3.5_moe_offline_w4a8.sh` 加载 `/mnt/weight/Qwen3.5-35B-A3B-mxfp-w4a8` 并自动检测 ModelSlim scheme。
+- 当前 HEAD 为 `2691db027`，实现提交已推送到 fork 的 `junlin_qwen3.5_moe_w4a8`。
 
 ---
 

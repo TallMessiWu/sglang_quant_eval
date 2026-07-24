@@ -15,7 +15,7 @@ Diffusion、Dense W8A8/W4A8 及 **Dense W4A4（PR #23795，2026-07-17 合入）*
 | ---- | ---- | -- | ---- |
 | `junlin_qwen3_moe_w8a8` | `sglang/qwen3_moe_w8a8/`（**主 clone**） | [#30768](https://github.com/sgl-project/sglang/pull/30768) | WIP OPEN，LLM MoE W8A8 MXFP8，在线+离线 A5 已 e2e 验证；OrangeRedeng 评审 **8 条全部落地**（⑧ NZ 已合入并回复，2026-07-21）。PR body 性能/精度数据已更新为 NZ 版。**2026-07-21 merge upstream/main（178 commit，`c0ed009f5`）解冲突，PR 已回到 MERGEABLE——⚠️ merge 后 A5 e2e 尚未重跑**。HEAD `e22b7bef8` |
 | `junlin_qwen3.5_moe_w8a8` | `sglang/qwen3.5_moe_w8a8/`（派生 worktree） | [#32155](https://github.com/sgl-project/sglang/pull/32155) | 🚧 DRAFT，Qwen3.5 Dense/MoE W8A8 MXFP8 实验/验证。在线 Qwen3.5 MoE W8A8 A5 精度正常；离线 ModelSlim 的 Qwen3.5 GDN packed mapping 修复 `e6ffbc02a` 已经 A5 文本+图片 e2e 验证正常。视觉塔量化配置修复 `ccc9d841a` 已推 fork；首次 A5 图片请求暴露 K=4304 的 MXFP8 scale floor/pair 布局错误，`ceil(K/32)` 占位并补齐奇数 scale 的修复 `fc9cd5bad` 与 CPU 回归测试已推 fork，待重跑图片 e2e。PR 当前 stacked on #30768，待其合入后 rebase 清理 diff。**2026-07-21 rebase 到 `junlin_qwen3_moe_w8a8`（`e22b7bef8`）**，故也含未合并的 MoE W8A8 PR #30768 代码。HEAD `fc9cd5bad` |
-| `junlin_qwen3.5_moe_w4a8` | `sglang/qwen3.5_moe_w4a8/`（派生 worktree） | 待创建 | 🚧 WIP，基于 `junlin_qwen3.5_moe_w8a8` `fc9cd5bad` 创建；已移植 Qwen3 MoE W4A8 在线+离线能力，并按当前基线让在线入口继承 `UnquantizedFusedMoEMethod`、为离线纯 scale scheme 注册空 offset。CPU 回归测试已补，A5 e2e 待验证；提交 `2691db027` 已推 fork。HEAD `2691db027`。 |
+| `junlin_qwen3.5_moe_w4a8` | `sglang/qwen3.5_moe_w4a8/`（派生 worktree） | 待创建 | 🚧 WIP，基于 `junlin_qwen3.5_moe_w8a8` `fc9cd5bad` 创建；已移植 Qwen3 MoE W4A8 在线+离线能力，并按当前基线让在线入口继承 `UnquantizedFusedMoEMethod`、为离线纯 scale scheme 注册空 offset。首次 A5 在线图片请求暴露视觉 QKV 的 A8W4 bias 契约错误，BF16 `[1,N]` 修复及 CPU 回归测试已随提交 `1ca00a86e` 推送 fork，待 A5 重跑。HEAD `1ca00a86e`。 |
 | `codex/fix-modelslim-mxfp4-packed-weight` | `sglang/fix_modelslim_mxfp4_packed/`（派生 worktree） | 待创建 | 🚧 基于 `upstream/main` `93cb9a548` 修复 Dense W4A4 offline ModelSlim 新版 packed checkpoint：`uint8 [out,in/2]` placeholder，移除 post-load 二次打包；CPU 回归测试已补，A5 e2e 待验证。HEAD `d875f6684`。 |
 
 ### 只存在于 fork 远程的分支（本地无目录）
@@ -138,7 +138,7 @@ SGLang 代码以 `git worktree` 形式放在 `sglang/` 下，各目录**共享�
 - **CANN 版本**: MXFP8 需 ≥ 8.0.RC3；MXFP4 最低版本待确认
 - **硬件**: Atlas 800I A2/A3（`DualLevelQuantBatchMatmul` 仅支持 Ascend 950，A2/A3 不支持）
 - **CPU offload**：`dit_cpu_offload` 默认 True，`process_weights_after_loading` 中需手动 `.to("npu:X")` 后再调用量化 API
-- **bias 精度**：量化 matmul 要求 bias 为 `float32`
+- **bias 精度/shape**：多数量化 matmul 使用 `float32` bias；A8W4 `npu_quant_matmul`（MXFP4 权重 + MXFP8 激活）是例外，要求 BF16 二维 bias `[1,N]`。Qwen3 文本层通常无 bias，Qwen3.5 视觉 QKV 会触发该契约
 - **tensor reshape**：diffusion 输入可能是 3D `[batch, seq, hidden]`，NPU 量化 API 需 2D，apply 中先 reshape 后 restore
 - 与社区 YChange01 协调 MXFP8/MXFP4 工作分工（已在 Issue #14424 认领）
 

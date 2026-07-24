@@ -97,7 +97,8 @@ Qwen3.5 Dense/MoE W8A8 MXFP8 实验/验证分支。此目录（`sglang/qwen3.5_m
 - 离线 `W4A8_MXFP` 复用同一 `NPUMXFP4W4A8MoEMethod`；补注册空 `weight_offset`，避免共享 ModelSlim apply 构造 `AscendQuantInfo` 时抛 `AttributeError`。
 - CPU 回归测试覆盖 Qwen 标准 expert scheme 分发、packed weight/scale placeholder、空 offset，以及 3D/4D scale 归一化；本机 Python 无 `torch`，测试逻辑待有依赖环境运行。A5 在线/离线 e2e 待验证。
 - 启动脚本：`llm/qwen3.5_moe_online_w4a8.sh` 从 `/mnt/share/weight/Qwen3.5-35B-A3B` 在线量化；`llm/qwen3.5_moe_offline_w4a8.sh` 加载 `/mnt/weight/Qwen3.5-35B-A3B-mxfp-w4a8` 并自动检测 ModelSlim scheme。
-- 当前 HEAD 为 `2691db027`，实现提交已推送到 fork 的 `junlin_qwen3.5_moe_w4a8`。
+- 2026-07-24 首次 A5 在线图片请求在视觉 QKV 报 `The dimension of bias should be 2`：共享 W4A8 Linear 误传 FP32 一维 bias；提交 `1ca00a86e` 已改为 BF16 `[1,N]` 并覆盖在线/离线，Qwen3 无 bias 路径保持不变，待 A5 重跑。
+- 当前 HEAD 为 `1ca00a86e`，实现提交已推送到 fork 的 `junlin_qwen3.5_moe_w4a8`。
 
 ---
 

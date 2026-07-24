@@ -123,6 +123,14 @@ A5 probe（同 shape 分别拿 `torch_npu.float4_e2m1fn_x2`=296 vs `torch.float4
 
 ---
 
+## A8W4 `npu_quant_matmul` 的 bias 必须是 BF16 二维 `[1,N]`
+
+Qwen3.5 在线 W4A8 的首次图片请求会进入视觉塔 QKV；该层带一维 bias。若沿用其他量化 matmul 的 FP32 `[N]` 处理，A5 会在 `NPUMXFP4W4A8LinearMethod.apply` 报 `The dimension of bias should be 2. Actual bias dimension is: 1.`。MindIE-SD 的同类 W4A8 路径会将 bias 转为 BF16，并把 `[N]` 扩成 `[1,N]`。
+
+在线和离线 W4A8 Dense 方法必须共享这一规范化逻辑。Qwen3 文本模型常见的无 bias 路径保持 `None`，不会受到数值或性能影响；不能把这个例外扩散到 MXFP8/W4A4 等其他量化方法。
+
+---
+
 ## sglang 文档已迁到 `docs_new/docs/`，改 legacy `docs/` 会被 CI 拒
 
 （2026-07-06 踩，`junlin_qwen3_dense_w4a8` PR #23650）

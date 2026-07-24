@@ -12,6 +12,14 @@ _Avoid_: Qwen3.5-specific MoE quantization
 An LLM quantization format pairing MXFP4 weights with dynamically quantized MXFP8 activations.
 _Avoid_: W4A4, INT4 W4A8
 
+**W4A4 MXFP**:
+An LLM quantization format pairing MXFP4 weights with dynamically quantized MXFP4 activations, single-level (UE8M0 block scales). On Qwen MoE it is applied only to the routed experts; the surrounding non-expert layers keep a higher-precision format.
+_Avoid_: full-model MXFP4, INT4 W4A4, dual-level MXFP4 MoE
+
+**Mixed-precision MoE**:
+A quantization layout where the routed experts use one format and the non-expert layers (attention, shared MLP, vision tower) use a higher-precision format, because a uniform low-bit format across all layers loses too much accuracy.
+_Avoid_: uniform-precision MoE, per-model precision
+
 **Online Quantization**:
 A mode that starts from BF16 or FP16 weights and quantizes them during model initialization.
 _Avoid_: Runtime checkpoint quantization
@@ -24,7 +32,8 @@ _Avoid_: Online ModelSlim, explicit ModelSlim scheme selection
 
 - **Qwen MoE** uses the same quantization capabilities for Qwen3 and Qwen3.5
 - **W4A8 MXFP** supports both **Online Quantization** and **Offline ModelSlim Quantization**
-- **Online Quantization** and **Offline ModelSlim Quantization** share the same inference semantics
+- **W4A4 MXFP** is a **Qwen MoE** capability applied to the routed experts as **Mixed-precision MoE**, and supports both **Online Quantization** and **Offline ModelSlim Quantization**
+- **Online Quantization** and **Offline ModelSlim Quantization** share the same inference semantics for a given layer, but may differ on which format the non-expert layers carry
 
 ## Example dialogue
 

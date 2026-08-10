@@ -191,6 +191,56 @@ def percentile(values, fraction):
     return ordered[index]
 
 
+def print_results_table(results):
+    headers = (
+        "TP",
+        "Model(s)",
+        "Q/KV",
+        "HD",
+        "OFF p50 ms",
+        "OFF p90 ms",
+        "ON p50 ms",
+        "ON p90 ms",
+        "Gain",
+        "Max diff",
+    )
+    rows = [
+        (
+            str(result["tp_size"]),
+            result["models"],
+            result["local_heads"],
+            str(result["head_dim"]),
+            f"{result['off_p50']:.3f}",
+            f"{result['off_p90']:.3f}",
+            f"{result['on_p50']:.3f}",
+            f"{result['on_p90']:.3f}",
+            f"{result['gain']:+.2f}%",
+            f"{result['max_abs_diff']:.4g}",
+        )
+        for result in results
+    ]
+    widths = [
+        max(len(header), *(len(row[index]) for row in rows))
+        for index, header in enumerate(headers)
+    ]
+    numeric_columns = {0, 2, 3, 4, 5, 6, 7, 8, 9}
+
+    def format_row(row):
+        return " | ".join(
+            (
+                value.rjust(widths[index])
+                if index in numeric_columns
+                else value.ljust(widths[index])
+            )
+            for index, value in enumerate(row)
+        )
+
+    print(format_row(headers))
+    print("-+-".join("-" * width for width in widths))
+    for row in rows:
+        print(format_row(row))
+
+
 def one_sided_wilcoxon_signed_rank(values, threshold):
     differences = [value - threshold for value in values if value != threshold]
     sample_count = len(differences)
@@ -372,31 +422,26 @@ def benchmark_model(model_name, represented_presets, tp_size, args, device):
     ]
     median_gain = statistics.median(paired_gains)
 
-    represented_models = [
+    model_names = [
         (
-            MODEL_PRESETS[preset].model_id
+            MODEL_PRESETS[preset].model_id.removeprefix("Qwen/")
             if preset != "custom"
             else "custom"
         )
         for preset in represented_presets
     ]
-    print(f"Models: {', '.join(represented_models)}")
-    print(f"Presets: {', '.join(represented_presets)} (TP={tp_size})")
-    print(
-        "Shape: "
-        f"prefill={args.prefill_tokens}, decode={args.decode_tokens}, "
-        f"kv_len={args.kv_len}, local_heads={shape.num_heads}/"
-        f"{shape.num_kv_heads}, head_dim={shape.head_dim}"
-    )
-    print(
-        "Correctness: torch.allclose=True "
-        f"(rtol={args.rtol:g}, atol={args.atol:g}, "
-        f"max_abs_diff={max_abs_diff:.8g})"
-    )
-    print(f"OFF single FIA: p50={off_p50:.3f} ms, p90={off_p90:.3f} ms")
-    print(f"ON split FIA:  p50={on_p50:.3f} ms, p90={on_p90:.3f} ms")
-    print(f"Paired median gain: {median_gain:+.2f}% ({args.iters} pairs)")
-    return f"TP={tp_size} {','.join(represented_presets)}", median_gain
+    return {
+        "tp_size": tp_size,
+        "models": ",".join(model_names),
+        "local_heads": f"{shape.num_heads}/{shape.num_kv_heads}",
+        "head_dim": shape.head_dim,
+        "off_p50": off_p50,
+        "off_p90": off_p90,
+        "on_p50": on_p50,
+        "on_p90": on_p90,
+        "gain": median_gain,
+        "max_abs_diff": max_abs_diff,
+    }
 
 
 def main():
@@ -407,9 +452,7 @@ def main():
     device = torch.device(f"npu:{args.device}")
     configuration_results = []
     for tp_index, tp_size in enumerate(args.tp_sizes):
-        if tp_index:
-            print()
-        print(f"=== Simulated TP={tp_size} on one NPU rank ===")
+        print(f"Benchmarking simulated TP={tp_size} on one NPU rank...", flush=True)
 
         shape_groups = {}
         for model_name in args.models:
@@ -420,7 +463,6 @@ def main():
         for shape_index, represented_presets in enumerate(
             shape_groups.values()
         ):
-            print()
             torch.manual_seed(args.seed + tp_index * 1000 + shape_index)
             configuration_results.append(
                 benchmark_model(
@@ -432,7 +474,13 @@ def main():
                 )
             )
 
-    configuration_gains = [gain for _, gain in configuration_results]
+    print()
+    print("=== Per-configuration results ===")
+    print_results_table(configuration_results)
+
+    configuration_gains = [
+        result["gain"] for result in configuration_results
+    ]
     p_value, positive_rank_sum, test_samples = (
         one_sided_wilcoxon_signed_rank(
             configuration_gains, args.min_gain
@@ -440,8 +488,8 @@ def main():
     )
     reject_null = p_value < args.alpha
     above_target = sum(gain > args.min_gain for gain in configuration_gains)
-    worst_label, worst_gain = min(
-        configuration_results, key=lambda result: result[1]
+    worst_result = min(
+        configuration_results, key=lambda result: result["gain"]
     )
 
     print()
@@ -461,7 +509,11 @@ def main():
         f"Configurations above target: {above_target}/"
         f"{len(configuration_results)}"
     )
-    print(f"Worst configuration: {worst_label}, gain={worst_gain:+.2f}%")
+    print(
+        "Worst configuration: "
+        f"TP={worst_result['tp_size']} {worst_result['models']}, "
+        f"gain={worst_result['gain']:+.2f}%"
+    )
     print(
         "Decision: "
         + ("REJECT H0" if reject_null else "FAIL TO REJECT H0")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare one mixed FIA call with prefill-first split FIA calls on Ascend NPU."""
+"""Compare mixed FIA calls across real Qwen model attention shapes on Ascend NPU."""
 
 import argparse
 import math
@@ -19,10 +19,22 @@ class ModelShape:
 
 
 MODEL_PRESETS = {
+    "qwen3.5-0.8b": ModelShape("Qwen/Qwen3.5-0.8B", 8, 2, 256),
+    "qwen3.5-2b": ModelShape("Qwen/Qwen3.5-2B", 8, 2, 256),
+    "qwen3.5-4b": ModelShape("Qwen/Qwen3.5-4B", 16, 4, 256),
+    "qwen3.5-9b": ModelShape("Qwen/Qwen3.5-9B", 16, 4, 256),
     "qwen3.5-27b": ModelShape("Qwen/Qwen3.5-27B", 24, 4, 256),
     "qwen3.5-35b-a3b": ModelShape("Qwen/Qwen3.5-35B-A3B", 16, 2, 256),
+    "qwen3.5-122b-a10b": ModelShape("Qwen/Qwen3.5-122B-A10B", 32, 2, 256),
+    "qwen3.5-397b-a17b": ModelShape("Qwen/Qwen3.5-397B-A17B", 32, 2, 256),
+    "qwen3-0.6b": ModelShape("Qwen/Qwen3-0.6B", 16, 8, 128),
+    "qwen3-1.7b": ModelShape("Qwen/Qwen3-1.7B", 16, 8, 128),
+    "qwen3-4b": ModelShape("Qwen/Qwen3-4B", 32, 8, 128),
+    "qwen3-8b": ModelShape("Qwen/Qwen3-8B", 32, 8, 128),
+    "qwen3-14b": ModelShape("Qwen/Qwen3-14B", 40, 8, 128),
     "qwen3-32b": ModelShape("Qwen/Qwen3-32B", 64, 8, 128),
     "qwen3-30b-a3b": ModelShape("Qwen/Qwen3-30B-A3B", 32, 4, 128),
+    "qwen3-235b-a22b": ModelShape("Qwen/Qwen3-235B-A22B", 64, 4, 128),
 }
 
 
@@ -33,7 +45,7 @@ def parse_args():
         "--models",
         nargs="+",
         choices=[*MODEL_PRESETS, "custom"],
-        help="model presets to benchmark; defaults to all presets",
+        help="model presets; defaults to all, deduplicated by local FIA shape",
     )
     parser.add_argument("--tp-size", type=int, default=1)
     parser.add_argument("--num-heads", type=int, help="custom global query heads")
@@ -183,7 +195,7 @@ def measure_npu_ms(fn):
     return start.elapsed_time(end), output
 
 
-def benchmark_model(model_name, args, device):
+def benchmark_model(model_name, represented_presets, args, device):
     shape = resolve_model_shape(model_name, args)
     num_requests = 1 + args.decode_tokens
     num_tokens = args.prefill_tokens + args.decode_tokens
@@ -316,7 +328,16 @@ def benchmark_model(model_name, args, device):
     )
     reject_null = p_value < args.alpha
 
-    print(f"Model: {shape.model_id} (preset={model_name}, TP={args.tp_size})")
+    represented_models = [
+        (
+            MODEL_PRESETS[preset].model_id
+            if preset != "custom"
+            else "custom"
+        )
+        for preset in represented_presets
+    ]
+    print(f"Models: {', '.join(represented_models)}")
+    print(f"Presets: {', '.join(represented_presets)} (TP={args.tp_size})")
     print(
         "Shape: "
         f"prefill={args.prefill_tokens}, decode={args.decode_tokens}, "
@@ -350,11 +371,19 @@ def main():
 
     torch_npu.npu.set_device(args.device)
     device = torch.device(f"npu:{args.device}")
-    for index, model_name in enumerate(args.models):
+    shape_groups = {}
+    for model_name in args.models:
+        shape = resolve_model_shape(model_name, args)
+        shape_key = (shape.num_heads, shape.num_kv_heads, shape.head_dim)
+        shape_groups.setdefault(shape_key, []).append(model_name)
+
+    for index, represented_presets in enumerate(shape_groups.values()):
         if index:
             print()
         torch.manual_seed(args.seed + index)
-        benchmark_model(model_name, args, device)
+        benchmark_model(
+            represented_presets[0], represented_presets, args, device
+        )
 
 
 if __name__ == "__main__":

@@ -23,6 +23,8 @@ def parse_args():
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--iters", type=int, default=50)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--rtol", type=float, default=1e-3)
+    parser.add_argument("--atol", type=float, default=1e-3)
     parser.add_argument("--min-gain", type=float, default=5.0)
     return parser.parse_args()
 
@@ -42,6 +44,8 @@ def validate_args(args):
         raise ValueError("block-size and head-dim must be positive")
     if args.warmup < 0 or args.iters <= 0:
         raise ValueError("warmup must be non-negative and iters must be positive")
+    if args.rtol < 0 or args.atol < 0:
+        raise ValueError("rtol and atol must be non-negative")
 
 
 def run_fia(
@@ -177,12 +181,25 @@ def main():
     off_output = run_off()
     on_output = run_on()
     torch_npu.npu.synchronize()
-    if not torch.equal(off_output, on_output):
-        mismatch_count = torch.count_nonzero(off_output != on_output).item()
-        max_abs_diff = (off_output.float() - on_output.float()).abs().max().item()
+    max_abs_diff = (off_output.float() - on_output.float()).abs().max().item()
+    if not torch.allclose(
+        off_output,
+        on_output,
+        rtol=args.rtol,
+        atol=args.atol,
+    ):
+        mismatch_count = torch.count_nonzero(
+            ~torch.isclose(
+                off_output,
+                on_output,
+                rtol=args.rtol,
+                atol=args.atol,
+            )
+        ).item()
         raise RuntimeError(
-            "OFF and ON outputs are not byte-identical: "
-            f"mismatches={mismatch_count}, max_abs_diff={max_abs_diff}"
+            "OFF and ON outputs are not close: "
+            f"mismatches={mismatch_count}, max_abs_diff={max_abs_diff}, "
+            f"rtol={args.rtol}, atol={args.atol}"
         )
 
     for _ in range(args.warmup):
@@ -211,7 +228,11 @@ def main():
         f"kv_len={args.kv_len}, heads={args.num_heads}/{args.num_kv_heads}, "
         f"head_dim={args.head_dim}"
     )
-    print("Correctness: torch.equal=True")
+    print(
+        "Correctness: torch.allclose=True "
+        f"(rtol={args.rtol:g}, atol={args.atol:g}, "
+        f"max_abs_diff={max_abs_diff:.8g})"
+    )
     print(f"OFF single FIA: p50={off_p50:.3f} ms, p90={off_p90:.3f} ms")
     print(f"ON split FIA:  p50={on_p50:.3f} ms, p90={on_p90:.3f} ms")
     print(

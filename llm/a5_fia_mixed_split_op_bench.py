@@ -4,48 +4,125 @@
 import argparse
 import math
 import statistics
+from dataclasses import dataclass
 
 import torch
 import torch_npu
 
 
+@dataclass(frozen=True)
+class ModelShape:
+    model_id: str
+    num_heads: int
+    num_kv_heads: int
+    head_dim: int
+
+
+MODEL_PRESETS = {
+    "qwen3.5-27b": ModelShape("Qwen/Qwen3.5-27B", 24, 4, 256),
+    "qwen3.5-35b-a3b": ModelShape("Qwen/Qwen3.5-35B-A3B", 16, 2, 256),
+    "qwen3-32b": ModelShape("Qwen/Qwen3-32B", 64, 8, 128),
+    "qwen3-30b-a3b": ModelShape("Qwen/Qwen3-30B-A3B", 32, 4, 128),
+}
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", type=int, default=0)
-    parser.add_argument("--num-heads", type=int, default=8)
-    parser.add_argument("--num-kv-heads", type=int, default=2)
-    parser.add_argument("--head-dim", type=int, default=128)
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        choices=[*MODEL_PRESETS, "custom"],
+        help="model presets to benchmark; defaults to all presets",
+    )
+    parser.add_argument("--tp-size", type=int, default=1)
+    parser.add_argument("--num-heads", type=int, help="custom global query heads")
+    parser.add_argument("--num-kv-heads", type=int, help="custom global KV heads")
+    parser.add_argument("--head-dim", type=int, help="custom attention head dimension")
     parser.add_argument("--block-size", type=int, default=128)
     parser.add_argument("--prefill-tokens", type=int, default=1024)
     parser.add_argument("--decode-tokens", type=int, default=32)
     parser.add_argument("--kv-len", type=int, default=4096)
     parser.add_argument("--mask-size", type=int, default=2048)
     parser.add_argument("--warmup", type=int, default=10)
-    parser.add_argument("--iters", type=int, default=50)
+    parser.add_argument("--iters", type=int, default=200)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--rtol", type=float, default=1e-3)
     parser.add_argument("--atol", type=float, default=1e-3)
     parser.add_argument("--min-gain", type=float, default=5.0)
-    return parser.parse_args()
+    parser.add_argument("--alpha", type=float, default=0.05)
+    args = parser.parse_args()
+
+    custom_values = (args.num_heads, args.num_kv_heads, args.head_dim)
+    if args.models is None:
+        args.models = (
+            ["custom"]
+            if any(value is not None for value in custom_values)
+            else list(MODEL_PRESETS)
+        )
+    return args
 
 
 def validate_args(args):
-    if args.num_heads <= 0 or args.num_kv_heads <= 0:
-        raise ValueError("head counts must be positive")
-    if args.num_heads % args.num_kv_heads != 0:
-        raise ValueError("num-heads must be divisible by num-kv-heads")
     if args.prefill_tokens <= 0 or args.decode_tokens <= 0:
         raise ValueError("mixed input requires positive prefill and decode tokens")
     if args.kv_len < args.prefill_tokens:
         raise ValueError("kv-len must be at least prefill-tokens")
     if args.mask_size < args.prefill_tokens:
         raise ValueError("mask-size must be at least prefill-tokens")
-    if args.block_size <= 0 or args.head_dim <= 0:
-        raise ValueError("block-size and head-dim must be positive")
+    if args.block_size <= 0 or args.tp_size <= 0:
+        raise ValueError("block-size and tp-size must be positive")
     if args.warmup < 0 or args.iters <= 0:
         raise ValueError("warmup must be non-negative and iters must be positive")
     if args.rtol < 0 or args.atol < 0:
         raise ValueError("rtol and atol must be non-negative")
+    if not 0 < args.alpha < 1:
+        raise ValueError("alpha must be between 0 and 1")
+
+    custom_values = (args.num_heads, args.num_kv_heads, args.head_dim)
+    if "custom" in args.models:
+        if args.models != ["custom"]:
+            raise ValueError("custom cannot be combined with model presets")
+        if any(value is None or value <= 0 for value in custom_values):
+            raise ValueError(
+                "custom requires positive --num-heads, --num-kv-heads, "
+                "and --head-dim"
+            )
+    elif any(value is not None for value in custom_values):
+        raise ValueError("custom head arguments require --models custom")
+
+
+def resolve_model_shape(model_name, args):
+    if model_name == "custom":
+        shape = ModelShape(
+            "custom", args.num_heads, args.num_kv_heads, args.head_dim
+        )
+    else:
+        shape = MODEL_PRESETS[model_name]
+
+    if shape.num_heads % args.tp_size != 0:
+        raise ValueError(
+            f"{shape.model_id}: query heads {shape.num_heads} are not divisible "
+            f"by TP={args.tp_size}"
+        )
+    if shape.num_kv_heads >= args.tp_size:
+        if shape.num_kv_heads % args.tp_size != 0:
+            raise ValueError(
+                f"{shape.model_id}: KV heads {shape.num_kv_heads} are not "
+                f"divisible by TP={args.tp_size}"
+            )
+    elif args.tp_size % shape.num_kv_heads != 0:
+        raise ValueError(
+            f"{shape.model_id}: TP={args.tp_size} cannot evenly replicate "
+            f"{shape.num_kv_heads} KV heads"
+        )
+
+    return ModelShape(
+        shape.model_id,
+        shape.num_heads // args.tp_size,
+        max(1, shape.num_kv_heads // args.tp_size),
+        shape.head_dim,
+    )
 
 
 def run_fia(
@@ -56,22 +133,23 @@ def run_fia(
     mask,
     q_cumulative,
     kv_lengths,
-    args,
+    shape,
+    block_size,
 ):
     output, _ = torch.ops.npu.npu_fused_infer_attention_score(
         query,
         key,
         value,
-        num_heads=args.num_heads,
-        num_key_value_heads=args.num_kv_heads,
+        num_heads=shape.num_heads,
+        num_key_value_heads=shape.num_kv_heads,
         input_layout="TND",
-        block_size=args.block_size,
+        block_size=block_size,
         block_table=block_table,
         atten_mask=mask,
         sparse_mode=3,
         actual_seq_lengths=q_cumulative,
         actual_seq_lengths_kv=kv_lengths,
-        scale=1.0 / math.sqrt(args.head_dim),
+        scale=1.0 / math.sqrt(shape.head_dim),
     )
     return output
 
@@ -80,6 +158,19 @@ def percentile(values, fraction):
     ordered = sorted(values)
     index = max(0, math.ceil(fraction * len(ordered)) - 1)
     return ordered[index]
+
+
+def one_sided_sign_test(gains, threshold):
+    above = sum(gain > threshold for gain in gains)
+    below = sum(gain < threshold for gain in gains)
+    sample_count = above + below
+    if sample_count == 0:
+        return 1.0, above, sample_count
+    tail_count = sum(
+        math.comb(sample_count, successes)
+        for successes in range(above, sample_count + 1)
+    )
+    return tail_count / (2**sample_count), above, sample_count
 
 
 def measure_npu_ms(fn):
@@ -92,32 +183,25 @@ def measure_npu_ms(fn):
     return start.elapsed_time(end), output
 
 
-def main():
-    args = parse_args()
-    validate_args(args)
-
-    torch_npu.npu.set_device(args.device)
-    torch.manual_seed(args.seed)
-    device = torch.device(f"npu:{args.device}")
-    dtype = torch.bfloat16
-
+def benchmark_model(model_name, args, device):
+    shape = resolve_model_shape(model_name, args)
     num_requests = 1 + args.decode_tokens
     num_tokens = args.prefill_tokens + args.decode_tokens
     blocks_per_request = math.ceil(args.kv_len / args.block_size)
     num_blocks = num_requests * blocks_per_request
 
     query = torch.randn(
-        (num_tokens, args.num_heads, args.head_dim),
-        dtype=dtype,
+        (num_tokens, shape.num_heads, shape.head_dim),
+        dtype=torch.bfloat16,
         device=device,
     )
     key = torch.randn(
         (
             num_blocks,
             args.block_size,
-            args.num_kv_heads * args.head_dim,
+            shape.num_kv_heads * shape.head_dim,
         ),
-        dtype=dtype,
+        dtype=torch.bfloat16,
         device=device,
     )
     value = torch.randn_like(key)
@@ -149,7 +233,8 @@ def main():
             mask,
             mixed_q_cumulative,
             kv_lengths,
-            args,
+            shape,
+            args.block_size,
         )
 
     def run_on():
@@ -161,7 +246,8 @@ def main():
             mask,
             [args.prefill_tokens],
             kv_lengths[:1],
-            args,
+            shape,
+            args.block_size,
         )
         decode = run_fia(
             query[args.prefill_tokens :],
@@ -171,7 +257,8 @@ def main():
             mask,
             decode_q_cumulative,
             kv_lengths[1:],
-            args,
+            shape,
+            args.block_size,
         )
         output = torch.empty_like(query)
         output[: args.prefill_tokens].copy_(prefill)
@@ -219,14 +306,22 @@ def main():
     on_p50 = statistics.median(timings["on"])
     off_p90 = percentile(timings["off"], 0.9)
     on_p90 = percentile(timings["on"], 0.9)
-    gain = (off_p50 - on_p50) / off_p50 * 100.0
-    target = "PASS" if gain >= args.min_gain else "MISS"
+    paired_gains = [
+        (off_ms - on_ms) / off_ms * 100.0
+        for off_ms, on_ms in zip(timings["off"], timings["on"])
+    ]
+    median_gain = statistics.median(paired_gains)
+    p_value, successes, test_samples = one_sided_sign_test(
+        paired_gains, args.min_gain
+    )
+    reject_null = p_value < args.alpha
 
+    print(f"Model: {shape.model_id} (preset={model_name}, TP={args.tp_size})")
     print(
         "Shape: "
         f"prefill={args.prefill_tokens}, decode={args.decode_tokens}, "
-        f"kv_len={args.kv_len}, heads={args.num_heads}/{args.num_kv_heads}, "
-        f"head_dim={args.head_dim}"
+        f"kv_len={args.kv_len}, local_heads={shape.num_heads}/"
+        f"{shape.num_kv_heads}, head_dim={shape.head_dim}"
     )
     print(
         "Correctness: torch.allclose=True "
@@ -235,10 +330,31 @@ def main():
     )
     print(f"OFF single FIA: p50={off_p50:.3f} ms, p90={off_p90:.3f} ms")
     print(f"ON split FIA:  p50={on_p50:.3f} ms, p90={on_p90:.3f} ms")
+    print(f"Paired median gain: {median_gain:+.2f}% ({args.iters} pairs)")
+    print("Test: exact one-sided paired sign test")
+    print(f"H0: median paired gain <= {args.min_gain:.2f}%")
+    print(f"Ha: median paired gain > {args.min_gain:.2f}%")
     print(
-        f"Median gain: {gain:+.2f}% "
-        f"(target >= {args.min_gain:.2f}%: {target})"
+        f"alpha={args.alpha:g}, p-value={p_value:.6g}, "
+        f"pairs above H0 boundary={successes}/{test_samples}"
     )
+    print(
+        "Decision: "
+        + ("REJECT H0" if reject_null else "FAIL TO REJECT H0")
+    )
+
+
+def main():
+    args = parse_args()
+    validate_args(args)
+
+    torch_npu.npu.set_device(args.device)
+    device = torch.device(f"npu:{args.device}")
+    for index, model_name in enumerate(args.models):
+        if index:
+            print()
+        torch.manual_seed(args.seed + index)
+        benchmark_model(model_name, args, device)
 
 
 if __name__ == "__main__":

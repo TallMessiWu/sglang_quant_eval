@@ -47,7 +47,17 @@ def parse_args():
         choices=[*MODEL_PRESETS, "custom"],
         help="model presets; defaults to all, deduplicated by local FIA shape",
     )
-    parser.add_argument("--tp-size", type=int, default=1)
+    parser.add_argument(
+        "--tp-sizes",
+        nargs="+",
+        type=int,
+        help="simulated TP sizes; defaults to 1 2 4 8",
+    )
+    parser.add_argument(
+        "--tp-size",
+        type=int,
+        help="simulate one TP size (backward-compatible alias)",
+    )
     parser.add_argument("--num-heads", type=int, help="custom global query heads")
     parser.add_argument("--num-kv-heads", type=int, help="custom global KV heads")
     parser.add_argument("--head-dim", type=int, help="custom attention head dimension")
@@ -72,6 +82,15 @@ def parse_args():
             if any(value is not None for value in custom_values)
             else list(MODEL_PRESETS)
         )
+    if args.tp_sizes is not None and args.tp_size is not None:
+        parser.error("--tp-sizes and --tp-size cannot be used together")
+    args.tp_sizes = list(
+        dict.fromkeys(
+            args.tp_sizes
+            if args.tp_sizes is not None
+            else ([args.tp_size] if args.tp_size is not None else [1, 2, 4, 8])
+        )
+    )
     return args
 
 
@@ -82,8 +101,8 @@ def validate_args(args):
         raise ValueError("kv-len must be at least prefill-tokens")
     if args.mask_size < args.prefill_tokens:
         raise ValueError("mask-size must be at least prefill-tokens")
-    if args.block_size <= 0 or args.tp_size <= 0:
-        raise ValueError("block-size and tp-size must be positive")
+    if args.block_size <= 0 or any(tp_size <= 0 for tp_size in args.tp_sizes):
+        raise ValueError("block-size and all tp-sizes must be positive")
     if args.warmup < 0 or args.iters <= 0:
         raise ValueError("warmup must be non-negative and iters must be positive")
     if args.rtol < 0 or args.atol < 0:
@@ -104,7 +123,7 @@ def validate_args(args):
         raise ValueError("custom head arguments require --models custom")
 
 
-def resolve_model_shape(model_name, args):
+def resolve_model_shape(model_name, args, tp_size):
     if model_name == "custom":
         shape = ModelShape(
             "custom", args.num_heads, args.num_kv_heads, args.head_dim
@@ -112,27 +131,27 @@ def resolve_model_shape(model_name, args):
     else:
         shape = MODEL_PRESETS[model_name]
 
-    if shape.num_heads % args.tp_size != 0:
+    if shape.num_heads % tp_size != 0:
         raise ValueError(
             f"{shape.model_id}: query heads {shape.num_heads} are not divisible "
-            f"by TP={args.tp_size}"
+            f"by TP={tp_size}"
         )
-    if shape.num_kv_heads >= args.tp_size:
-        if shape.num_kv_heads % args.tp_size != 0:
+    if shape.num_kv_heads >= tp_size:
+        if shape.num_kv_heads % tp_size != 0:
             raise ValueError(
                 f"{shape.model_id}: KV heads {shape.num_kv_heads} are not "
-                f"divisible by TP={args.tp_size}"
+                f"divisible by TP={tp_size}"
             )
-    elif args.tp_size % shape.num_kv_heads != 0:
+    elif tp_size % shape.num_kv_heads != 0:
         raise ValueError(
-            f"{shape.model_id}: TP={args.tp_size} cannot evenly replicate "
+            f"{shape.model_id}: TP={tp_size} cannot evenly replicate "
             f"{shape.num_kv_heads} KV heads"
         )
 
     return ModelShape(
         shape.model_id,
-        shape.num_heads // args.tp_size,
-        max(1, shape.num_kv_heads // args.tp_size),
+        shape.num_heads // tp_size,
+        max(1, shape.num_kv_heads // tp_size),
         shape.head_dim,
     )
 
@@ -195,8 +214,8 @@ def measure_npu_ms(fn):
     return start.elapsed_time(end), output
 
 
-def benchmark_model(model_name, represented_presets, args, device):
-    shape = resolve_model_shape(model_name, args)
+def benchmark_model(model_name, represented_presets, tp_size, args, device):
+    shape = resolve_model_shape(model_name, args, tp_size)
     num_requests = 1 + args.decode_tokens
     num_tokens = args.prefill_tokens + args.decode_tokens
     blocks_per_request = math.ceil(args.kv_len / args.block_size)
@@ -337,7 +356,7 @@ def benchmark_model(model_name, represented_presets, args, device):
         for preset in represented_presets
     ]
     print(f"Models: {', '.join(represented_models)}")
-    print(f"Presets: {', '.join(represented_presets)} (TP={args.tp_size})")
+    print(f"Presets: {', '.join(represented_presets)} (TP={tp_size})")
     print(
         "Shape: "
         f"prefill={args.prefill_tokens}, decode={args.decode_tokens}, "
@@ -371,19 +390,29 @@ def main():
 
     torch_npu.npu.set_device(args.device)
     device = torch.device(f"npu:{args.device}")
-    shape_groups = {}
-    for model_name in args.models:
-        shape = resolve_model_shape(model_name, args)
-        shape_key = (shape.num_heads, shape.num_kv_heads, shape.head_dim)
-        shape_groups.setdefault(shape_key, []).append(model_name)
-
-    for index, represented_presets in enumerate(shape_groups.values()):
-        if index:
+    for tp_index, tp_size in enumerate(args.tp_sizes):
+        if tp_index:
             print()
-        torch.manual_seed(args.seed + index)
-        benchmark_model(
-            represented_presets[0], represented_presets, args, device
-        )
+        print(f"=== Simulated TP={tp_size} on one NPU rank ===")
+
+        shape_groups = {}
+        for model_name in args.models:
+            shape = resolve_model_shape(model_name, args, tp_size)
+            shape_key = (shape.num_heads, shape.num_kv_heads, shape.head_dim)
+            shape_groups.setdefault(shape_key, []).append(model_name)
+
+        for shape_index, represented_presets in enumerate(
+            shape_groups.values()
+        ):
+            print()
+            torch.manual_seed(args.seed + tp_index * 1000 + shape_index)
+            benchmark_model(
+                represented_presets[0],
+                represented_presets,
+                tp_size,
+                args,
+                device,
+            )
 
 
 if __name__ == "__main__":

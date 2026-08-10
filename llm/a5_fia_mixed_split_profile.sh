@@ -65,6 +65,7 @@ case "$action" in
 
         echo "Starting server with FIA mixed split: $mode"
         echo "Profiler output directory: $profile_dir"
+        echo "Prefill CUDA graph disabled so OFF and ON both exercise forward_mixed."
         exec sglang serve \
             --model-path "$model_path" \
             --host "$host" \
@@ -74,6 +75,7 @@ case "$action" in
             --context-length "$context_length" \
             --enable-mixed-chunk \
             --chunked-prefill-size "$chunked_prefill_size" \
+            --disable-prefill-cuda-graph \
             --reasoning-parser qwen3 \
             --trust-remote-code
         ;;

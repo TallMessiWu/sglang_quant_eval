@@ -191,17 +191,46 @@ def percentile(values, fraction):
     return ordered[index]
 
 
-def one_sided_sign_test(gains, threshold):
-    above = sum(gain > threshold for gain in gains)
-    below = sum(gain < threshold for gain in gains)
-    sample_count = above + below
+def one_sided_wilcoxon_signed_rank(values, threshold):
+    differences = [value - threshold for value in values if value != threshold]
+    sample_count = len(differences)
     if sample_count == 0:
-        return 1.0, above, sample_count
-    tail_count = sum(
-        math.comb(sample_count, successes)
-        for successes in range(above, sample_count + 1)
+        return 1.0, 0.0, sample_count
+
+    sorted_indices = sorted(
+        range(sample_count), key=lambda index: abs(differences[index])
     )
-    return tail_count / (2**sample_count), above, sample_count
+    ranks = [0.0] * sample_count
+    start = 0
+    while start < sample_count:
+        end = start + 1
+        absolute_value = abs(differences[sorted_indices[start]])
+        while (
+            end < sample_count
+            and abs(differences[sorted_indices[end]]) == absolute_value
+        ):
+            end += 1
+        average_rank = (start + 1 + end) / 2.0
+        for position in range(start, end):
+            ranks[sorted_indices[position]] = average_rank
+        start = end
+
+    scaled_ranks = [round(rank * 2) for rank in ranks]
+    observed_positive = sum(
+        rank
+        for rank, difference in zip(scaled_ranks, differences)
+        if difference > 0
+    )
+    total_rank = sum(scaled_ranks)
+    subset_counts = [0] * (total_rank + 1)
+    subset_counts[0] = 1
+    for rank in scaled_ranks:
+        for rank_sum in range(total_rank - rank, -1, -1):
+            subset_counts[rank_sum + rank] += subset_counts[rank_sum]
+
+    tail_count = sum(subset_counts[observed_positive:])
+    p_value = tail_count / (2**sample_count)
+    return p_value, observed_positive / 2.0, sample_count
 
 
 def measure_npu_ms(fn):
@@ -342,10 +371,6 @@ def benchmark_model(model_name, represented_presets, tp_size, args, device):
         for off_ms, on_ms in zip(timings["off"], timings["on"])
     ]
     median_gain = statistics.median(paired_gains)
-    p_value, successes, test_samples = one_sided_sign_test(
-        paired_gains, args.min_gain
-    )
-    reject_null = p_value < args.alpha
 
     represented_models = [
         (
@@ -371,17 +396,7 @@ def benchmark_model(model_name, represented_presets, tp_size, args, device):
     print(f"OFF single FIA: p50={off_p50:.3f} ms, p90={off_p90:.3f} ms")
     print(f"ON split FIA:  p50={on_p50:.3f} ms, p90={on_p90:.3f} ms")
     print(f"Paired median gain: {median_gain:+.2f}% ({args.iters} pairs)")
-    print("Test: exact one-sided paired sign test")
-    print(f"H0: median paired gain <= {args.min_gain:.2f}%")
-    print(f"Ha: median paired gain > {args.min_gain:.2f}%")
-    print(
-        f"alpha={args.alpha:g}, p-value={p_value:.6g}, "
-        f"pairs above H0 boundary={successes}/{test_samples}"
-    )
-    print(
-        "Decision: "
-        + ("REJECT H0" if reject_null else "FAIL TO REJECT H0")
-    )
+    return f"TP={tp_size} {','.join(represented_presets)}", median_gain
 
 
 def main():
@@ -390,6 +405,7 @@ def main():
 
     torch_npu.npu.set_device(args.device)
     device = torch.device(f"npu:{args.device}")
+    configuration_results = []
     for tp_index, tp_size in enumerate(args.tp_sizes):
         if tp_index:
             print()
@@ -406,13 +422,51 @@ def main():
         ):
             print()
             torch.manual_seed(args.seed + tp_index * 1000 + shape_index)
-            benchmark_model(
-                represented_presets[0],
-                represented_presets,
-                tp_size,
-                args,
-                device,
+            configuration_results.append(
+                benchmark_model(
+                    represented_presets[0],
+                    represented_presets,
+                    tp_size,
+                    args,
+                    device,
+                )
             )
+
+    configuration_gains = [gain for _, gain in configuration_results]
+    p_value, positive_rank_sum, test_samples = (
+        one_sided_wilcoxon_signed_rank(
+            configuration_gains, args.min_gain
+        )
+    )
+    reject_null = p_value < args.alpha
+    above_target = sum(gain > args.min_gain for gain in configuration_gains)
+    worst_label, worst_gain = min(
+        configuration_results, key=lambda result: result[1]
+    )
+
+    print()
+    print("=== Overall decision across unique local FIA configurations ===")
+    print(
+        "Aggregation: one paired median gain per unique local shape within "
+        "each TP"
+    )
+    print("Test: exact one-sided Wilcoxon signed-rank test")
+    print(f"H0: configuration-level gain is centered at <= {args.min_gain:.2f}%")
+    print(f"Ha: configuration-level gain is centered at > {args.min_gain:.2f}%")
+    print(
+        f"alpha={args.alpha:g}, p-value={p_value:.6g}, "
+        f"W+={positive_rank_sum:.1f}, n={test_samples}"
+    )
+    print(
+        f"Configurations above target: {above_target}/"
+        f"{len(configuration_results)}"
+    )
+    print(f"Worst configuration: {worst_label}, gain={worst_gain:+.2f}%")
+    print(
+        "Decision: "
+        + ("REJECT H0" if reject_null else "FAIL TO REJECT H0")
+    )
+    print("Overall verdict: " + ("PASS" if reject_null else "MISS"))
 
 
 if __name__ == "__main__":

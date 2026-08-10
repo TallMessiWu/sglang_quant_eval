@@ -18,7 +18,7 @@ Environment overrides:
   MODEL_PATH, SERVER_HOST, SERVER_PORT, TP_SIZE, CONTEXT_LENGTH
   CHUNKED_PREFILL_SIZE
   PROFILE_ROOT, NUM_PROMPTS, INPUT_LEN, OUTPUT_LEN, REQUEST_RATE
-  MAX_CONCURRENCY, WARMUP_REQUESTS, PROFILE_NUM_STEPS
+  MAX_CONCURRENCY, PROFILE_NUM_STEPS
 EOF
 }
 
@@ -78,20 +78,41 @@ case "$action" in
             --trust-remote-code
         ;;
     profile)
-        num_prompts=${NUM_PROMPTS:-128}
+        num_prompts=${NUM_PROMPTS:-12}
         input_len=${INPUT_LEN:-4096}
-        output_len=${OUTPUT_LEN:-512}
-        request_rate=${REQUEST_RATE:-4}
-        max_concurrency=${MAX_CONCURRENCY:-32}
-        warmup_requests=${WARMUP_REQUESTS:-16}
-        profile_num_steps=${PROFILE_NUM_STEPS:-20}
+        output_len=${OUTPUT_LEN:-64}
+        request_rate=${REQUEST_RATE:-8}
+        max_concurrency=${MAX_CONCURRENCY:-8}
+        profile_num_steps=${PROFILE_NUM_STEPS:-8}
+        base_url="http://${host}:${port}"
+        trace_dir="${profile_dir}/$(date +%Y%m%d-%H%M%S)"
 
-        mkdir -p "$profile_dir"
+        mkdir -p "$trace_dir"
         echo "Profiling FIA mixed split mode: $mode"
-        echo "If no mixed marker appears, rerun with REQUEST_RATE=8, then 16."
-        exec python3 -m sglang.benchmark.serving \
+        echo "Trace directory: $trace_dir"
+        echo "If no mixed marker appears, rerun with REQUEST_RATE=16."
+
+        printf -v profile_payload \
+            '{"activities":["CPU","GPU"],"num_steps":%s,"profile_by_stage":false,"with_stack":false,"record_shapes":false,"output_dir":"%s","profile_prefix":"%s"}' \
+            "$profile_num_steps" "$trace_dir" "$mode"
+
+        curl --fail --silent --show-error \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --data-binary "$profile_payload" \
+            "${base_url}/start_profile"
+        echo
+
+        stop_profile() {
+            curl --silent --show-error \
+                --request POST \
+                "${base_url}/stop_profile" >/dev/null 2>&1 || true
+        }
+        trap stop_profile EXIT
+
+        python3 -m sglang.benchmark.serving \
             --backend sglang \
-            --base-url "http://${host}:${port}" \
+            --base-url "$base_url" \
             --dataset-name random \
             --num-prompts "$num_prompts" \
             --random-input-len "$input_len" \
@@ -101,15 +122,11 @@ case "$action" in
             --max-concurrency "$max_concurrency" \
             --tokenize-prompt \
             --seed 0 \
-            --warmup-requests "$warmup_requests" \
-            --profile \
-            --profile-by-stage \
-            --profile-stages prefill \
-            --profile-num-steps "$profile_num_steps" \
-            --profile-activities CPU GPU \
-            --profile-prefix "$mode" \
-            --profile-output-dir "$profile_dir" \
-            --output-file "${profile_dir}/benchmark.jsonl"
+            --warmup-requests 0 \
+            --output-file "${trace_dir}/benchmark.jsonl"
+
+        trap - EXIT
+        stop_profile
         ;;
     *)
         echo "Invalid action: $action (expected serve or profile)" >&2

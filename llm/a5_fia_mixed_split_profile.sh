@@ -108,9 +108,8 @@ case "$action" in
                 --request POST \
                 "${base_url}/stop_profile" >/dev/null 2>&1 || true
         }
-        trap stop_profile EXIT
 
-        python3 -m sglang.benchmark.serving \
+        if ! python3 -m sglang.benchmark.serving \
             --backend sglang \
             --base-url "$base_url" \
             --dataset-name random \
@@ -123,10 +122,10 @@ case "$action" in
             --tokenize-prompt \
             --seed 0 \
             --warmup-requests 0 \
-            --output-file "${trace_dir}/benchmark.jsonl"
-
-        trap - EXIT
-        stop_profile
+            --output-file "${trace_dir}/benchmark.jsonl"; then
+            stop_profile
+            exit 1
+        fi
         ;;
     *)
         echo "Invalid action: $action (expected serve or profile)" >&2

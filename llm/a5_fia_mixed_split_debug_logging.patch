@@ -1,18 +1,28 @@
 Debug tracing for the A5 mixed-chunk FIA split.
 
 Adds one-shot logger.info probes along the whole MIXED dispatch chain, so a
-single request shows exactly how far a mixed batch gets:
+single request shows exactly how far a mixed batch gets. Every probe fires at
+most once per process, so a missing line means that stage was never reached --
+that is the point.
 
-  Scheduler.get_new_batch_prefill      -> "scheduler formed MIXED"
-  TpModelWorker.forward_batch_generation -> "worker received MIXED ForwardBatch"
-  ModelRunner._forward_raw             -> "ModelRunner dispatches MIXED: path="
-  EagerRunner._execute_extend          -> "EagerRunner executes MIXED"
-  RadixAttention.forward               -> "RadixAttention sees MIXED: backend="
-  PrefillCudaGraphRunner.load_batch    -> "not dispatched: ... replays as EXTEND"
-  AscendAttnBackend.forward_mixed      -> "mixed forward: decision=split|single"
+Expected sequence for one mixed batch (all seven lines, in this order):
 
-Every probe fires at most once per process, so a missing line means that
-stage was never reached -- that is the point.
+  Scheduler.get_new_batch_prefill        "scheduler formed MIXED"
+  TpModelWorker.forward_batch_generation "worker received MIXED ForwardBatch"
+  PrefillCudaGraphRunner.can_run_graph   "prefill graph declines MIXED"
+  ModelRunner._forward_raw               "dispatches MIXED: path=eager"
+  EagerRunner._execute_extend            "EagerRunner executes MIXED"
+  RadixAttention.forward                 "sees MIXED: backend=..."
+  AscendAttnBackend.forward_mixed        "mixed forward: decision=split"
+
+Two lines are failure signals, not normal output:
+
+  "dispatches MIXED: path=prefill_graph"  -- can_run_graph() let the batch
+      through; the split is about to be lost.
+  "Ascend FIA BUG: a MIXED batch reached the prefill CUDA graph"  -- same
+      failure, observed one layer deeper. Check that
+      attn_backend.enable_fia_mixed_split is still mirrored onto whatever
+      wrapper ModelRunner holds.
 
 Apply / revert from the SGLang worktree root, not from this repo:
 
@@ -20,11 +30,10 @@ Apply / revert from the SGLang worktree root, not from this repo:
   git apply    ../../llm/a5_fia_mixed_split_debug_logging.patch   # add prints
   git apply -R ../../llm/a5_fia_mixed_split_debug_logging.patch   # remove them
 
-Check before committing to SGLang -- this patch is a debugging aid and is not
-meant to be pushed. Generated against SGLang commit 691a02fb69; if it stops
-applying, regenerate it with:
-
-  git diff 691a02fb69 1a3fb20fac -- python/
+This is a debugging aid -- do not commit it to the SGLang branch. Run
+`git status` before committing there. Hand-maintained against SGLang commit
+1e0e0d6355; if it stops applying, re-apply what still fits, fix the rejected
+hunks by hand, and regenerate with `git diff -- python/`.
 
 diff --git a/python/sglang/srt/hardware_backend/npu/attention/ascend_backend.py b/python/sglang/srt/hardware_backend/npu/attention/ascend_backend.py
 index 771f476c1d..304a8cbabe 100644
@@ -271,10 +280,23 @@ index 3c716c840c..cafac70b35 100644
          if cp_v2_active:
              prepare_cp_forward(forward_batch)
 diff --git a/python/sglang/srt/model_executor/runner/prefill_cuda_graph_runner.py b/python/sglang/srt/model_executor/runner/prefill_cuda_graph_runner.py
-index 63f477fc3e..63664681c0 100644
+index 14673a7355..12297b6e3b 100644
 --- a/python/sglang/srt/model_executor/runner/prefill_cuda_graph_runner.py
 +++ b/python/sglang/srt/model_executor/runner/prefill_cuda_graph_runner.py
-@@ -1452,6 +1452,19 @@ class PrefillCudaGraphRunner(BaseCudaGraphRunner):
+@@ -1098,6 +1098,12 @@ class PrefillCudaGraphRunner(BaseCudaGraphRunner):
+             forward_batch.forward_mode == ForwardMode.MIXED
+             and self.model_runner.attn_backend.enable_fia_mixed_split
+         ):
++            if not getattr(self, "_logged_fia_mixed_eager_fallback", False):
++                logger.info(
++                    "Ascend FIA prefill graph declines MIXED: routing to the "
++                    "eager runner to preserve ForwardMode.MIXED"
++                )
++                self._logged_fia_mixed_eager_fallback = True
+             return False
+ 
+         # DP check: group verdict from the schedule-time all-gather
+@@ -1464,6 +1470,20 @@ class PrefillCudaGraphRunner(BaseCudaGraphRunner):
              else forward_batch.num_token_non_padded
          )
  
@@ -286,8 +308,9 @@ index 63f477fc3e..63664681c0 100644
 +            and not getattr(self, "_logged_fia_mixed_graph_normalization", False)
 +        ):
 +            logger.info(
-+                "Ascend FIA mixed split is not dispatched: the prefill CUDA "
-+                "graph replays this MIXED batch as EXTEND"
++                "Ascend FIA BUG: a MIXED batch reached the prefill CUDA graph "
++                "and is being replayed as EXTEND -- can_run_graph() should "
++                "have declined it, so the split is silently disabled"
 +            )
 +            self._logged_fia_mixed_graph_normalization = True
 +

@@ -1,0 +1,296 @@
+Debug tracing for the A5 mixed-chunk FIA split.
+
+Adds one-shot logger.info probes along the whole MIXED dispatch chain, so a
+single request shows exactly how far a mixed batch gets:
+
+  Scheduler.get_new_batch_prefill      -> "scheduler formed MIXED"
+  TpModelWorker.forward_batch_generation -> "worker received MIXED ForwardBatch"
+  ModelRunner._forward_raw             -> "ModelRunner dispatches MIXED: path="
+  EagerRunner._execute_extend          -> "EagerRunner executes MIXED"
+  RadixAttention.forward               -> "RadixAttention sees MIXED: backend="
+  PrefillCudaGraphRunner.load_batch    -> "not dispatched: ... replays as EXTEND"
+  AscendAttnBackend.forward_mixed      -> "mixed forward: decision=split|single"
+
+Every probe fires at most once per process, so a missing line means that
+stage was never reached -- that is the point.
+
+Apply / revert from the SGLang worktree root, not from this repo:
+
+  cd sglang/a5_fia_mixed_split
+  git apply    ../../llm/a5_fia_mixed_split_debug_logging.patch   # add prints
+  git apply -R ../../llm/a5_fia_mixed_split_debug_logging.patch   # remove them
+
+Check before committing to SGLang -- this patch is a debugging aid and is not
+meant to be pushed. Generated against SGLang commit 691a02fb69; if it stops
+applying, regenerate it with:
+
+  git diff 691a02fb69 1a3fb20fac -- python/
+
+diff --git a/python/sglang/srt/hardware_backend/npu/attention/ascend_backend.py b/python/sglang/srt/hardware_backend/npu/attention/ascend_backend.py
+index 771f476c1d..304a8cbabe 100644
+--- a/python/sglang/srt/hardware_backend/npu/attention/ascend_backend.py
++++ b/python/sglang/srt/hardware_backend/npu/attention/ascend_backend.py
+@@ -349,6 +349,7 @@ class AscendAttnBackend(AttentionBackend):
+             and not self.use_mla
+             and supports_fia_mixed_split()
+         )
++        self._logged_fia_mixed_decisions = set()
+         if speculative_step_id == 0:
+             logger.info(
+                 "Ascend FIA mixed split is %s (ASCEND_USE_FIA=%s, "
+@@ -3051,7 +3052,39 @@ class AscendAttnBackend(AttentionBackend):
+ 
+         query = q.reshape(-1, layer.tp_q_head_num, layer.qk_head_dim)
+ 
+-        if self._should_split_fia_mixed(layer, topk_indices):
++        should_split = self._should_split_fia_mixed(layer, topk_indices)
++        decision = "split" if should_split else "single"
++        logged_decisions = getattr(self, "_logged_fia_mixed_decisions", set())
++        if decision not in logged_decisions:
++            metadata = self.forward_metadata
++            num_prefill_tokens = metadata.mixed_num_prefill_tokens
++            num_prefill_reqs = metadata.mixed_num_prefill_reqs
++            logger.info(
++                "Ascend FIA mixed forward: decision=%s, layer=%s, "
++                "tokens=%s (prefill=%s, decode=%s), requests=%s "
++                "(prefill=%s, decode=%s), sliding_window=%s",
++                decision,
++                layer.layer_id,
++                query.shape[0],
++                num_prefill_tokens,
++                (
++                    query.shape[0] - num_prefill_tokens
++                    if num_prefill_tokens is not None
++                    else None
++                ),
++                metadata.block_tables.shape[0],
++                num_prefill_reqs,
++                (
++                    metadata.block_tables.shape[0] - num_prefill_reqs
++                    if num_prefill_reqs is not None
++                    else None
++                ),
++                layer.sliding_window_size,
++            )
++            logged_decisions.add(decision)
++            self._logged_fia_mixed_decisions = logged_decisions
++
++        if should_split:
+             with profile_range("ascend.fia_mixed.split"):
+                 attn_output = self._forward_fia_mixed_split(
+                     query, key, value, layer, block_size
+diff --git a/python/sglang/srt/layers/radix_attention.py b/python/sglang/srt/layers/radix_attention.py
+index e440aac242..1056e48100 100644
+--- a/python/sglang/srt/layers/radix_attention.py
++++ b/python/sglang/srt/layers/radix_attention.py
+@@ -15,6 +15,7 @@
+ 
+ from __future__ import annotations
+ 
++import logging
+ from contextlib import contextmanager
+ from contextvars import ContextVar
+ from enum import Enum
+@@ -36,6 +37,8 @@ from sglang.srt.utils.common import is_hip
+ from sglang.srt.utils.custom_op import register_custom_op
+ 
+ _is_hip = is_hip()
++logger = logging.getLogger(__name__)
++_logged_fia_mixed_radix_dispatch = False
+ 
+ # When set, RadixAttention.forward runs the attention backend eagerly instead of
+ # routing through the tc-piecewise split op. A caller already inside a
+@@ -157,6 +160,8 @@ class RadixAttention(nn.Module):
+         key_value_num_tokens: Optional[int] = None,
+         **kwargs,
+     ):
++        global _logged_fia_mixed_radix_dispatch
++
+         if k is not None:
+             # For cross-layer sharing, kv can be None
+             assert v is not None
+@@ -167,6 +172,21 @@ class RadixAttention(nn.Module):
+                 k = k.view(-1, self.tp_k_head_num, self.v_head_dim)
+ 
+         context = get_tc_piecewise_forward_context()
++        if (
++            forward_batch.forward_mode.is_mixed()
++            and not torch.compiler.is_compiling()
++            and not _logged_fia_mixed_radix_dispatch
++        ):
++            attn_backend = get_attn_backend()
++            if getattr(attn_backend, "enable_fia_mixed_split", False):
++                logger.info(
++                    "Ascend FIA RadixAttention sees MIXED: layer=%s, "
++                    "tc_piecewise_context=%s, backend=%s",
++                    self.layer_id,
++                    context is not None,
++                    type(attn_backend).__name__,
++                )
++                _logged_fia_mixed_radix_dispatch = True
+         if (
+             forward_batch.forward_mode.is_extend()
+             and context is not None
+diff --git a/python/sglang/srt/managers/scheduler.py b/python/sglang/srt/managers/scheduler.py
+index ea281ee485..8945a00cad 100644
+--- a/python/sglang/srt/managers/scheduler.py
++++ b/python/sglang/srt/managers/scheduler.py
+@@ -1076,6 +1076,7 @@ class Scheduler(
+             ipc_channels=self.ipc_channels,
+         )
+         self._last_logged_elastic_radix_namespace: Optional[str] = None
++        self._logged_fia_mixed_batch = False
+         self.session_controller = SessionController(self.tree_cache)
+         self.forward_sleep_time = None
+         self._engine_paused = False
+@@ -1103,6 +1104,14 @@ class Scheduler(
+         self.is_mixed_chunk = (
+             self.chunked_prefill_size is not None and get_schedule().enable_mixed_chunk
+         )
++        if _is_npu and get_bool_env_var("ASCEND_USE_FIA", "False"):
++            logger.info(
++                "Ascend FIA mixed scheduler: enabled=%s, "
++                "chunked_prefill_size=%s, enable_mixed_chunk=%s",
++                self.is_mixed_chunk,
++                self.chunked_prefill_size,
++                get_schedule().enable_mixed_chunk,
++            )
+ 
+         # Init the dynamic chunking predictor for PP
+         self.enable_dynamic_chunking = (
+@@ -3288,6 +3297,20 @@ class Scheduler(
+             running_batch.filter_batch()
+             if not running_batch.is_empty():
+                 running_batch.prepare_for_decode()
++                if (
++                    _is_npu
++                    and get_bool_env_var("ASCEND_USE_FIA", "False")
++                    and not self._logged_fia_mixed_batch
++                ):
++                    logger.info(
++                        "Ascend FIA scheduler formed MIXED: "
++                        "prefill_requests=%s, prefill_tokens=%s, "
++                        "decode_requests=%s",
++                        new_batch.batch_size(),
++                        new_batch.extend_num_tokens,
++                        running_batch.batch_size(),
++                    )
++                    self._logged_fia_mixed_batch = True
+                 new_batch.mix_with_running(running_batch)
+                 new_batch.decoding_reqs = running_batch.reqs
+             running_batch = ScheduleBatch(
+diff --git a/python/sglang/srt/managers/tp_worker.py b/python/sglang/srt/managers/tp_worker.py
+index d3768d48ad..81304dd01f 100644
+--- a/python/sglang/srt/managers/tp_worker.py
++++ b/python/sglang/srt/managers/tp_worker.py
+@@ -562,6 +562,23 @@ class TpModelWorker(BaseTpWorker):
+                 capture_hidden_mode is None
+             ), "capture_hidden_mode override requires a ScheduleBatch input"
+ 
++        if (
++            forward_batch.forward_mode.is_mixed()
++            and getattr(
++                self.model_runner.attn_backend, "enable_fia_mixed_split", False
++            )
++            and not getattr(self, "_logged_fia_mixed_forward_batch", False)
++        ):
++            logger.info(
++                "Ascend FIA worker received MIXED ForwardBatch: "
++                "tokens=%s, requests=%s, prefill_tokens=%s, prefill_requests=%s",
++                forward_batch.input_ids.shape[0],
++                forward_batch.batch_size,
++                forward_batch.mixed_num_prefill_tokens,
++                forward_batch.mixed_num_prefill_reqs,
++            )
++            self._logged_fia_mixed_forward_batch = True
++
+         # Deprecated kwarg: pre-planners mark the batch themselves now.
+         forward_batch.apply_deprecated_skip_attn_backend_init(skip_attn_backend_init)
+ 
+diff --git a/python/sglang/srt/model_executor/model_runner.py b/python/sglang/srt/model_executor/model_runner.py
+index d91c513280..289ad69334 100644
+--- a/python/sglang/srt/model_executor/model_runner.py
++++ b/python/sglang/srt/model_executor/model_runner.py
+@@ -1515,6 +1515,32 @@ class ModelRunner:
+             # dispatch below reads the pool.
+             self._maybe_execute_deferred_mamba_cow_and_clear(forward_batch)
+ 
++            if (
++                forward_batch.forward_mode.is_mixed()
++                and getattr(self.attn_backend, "enable_fia_mixed_split", False)
++                and not getattr(self, "_logged_fia_mixed_runner_dispatch", False)
++            ):
++                prefill_runner = self.prefill_cuda_graph_runner
++                prefill_graph_selected = bool(
++                    not isinstance(prefill_runner, EagerRunner)
++                    and prefill_runner is not None
++                    and prefill_runner.can_run_graph(forward_batch)
++                    and _prefill_cuda_graph_allows_context_parallel(
++                        prefill_runner, forward_batch
++                    )
++                )
++                logger.info(
++                    "Ascend FIA ModelRunner dispatches MIXED: path=%s, "
++                    "prefill_runner=%s",
++                    "prefill_graph" if prefill_graph_selected else "eager",
++                    (
++                        type(prefill_runner).__name__
++                        if prefill_runner is not None
++                        else None
++                    ),
++                )
++                self._logged_fia_mixed_runner_dispatch = True
++
+             dwdp_mgr = get_global_dwdp_manager()
+             if dwdp_mgr is not None:
+                 dwdp_mgr.prefetch_first_layers()
+diff --git a/python/sglang/srt/model_executor/runner/eager_runner.py b/python/sglang/srt/model_executor/runner/eager_runner.py
+index 3c716c840c..cafac70b35 100644
+--- a/python/sglang/srt/model_executor/runner/eager_runner.py
++++ b/python/sglang/srt/model_executor/runner/eager_runner.py
+@@ -259,6 +259,21 @@ class EagerRunner(BaseRunner):
+         if not self.enable_pdmux:
+             forward_batch = self.load_batch(forward_batch, pp_proxy_tensors)
+ 
++        if (
++            forward_batch.forward_mode.is_mixed()
++            and getattr(model_runner.attn_backend, "enable_fia_mixed_split", False)
++            and not getattr(self, "_logged_fia_mixed_eager_batch", False)
++        ):
++            logger.info(
++                "Ascend FIA EagerRunner executes MIXED: tokens=%s, requests=%s, "
++                "prefill_tokens=%s, prefill_requests=%s",
++                forward_batch.input_ids.shape[0],
++                forward_batch.batch_size,
++                forward_batch.mixed_num_prefill_tokens,
++                forward_batch.mixed_num_prefill_reqs,
++            )
++            self._logged_fia_mixed_eager_batch = True
++
+         cp_v2_active = is_cp_v2_active(forward_batch)
+         if cp_v2_active:
+             prepare_cp_forward(forward_batch)
+diff --git a/python/sglang/srt/model_executor/runner/prefill_cuda_graph_runner.py b/python/sglang/srt/model_executor/runner/prefill_cuda_graph_runner.py
+index 63f477fc3e..63664681c0 100644
+--- a/python/sglang/srt/model_executor/runner/prefill_cuda_graph_runner.py
++++ b/python/sglang/srt/model_executor/runner/prefill_cuda_graph_runner.py
+@@ -1452,6 +1452,19 @@ class PrefillCudaGraphRunner(BaseCudaGraphRunner):
+             else forward_batch.num_token_non_padded
+         )
+ 
++        if (
++            forward_batch.forward_mode == ForwardMode.MIXED
++            and getattr(
++                self.model_runner.attn_backend, "enable_fia_mixed_split", False
++            )
++            and not getattr(self, "_logged_fia_mixed_graph_normalization", False)
++        ):
++            logger.info(
++                "Ascend FIA mixed split is not dispatched: the prefill CUDA "
++                "graph replays this MIXED batch as EXTEND"
++            )
++            self._logged_fia_mixed_graph_normalization = True
++
+         # Normalize MIXED→EXTEND so dynamo's guard (captured with EXTEND=1)
+         # doesn't fail on MIXED=3.
+         pcg_forward_mode = (

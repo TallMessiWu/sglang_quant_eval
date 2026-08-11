@@ -4,3 +4,6 @@ AGENTS.md   merge=ours
 
 # Shell 脚本强制 LF，保证在 Linux 服务器上可直接执行（CRLF 会导致 bad interpreter）
 *.sh text eol=lf
+
+# Patch 文件强制 LF，CRLF 会让 git apply 报 corrupt patch
+*.patch text eol=lf

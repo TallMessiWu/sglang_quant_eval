@@ -8,6 +8,11 @@
 # 拆分只在调度器真的形成 mixed batch 时才生效，所以这里必须带
 # --enable-mixed-chunk，且 --chunked-prefill-size 要小于请求的输入长度，
 # 否则 prefill 一步做完，永远不会和 decode 混在同一个 batch 里。
+#
+# --chunked-prefill-size 同时是 mixed batch 里 prefill 段的长度上限：调大
+# 输入长度没用，那一段永远不会超过这个值。vllm-ascend#11948 测出收益的
+# 那个 batch，prefill 段有 11274 token，收益的大头（566us / 全部 811us）
+# 就来自 prefill 段本身变规整；chunk 开在 1024 基本榨不出这部分。
 
 set -euo pipefail
 
@@ -25,8 +30,9 @@ usage() {
   SERVER_HOST           监听地址      (默认 127.0.0.1)
   SERVER_PORT           监听端口      (默认 $VLLM_PORT，再默认 30000)
   TP_SIZE               张量并行      (默认 1)
-  CONTEXT_LENGTH        最大上下文    (默认 5000)
-  CHUNKED_PREFILL_SIZE  prefill 分块  (默认 1024)
+  CONTEXT_LENGTH        最大上下文    (默认 10240)
+  CHUNKED_PREFILL_SIZE  prefill 分块  (默认 4096，同时是 mixed batch 里
+                                       prefill 段的长度上限)
   BENCH_ROOT            结果/trace 根 (默认 <repo>/llm/fia_bench)
 EOF
 }
@@ -56,8 +62,8 @@ model_path=${MODEL_PATH:-/home/weights/Qwen3.5-27B}
 host=${SERVER_HOST:-127.0.0.1}
 port=${SERVER_PORT:-${VLLM_PORT:-30000}}
 tp_size=${TP_SIZE:-1}
-context_length=${CONTEXT_LENGTH:-5000}
-chunked_prefill_size=${CHUNKED_PREFILL_SIZE:-1024}
+context_length=${CONTEXT_LENGTH:-10240}
+chunked_prefill_size=${CHUNKED_PREFILL_SIZE:-4096}
 bench_root=${BENCH_ROOT:-${repo_root}/llm/fia_bench}
 profile_dir="${bench_root}/${mode}"
 

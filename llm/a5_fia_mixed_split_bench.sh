@@ -29,12 +29,16 @@ usage() {
 用法:
   a5_fia_mixed_split_bench.sh run <off|on> [--profile]
   a5_fia_mixed_split_bench.sh compare
+  a5_fia_mixed_split_bench.sh verify
   a5_fia_mixed_split_bench.sh inspect <服务日志>
 
 示例:
   ./llm/a5_fia_mixed_split_bench.sh run off
   ./llm/a5_fia_mixed_split_bench.sh run on
   ./llm/a5_fia_mixed_split_bench.sh compare
+
+  # 精度：off/on 生成文本逐字节比对
+  ./llm/a5_fia_mixed_split_bench.sh verify
 
   # 先确认负载造对了：看 mixed batch 的实际形态
   ./llm/a5_fia_mixed_split_bench.sh inspect on.log
@@ -156,6 +160,7 @@ case "$action" in
             --tokenize-prompt \
             --seed 0 \
             --warmup-requests 1 \
+            --output-details \
             --output-file "${run_dir}/benchmark.jsonl"
 
         echo
@@ -244,6 +249,78 @@ print()
 print("正数 = on 更好。delta 小于任一侧的 spread 时，这个差异是噪声，不是信号。")
 print("拆分只作用于 mixed batch，先用 inspect 确认 mixed 占总步数的比例 ——")
 print("端到端涨幅的上限约等于「算子涨幅 x mixed 步占比 x attention 占单步的比重」。")
+PY
+        ;;
+
+    verify)
+        # 精度验证：off/on 用同一个 seed、同样的长度、temperature=0，逐条比对
+        # 生成文本。这是唯一能覆盖 SGLang 真实实现的多 decode 请求路径的手段
+        # —— op bench 的对拍是自己复现了一遍拆分逻辑，走不到
+        # _forward_fia_mixed_split 里 block_table / seq_lens 的多请求切片。
+        if ! compgen -G "${bench_root}/off/*/benchmark.jsonl" >/dev/null \
+            || ! compgen -G "${bench_root}/on/*/benchmark.jsonl" >/dev/null; then
+            echo "❌ 找不到两组结果，off 和 on 各跑一次再来 verify" >&2
+            exit 1
+        fi
+
+        python3 - "${bench_root}/off" "${bench_root}/on" <<'PY'
+import glob
+import json
+import os
+import sys
+
+
+def latest_texts(directory):
+    paths = sorted(glob.glob(os.path.join(directory, "*", "benchmark.jsonl")))
+    if not paths:
+        sys.exit(f"{directory} 下没有结果")
+    path = paths[-1]
+    with open(path, encoding="utf-8") as handle:
+        rows = [json.loads(line) for line in handle if line.strip()]
+    if not rows:
+        sys.exit(f"{path} 里没有结果")
+    texts = rows[-1].get("generated_texts")
+    if texts is None:
+        sys.exit(
+            f"{path} 里没有 generated_texts。这次运行是在加 --output-details "
+            "之前跑的，off 和 on 都要重跑一次。"
+        )
+    return path, texts
+
+
+off_path, off_texts = latest_texts(sys.argv[1])
+on_path, on_texts = latest_texts(sys.argv[2])
+print(f"off: {off_path}  ({len(off_texts)} 条)")
+print(f"on : {on_path}  ({len(on_texts)} 条)")
+print()
+
+if len(off_texts) != len(on_texts):
+    sys.exit(
+        f"❌ 请求数不一致 ({len(off_texts)} vs {len(on_texts)})，"
+        "两组必须用同一套负载参数"
+    )
+
+mismatches = [
+    (index, a, b)
+    for index, (a, b) in enumerate(zip(off_texts, on_texts))
+    if a != b
+]
+
+if not mismatches:
+    print(f"✅ {len(off_texts)}/{len(off_texts)} 条输出逐字节一致")
+    sys.exit(0)
+
+print(f"❌ {len(mismatches)}/{len(off_texts)} 条输出不一致")
+for index, a, b in mismatches[:3]:
+    # 定位第一个分叉的字符，贪心解码下这里就是数值差异首次改变 argmax 的位置
+    diverge = next(
+        (i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b))
+    )
+    print()
+    print(f"--- 请求 {index}，第 {diverge} 个字符处分叉 ---")
+    print(f"  off: ...{a[max(0, diverge - 40):diverge + 40]!r}")
+    print(f"  on : ...{b[max(0, diverge - 40):diverge + 40]!r}")
+sys.exit(1)
 PY
         ;;
 
@@ -356,7 +433,7 @@ PY
         ;;
 
     *)
-        echo "❌ 无效动作: $action (应为 run / compare / inspect)" >&2
+        echo "❌ 无效动作: $action (应为 run / compare / verify / inspect)" >&2
         usage
         exit 2
         ;;

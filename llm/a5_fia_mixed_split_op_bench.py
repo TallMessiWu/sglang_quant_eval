@@ -65,6 +65,10 @@ def parse_args():
     parser.add_argument("--prefill-tokens", type=int, default=1024)
     parser.add_argument("--decode-tokens", type=int, default=32)
     parser.add_argument("--kv-len", type=int, default=4096)
+    # sparse_mode=3 下 atten_mask 是压缩模板，kernel 内部按 causal 规则展开，
+    # 所以它不需要大于等于 prefill-tokens。这里的默认值对应 SGLang 运行时写死的
+    # AscendAttnMaskBuilder.mixed_chunk_attn_mask 尺寸(2048)，改了就不是在测
+    # 真实配置了。
     parser.add_argument("--mask-size", type=int, default=2048)
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--iters", type=int, default=200)
@@ -99,8 +103,8 @@ def validate_args(args):
         raise ValueError("mixed input requires positive prefill and decode tokens")
     if args.kv_len < args.prefill_tokens:
         raise ValueError("kv-len must be at least prefill-tokens")
-    if args.mask_size < args.prefill_tokens:
-        raise ValueError("mask-size must be at least prefill-tokens")
+    if args.mask_size <= 0:
+        raise ValueError("mask-size must be positive")
     if args.block_size <= 0 or any(tp_size <= 0 for tp_size in args.tp_sizes):
         raise ValueError("block-size and all tp-sizes must be positive")
     if args.warmup < 0 or args.iters <= 0:

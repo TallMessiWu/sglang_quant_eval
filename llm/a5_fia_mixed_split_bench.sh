@@ -41,7 +41,8 @@ usage() {
   ./llm/a5_fia_mixed_split_bench.sh verify
 
   # 底噪基线：同为 off 的两次运行互比，量硬件本身的不确定性
-  ./llm/a5_fia_mixed_split_bench.sh verify \n      llm/fia_bench/off/20260812-100000 llm/fia_bench/off/20260812-101500
+  ./llm/a5_fia_mixed_split_bench.sh verify \
+      llm/fia_bench/off/20260812-100000 llm/fia_bench/off/20260812-101500
 
   # 先确认负载造对了：看 mixed batch 的实际形态
   ./llm/a5_fia_mixed_split_bench.sh inspect on.log

@@ -29,7 +29,7 @@ usage() {
 用法:
   a5_fia_mixed_split_bench.sh run <off|on> [--profile]
   a5_fia_mixed_split_bench.sh compare
-  a5_fia_mixed_split_bench.sh verify
+  a5_fia_mixed_split_bench.sh verify [<目录A> <目录B>]
   a5_fia_mixed_split_bench.sh inspect <服务日志>
 
 示例:
@@ -39,6 +39,9 @@ usage() {
 
   # 精度：off/on 生成文本逐字节比对
   ./llm/a5_fia_mixed_split_bench.sh verify
+
+  # 底噪基线：同为 off 的两次运行互比，量硬件本身的不确定性
+  ./llm/a5_fia_mixed_split_bench.sh verify \n      llm/fia_bench/off/20260812-100000 llm/fia_bench/off/20260812-101500
 
   # 先确认负载造对了：看 mixed batch 的实际形态
   ./llm/a5_fia_mixed_split_bench.sh inspect on.log
@@ -257,13 +260,14 @@ PY
         # 生成文本。这是唯一能覆盖 SGLang 真实实现的多 decode 请求路径的手段
         # —— op bench 的对拍是自己复现了一遍拆分逻辑，走不到
         # _forward_fia_mixed_split 里 block_table / seq_lens 的多请求切片。
-        if ! compgen -G "${bench_root}/off/*/benchmark.jsonl" >/dev/null \
-            || ! compgen -G "${bench_root}/on/*/benchmark.jsonl" >/dev/null; then
-            echo "❌ 找不到两组结果，off 和 on 各跑一次再来 verify" >&2
-            exit 1
-        fi
+        # 默认比 off 与 on。也可以显式传两个目录，用来先跑一次同模式的基线
+        # 对照（off 的两次运行互比）—— bf16 归约顺序在 NPU 上不保证稳定，
+        # 个别 token 的 argmax 可能翻转，不先量出这个底噪就无法判断 off/on
+        # 的差异是拆分算错了还是硬件抖动。
+        dir_a=${1:-${bench_root}/off}
+        dir_b=${2:-${bench_root}/on}
 
-        python3 - "${bench_root}/off" "${bench_root}/on" <<'PY'
+        python3 - "$dir_a" "$dir_b" <<'PY'
 import glob
 import json
 import os
@@ -271,10 +275,15 @@ import sys
 
 
 def latest_texts(directory):
-    paths = sorted(glob.glob(os.path.join(directory, "*", "benchmark.jsonl")))
-    if not paths:
-        sys.exit(f"{directory} 下没有结果")
-    path = paths[-1]
+    # 既接受模式目录(取其中最新一次运行)，也接受具体某一次运行的目录
+    direct = os.path.join(directory, "benchmark.jsonl")
+    if os.path.isfile(direct):
+        path = direct
+    else:
+        paths = sorted(glob.glob(os.path.join(directory, "*", "benchmark.jsonl")))
+        if not paths:
+            sys.exit(f"{directory} 下没有结果")
+        path = paths[-1]
     with open(path, encoding="utf-8") as handle:
         rows = [json.loads(line) for line in handle if line.strip()]
     if not rows:

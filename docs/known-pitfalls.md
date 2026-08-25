@@ -131,17 +131,15 @@ Qwen3.5 在线 W4A8 的首次图片请求会进入视觉塔 QKV；该层带一�
 
 ---
 
-## sglang 文档已迁到 `docs_new/docs/`，改 legacy `docs/` 会被 CI 拒
+## sglang 文档路径迁移过两次；长期分支里的 `docs_new/` 改动会被 merge 静默吞掉
 
-（2026-07-06 踩，`junlin_qwen3_dense_w4a8` PR #23650）
+（2026-07-06 踩第一次，`junlin_qwen3_dense_w4a8` PR #23650；2026-08-25 踩第二次，PR #32602）
 
-upstream 把文档从 `docs/`（`.md`）迁到 **`docs_new/docs/`（`.mdx`）**，`lint` job 有个 step「reject changes under legacy docs/」用 `git diff origin/main...HEAD | xargs scripts/ci/check_no_docs_changes.py` 检出任何 `docs/` 下改动（allowlist 除外）就 fail，连累 pr-gate/pr-test-*。
+upstream 先把文档从 `docs/`（`.md`）迁到 `docs_new/docs/`（`.mdx`），**之后又把 `docs_new/` 改回 `docs/`**。当前 main 只有 `docs/docs/**/*.mdx`，`docs_new/` 与当年那个 `scripts/ci/check_no_docs_changes.py` 守卫都已不存在。
 
-**改文档一律去 `docs_new/docs/` 对应位置**（路径也重构了，如 `docs/platforms/ascend/ascend_npu_quantization.md` → `docs_new/docs/hardware-platforms/ascend-npus/ascend_npu_quantization.mdx`，且是 HTML `<table>` + JSX `style={{color:'green'}}`，非 md 表）。
+**改文档一律去 `docs/docs/` 对应位置**，用 `.mdx`（HTML `<table>` + JSX `style={{color:'green'}}`，非 md 表）。改之前先 `git ls-tree -r upstream/main --name-only | grep <关键词>` 确认真实路径，不要照抄旧文档快照——Ascend 量化页面这一路走过 `docs/platforms/ascend/ascend_npu_quantization.md` → `docs_new/docs/hardware-platforms/ascend-npus/ascend_npu_quantization.mdx` → `docs/docs/hardware-platforms/ascend-npus/optimization/quantization.mdx`。
 
-已在 legacy `docs/` 加过行的旧 PR 要**把 legacy 文件还原到 base**（`git checkout <merge-base> -- docs/...`，净 diff 不含 docs/ 即过）+ 在 docs_new 补等价内容。
-
-注意本地 `pre-commit run --files <legacy doc>` 会误报（hook `pass_filenames:false` 读 `git diff --cached`，只要 legacy 被 staged 就 fail）——以「净 diff 模拟」`git diff <base> --name-only | xargs python3 scripts/ci/check_no_docs_changes.py` 为准。
+**最危险的是长期分支**：目录改名 + 文件重排后 git 的 rename 检测认不出来，合并 `upstream/main` 时**不报冲突**，只是把你在 `docs_new/` 下的改动一起删掉。合并后必须 `git diff upstream/main -- docs` 复核自己的文档改动还在不在，为空就说明被吞了，要手动搬到新路径。
 
 ---
 
@@ -230,3 +228,23 @@ strided weight/scale view（w8a8 上实测 -6.6% 提升）在 **w4a8 分支的 N
 strided 优化版存档在分支 **`junlin_qwen3_dense_w4a8_strided`**（72fa20005）。
 
 **教训**：`.contiguous()` 去留是「硬件/kernel 相关」，不要跨分支照搬 w8a8 的 layout 优化，需各自 NPU benchmark。
+
+---
+
+## NPU kernel 类在 CPU 上构造即炸，CPU 单测写不出来
+
+（2026-08-25 踩，PR #32601）
+
+`HiddenStatesDynamicQuant.__init__` 曾直接 `self._op = torch.ops.npu.npu_dynamic_mx_quant`。没装 torch_npu 时 `torch.ops.npu` 是空 namespace，属性访问就 `AttributeError`，于是 `NPUW4A8MXFP4MoEMethod()` / `NPUW4A4MXFP4MoEMethod()` 构造不出来，连带持有它们的 `ModelSlimW4A8MXFP4MoE` / `ModelSlimW4A4MXFP4MoE` 也无法在 CPU 上实例化——`register_cpu_ci` 的 scheme 测试一行都写不了。
+
+已改成首次调用时 `getattr(torch.ops.npu, self._op_name)`：dtype 校验仍在 `__init__` 里立刻报错，缺 torch_npu 依然在真正执行时炸得很响。**新写 NPU kernel 类时别在 `__init__` 里绑 `torch.ops.npu.*`**，否则等价于宣布这条路径没有 CPU 覆盖。
+
+---
+
+## 新增 MoE 量化方案前先查 `moe_quant_schemes`，重名条目会变死代码
+
+（2026-08-25 踩，PR #32601 / #32602）
+
+`ModelSlimConfig.get_moe_scheme` 用一张 `[(scheme_name, scheme_class), ...]` 列表按顺序匹配，命中第一条就返回。上游 [#30318](https://github.com/sgl-project/sglang/pull/30318) / [#30319](https://github.com/sgl-project/sglang/pull/30319) 已把 `W4A8_MXFP` → `ModelSlimW4A8MXFP4MoE`、`W4A4_MXFP4` → `ModelSlimW4A4MXFP4MoE` 注册进去；长期分支里再追加一条同名条目**不会冲突也不会报错**，只是排在后面永远匹配不到，整套自研 scheme 变成死代码。
+
+同理，`hardware_backend/npu/quantization/moe_methods.py` 里上游已有 `NPUW4A8MXFP4MoEMethod` / `NPUW4A4MXFP4MoEMethod`。要加在线量化就在这些类里按权重 dtype 分支（BF16/FP16 = 在线，uint8 = 离线 checkpoint），不要另起一个平行类。

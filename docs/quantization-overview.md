@@ -29,11 +29,13 @@ Offline 启动脚本通常不显式传 `--quantization modelslim`；以 checkpoi
 | Dense W4A4 MXFP4 | 已合并 [#23795](https://github.com/sgl-project/sglang/pull/23795)；packed loader 修复 [#32013](https://github.com/sgl-project/sglang/pull/32013) 已合并 | 双级 MXFP4 | 单级 packed MXFP4 |
 | MoE W8A8 MXFP8 | 已合并 [#30768](https://github.com/sgl-project/sglang/pull/30768) | 是 | 是 |
 | Qwen3.5 ModelSlim / 视觉塔 W8A8 适配 | Open Draft [#32266](https://github.com/sgl-project/sglang/pull/32266) | 复用已合并能力 | GDN mapping、视觉塔和 partial scale 适配 |
-| MoE W4A8 MXFP | Open Draft [#32601](https://github.com/sgl-project/sglang/pull/32601) | 已实现，待当前分支验证闭环 | 已实现，待当前分支验证闭环 |
-| MoE W4A4 MXFP4 | Open Draft [#32602](https://github.com/sgl-project/sglang/pull/32602) | 已实现，待当前分支验证闭环 | 已实现，待当前分支验证闭环 |
+| MoE W4A8 MXFP | 离线已合并 [#30318](https://github.com/sgl-project/sglang/pull/30318)；在线入口 Open Draft [#32601](https://github.com/sgl-project/sglang/pull/32601) | `--quantization mxfp_w4a8` 的 experts 分支，待 A5 验证闭环 | 是（`ModelSlimW4A8MXFP4MoE`） |
+| MoE W4A4 MXFP4 | 离线已合并 [#30319](https://github.com/sgl-project/sglang/pull/30319)；在线入口 Open Draft [#32602](https://github.com/sgl-project/sglang/pull/32602) | `--quantization mxfp4` 的 experts 分支，待 A5 验证闭环 | 是（`ModelSlimW4A4MXFP4MoE`） |
 | Qwen3.5 Gemma RMSNorm on 950 | SGLang [#32745](https://github.com/sgl-project/sglang/pull/32745) + kernel [#638](https://github.com/sgl-project/sgl-kernel-npu/pull/638) | 构建期 wheel provider | 同一稳定 API |
 
 “已实现”不等于当前分支已完成硬件验收；以 PR 正文的最新 Validation/TODO 和真实 A5/A2/A3 日志为准。
+
+MoE 的离线 MXFP4 路径已由上游 #30318 / #30319 落地，#32601 与 #32602 只剩在线量化入口；相关去重与注册表陷阱见 [known-pitfalls.md](known-pitfalls.md)。
 
 ## SGLang 关键路径
 
@@ -48,7 +50,7 @@ Offline 启动脚本通常不显式传 `--quantization modelslim`；以 checkpoi
 
 ### LLM Dense / ModelSlim
 
-- `srt/layers/quantization/linear_method_npu.py`：NPU Dense quantized linear 方法
+- `srt/hardware_backend/npu/quantization/linear_method_npu.py`：NPU Dense quantized linear 方法
 - `srt/layers/quantization/npu_mxfp4.py`：在线 W4A8 配置与 Linear 分发
 - `srt/layers/quantization/npu_mxfp4_w4a4.py`：在线 W4A4 配置与 NPU 分发
 - `srt/layers/quantization/modelslim/modelslim.py`：ModelSlim Linear/MoE scheme 分发

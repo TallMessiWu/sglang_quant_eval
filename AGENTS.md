@@ -24,7 +24,7 @@
 6. `sglang/` 整体被主仓 `.gitignore` 忽略，不是子模块；SGLang 提交和推送都在具体 worktree 内完成，主仓不记录其 gitlink。
 7. worktree、PR 或远程映射变化后，更新 [docs/branches.md](docs/branches.md)，不要把易漂移的 HEAD/PR 状态复制回本文件。
 
-当前映射见 [docs/branches.md](docs/branches.md)。其中还记录了一个历史遗留、位于系统临时目录的 `junlin_codeowners` worktree；它不是活跃 PR worktree，禁止继续在那里改代码，复用该分支前必须迁回 `sglang/`。
+当前映射见 [docs/branches.md](docs/branches.md)。历史遗留、位于系统临时目录的 `junlin_codeowners` worktree 已清除；复用该分支必须先在 `sglang/` 下新建 worktree。
 
 ## 仓库与远程约定
 

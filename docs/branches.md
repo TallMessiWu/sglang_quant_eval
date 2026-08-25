@@ -22,9 +22,9 @@
 | SGLang [#34387](https://github.com/sgl-project/sglang/pull/34387) — A5 mixed chunked-prefill FIA split | Open Draft | `junlin_a5_fia_mixed_split` | `b56ef226ad` | `sglang/a5_fia_mixed_split/` |
 | sgl-kernel-npu [#638](https://github.com/sgl-project/sgl-kernel-npu/pull/638) — portable Gemma RMSNorm API | Open | `codex/a5-gemma-rmsnorm-csrc` | `99421ab5b6` | `sgl-kernel-npu/` |
 
-核对时，上表 6 个 GitHub head SHA 均与本地 checkout 完全一致，本地 7 个 SGLang worktree 与 kernel checkout 均无未提交改动。#32745 与 #638 已从 draft 转为正式 PR。
+核对时，上表 6 个 GitHub head SHA 均与本地 checkout 完全一致，本地 6 个 SGLang worktree 与 kernel checkout 均无未提交改动。#32745 与 #638 已从 draft 转为正式 PR。
 
-主仓当前记录的 `sgl-kernel-npu` gitlink 是 `bdffead11a`，而 PR #638 checkout 是 `99421ab5b6`，所以主仓 `git status` 会显示 `M sgl-kernel-npu`。这表示子模块 checkout 与主仓快照不同，不表示 kernel worktree 内有未提交文件；只有明确要让主仓固定到 #638 版本时才更新 gitlink。
+主仓 `sgl-kernel-npu` gitlink 已于 2026-08-25 记录到 PR #638 的 `99421ab5b6`，与子模块 checkout 一致，`git status` 不再显示 `M sgl-kernel-npu`。该 commit 位于开发 fork 的 `codex/a5-gemma-rmsnorm-csrc` 分支而非 `main`；#638 后续如有新提交或被合并压缩，gitlink 会重新落后，只在用户明确要记录新版本时才更新。
 
 ## SGLang worktree 结构
 
@@ -33,7 +33,6 @@ sglang/
 ├── qwen3.5_dense_w8a8/   # 主 clone；持有共享 .git；PR #32745
 ├── a5_fia_mixed_split/   # 派生 worktree；base upstream/main @ 5efe9b104d；PR #34387
 ├── ascend_moe_lora/      # 派生 worktree；junlin-ascend-moe-lora；base upstream/main @ f2c84de022
-├── remove-vllm-ascend-comments/ # 派生 worktree；PR #34829 已合并，目录待清理
 ├── qwen3.5_moe_w8a8/     # 派生 worktree；PR #32266
 ├── qwen3.5_moe_w4a8/     # 派生 worktree；PR #32601
 └── qwen3.5_moe_w4a4/     # 派生 worktree；PR #32602
@@ -41,15 +40,7 @@ sglang/
 
 强制规则：**每个需要修改 SGLang 代码的分支，都必须在 `sglang/` 下有独立 worktree。** 不得在现有目录中切换功能分支，也不得直接在外部临时 worktree 修改。
 
-当前共享仓库仍注册了一个历史 worktree：
-
-```text
-%LOCALAPPDATA%/Temp/claude/.../scratchpad/sglang-codeowners
-  branch: junlin_codeowners
-  HEAD:   78b216ea63
-```
-
-它不是当前 open PR 的工作目录，也不符合新规则。不要继续在那里修改；若要复用 `junlin_codeowners`，先确认旧目录可移除，再在 `sglang/` 下重新创建 worktree。
+共享仓库曾在系统临时目录注册过一个 `junlin_codeowners` worktree，其目录已消失，注册记录已于 2026-08-25 用 `git worktree prune` 清除。分支 `junlin_codeowners`（`78b216ea63`）本身保留；要复用它必须在 `sglang/` 下新建 worktree，不得再在仓库外目录修改。
 
 ## 分支依赖
 
@@ -66,7 +57,7 @@ sglang/
 
 - SGLang [#30768](https://github.com/sgl-project/sglang/pull/30768)（MoE W8A8）已于 2026-07-29 合并。
 - SGLang [#32013](https://github.com/sgl-project/sglang/pull/32013)（ModelSlim packed MXFP4 loader）已于 2026-07-29 合并。
-- SGLang [#34829](https://github.com/sgl-project/sglang/pull/34829)（清理 NPU 量化注释）已于 2026-08-21 合并；本地 `sglang/remove-vllm-ascend-comments/` 仍停在 `11013cb37c`，确认无用后可移除该 worktree。
+- SGLang [#34829](https://github.com/sgl-project/sglang/pull/34829)（清理 NPU 量化注释）已于 2026-08-21 合并；对应 worktree 已于 2026-08-25 移除，分支 `junlin-remove-vllm-ascend-comments`（`11013cb37c`）仍在本地与 fork 远程。
 - 活跃 PR 正文或 diff 若仍显示前两个前置 PR，表示功能分支尚未完成基于最新 `main` 的栈清理；不要再把它们记为 open dependency。
 
 ## 操作前核对

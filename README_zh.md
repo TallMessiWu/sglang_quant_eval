@@ -13,14 +13,14 @@
 
 ## 📁 仓库结构
 
-- `sglang/` — SGLang fork 的本地 `git worktree` 容器，将 **2 个活跃分支** 同时 checkout、共享同一个 `.git`。`qwen3_moe_w8a8/` 是主 clone，`qwen3.5_dense_w8a8/` 是派生 worktree。整个目录**纯本地、gitignore**——主仓不再跟踪任何 sglang 子模块。已合并功能 (Diffusion MXFP8/MXFP4、Dense W8A8/W4A8/W4A4) 都在 `upstream/main`。worktree 与分支的对应关系、已合并 PR 清单见 `AGENTS.md`。
+- `sglang/` — SGLang fork 的本地、gitignored `git worktree` 容器。`qwen3.5_dense_w8a8/` 是持有共享 `.git` 的主 clone，其他活跃 PR 分支是同级 worktree。所有需要修改 SGLang 代码的分支都必须在此目录下拥有独立 worktree；实时映射见 `docs/branches.md`。
 - `MindIE-SD/` — 华为 MindIE-SD 源码 (子模块，跟踪 `dev`)；**Diffusion** 侧 Ascend NPU MXFP8/FP8 操作的主要参考实现。
 - `msmodelslim/` — 华为 msmodelslim 源码 (子模块，跟踪 `master`)；**离线** MXFP4/MXFP8 权重导出格式的参考。
 - `vllm-ascend/` — vLLM Ascend 后端 (子模块，跟踪 `main`)；**LLM** 侧 MXFP 量化实现的主要参考标准。
-- `sgl-kernel-npu/` — 上游 NPU kernel 仓 (子模块，跟踪 `main`)；提供量化路径运行时 import 的 `sgl_kernel_npu` (RoPE、triton norm 等)。
+- `sgl-kernel-npu/` — NPU kernel 子模块；开发 `origin` 为 `TallMessiWu/sgl-kernel-npu`，官方 `upstream` 为 `sgl-project/sgl-kernel-npu`，向 SGLang 提供稳定 NPU API。
 - `diffusion/` & `llm/` — Diffusion (Wan2.2) 与 LLM (Qwen3/3.5) 推理及量化的运行脚本、量化描述 JSON 和 PR 说明。
-- `docs/` — 项目文档：`branches.md` (分支/PR 状态)、`known-pitfalls.md`、`sgl-kernel-npu-build.md`、`npu-api/` (Ascend kernel API 参考——`DualLevelQuantBatchMatmul`、`DynamicDualLevelMxQuant`)、`agents/` (agent 工作流文档)。
-- `AGENTS.md` — AI 助手指令及项目上下文；**唯一内容源** (`CLAUDE.md` 为指向它的软链接)。
+- `docs/` — 项目文档：`branches.md`（实时 PR/worktree/remote）、`quantization-overview.md`（能力矩阵与代码路径）、`known-pitfalls.md`、`sgl-kernel-npu-build.md`、`npu-api/`、`agents/`。
+- `AGENTS.md` — 精简后的 AI 助手操作规则和文档入口 (`CLAUDE.md` 为指向它的软链接)；易漂移状态统一放在 `docs/branches.md`。
 - `.agents/skills/` — AI Agent 自定义技能 (`.claude/skills` 为指向该目录的软链接)。
 - `README.md` / `README_zh.md` — 中英文项目自述文档。
 
@@ -31,11 +31,11 @@
 1. **在线量化**: 加载 FP16/BF16 权重，在 `process_weights_after_loading` 中实时量化。用 `--quantization mxfp8` / `mxfp4` / `mxfp_w4a8` 触发。
 2. **离线量化 (msmodelslim)**: 加载由华为 `msmodelslim` 工具生成的预量化权重。用 `--quantization modelslim` 触发，scheme 由 `quant_model_description.json` 自动检测。
 
-核心 `torch_npu` API 包括 `npu_dynamic_mx_quant` + `npu_quant_matmul` (MXFP8 / W4A8) 与 `npu_dynamic_dual_level_mx_quant` + `npu_dual_level_quant_matmul` (双级 MXFP4 / W4A4)。完整实现进度矩阵见 `AGENTS.md`。
+核心 `torch_npu` API 包括 `npu_dynamic_mx_quant` + `npu_quant_matmul` (MXFP8 / W4A8) 与 `npu_dynamic_dual_level_mx_quant` + `npu_dual_level_quant_matmul` (双级 MXFP4 / W4A4)。完整实现进度矩阵见 `docs/quantization-overview.md`。
 
 ## 💻 环境要求
 
-- **硬件**: 华为 Ascend NPU。MXFP8 / W8A8 / W4A8 可在 Atlas 800I A2/A3 上运行；**双级 MXFP4 (W4A4) 需 Ascend 950 (A5)**——`DualLevelQuantBatchMatmul` 算子在 A2/A3 上不支持。
+- **硬件**: 华为 Ascend NPU。支持范围取决于具体路径：双级 MXFP4 和当前 MXFP MoE grouped-matmul 路径需要 Ascend 950 (A5)，部分 Dense MXFP 路径也支持 A2/A3。不要只按格式名推断硬件支持，应核对实际算子。
 - **软件**: CANN ≥ 8.0.RC3 (支持 `npu_dynamic_mx_quant` / MXFP8 的必需版本)；MXFP4 需较新的 `torch_npu` (如 `2.10.0.postX`)。
 - **依赖**: `torch`、`torch_npu` 以及 SGLang 的相关依赖。
 
@@ -46,6 +46,7 @@
 - `sglang-quant-lookup`、`trace-quant-path` — 查找 / 追踪 SGLang 量化实现。
 - `mxfp4-impl-ref`、`mxfp8-impl-ref` — MXFP4/MXFP8 完整实现参考 (API 签名、shape、gotchas)。
 - `npu-api-check`、`compare-impl` — 分析 `torch_npu` API 用法；与 MindIE-SD、vllm-ascend 对比。
+- `sgl-kernel-npu-dev` — 核对 remote/submodule 状态，构建并验证 910/950 target-specific kernel wheel。
 - `check-issue` — 检查与本项目相关的 SGLang Issue/PR 状态。
 - `gitmoji-commit` — 生成符合 Gitmoji 规范的提交信息。
 - 以及工程/工作流类技能 (`diagnose`、`tdd`、`triage`、`handoff` 等)。完整列表见 `.agents/skills/` 目录。

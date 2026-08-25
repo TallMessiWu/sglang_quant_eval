@@ -1,6 +1,13 @@
 .vscode
 .idea
 .claude/settings.local.json
-# sglang: 全部 worktree 纯本地不跟踪(主仓不再有 sglang 子模块)
-# qwen3_moe_w8a8 是主 clone(持有共享 .git),qwen3.5_dense_w8a8 由它派生
+# sglang: 全部 worktree 纯本地不跟踪（主仓不再有 sglang 子模块）
+# qwen3.5_dense_w8a8 是当前主 clone（持有共享 .git），其他功能目录由它派生
 sglang/
+
+# benchmark 结果与 torch profiler trace：跑一次就是几十 MB，只在本机有意义
+llm/fia_bench/
+llm/profiling/
+
+# 一次性渲染产物（进度图 HTML/PNG），只在本机有意义
+artifacts/

@@ -12,5 +12,5 @@
 	branch = main
 [submodule "sgl-kernel-npu"]
 	path = sgl-kernel-npu
-	url = https://github.com/sgl-project/sgl-kernel-npu.git
+	url = https://github.com/TallMessiWu/sgl-kernel-npu.git
 	branch = main

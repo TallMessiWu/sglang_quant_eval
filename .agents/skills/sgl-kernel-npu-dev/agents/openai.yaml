@@ -1,0 +1,4 @@
+interface:
+  display_name: "SGL Kernel NPU Dev"
+  short_description: "Build and validate target-specific NPU kernel wheels"
+  default_prompt: "Use $sgl-kernel-npu-dev to inspect or update the sgl-kernel-npu integration safely."

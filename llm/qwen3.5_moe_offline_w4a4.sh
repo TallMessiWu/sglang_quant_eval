@@ -22,7 +22,7 @@ export ASCEND_USE_FIA=1
 sglang serve \
     --model-path /mnt/weight/Qwen3.5-35B-A3B-mxfp-w4a4 \
     --host 127.0.0.1 \
-    --port $VLLM_PORT \
+    --port ${VLLM_PORT:-6969} \
     --device npu \
     --tp 1 \
     --reasoning-parser qwen3 \

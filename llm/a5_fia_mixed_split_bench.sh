@@ -52,7 +52,7 @@ usage() {
 
 环境变量覆盖:
   SERVER_HOST      服务地址        (默认 127.0.0.1)
-  SERVER_PORT      服务端口        (默认 $VLLM_PORT，再默认 30000)
+  SERVER_PORT      服务端口        (默认 $VLLM_PORT，再默认 6969)
   DATASET_PATH     ShareGPT 数据集 (默认 /home/hajimi/benchmark/ShareGPT_V3_unfiltered_cleaned_split.json)
   NUM_PROMPTS      请求总数        (默认 96)
   INPUT_LEN        输入长度        (默认 8192，要大于服务端分块大小)
@@ -75,7 +75,7 @@ script_dir=$(dirname "$(readlink -f "$0")")
 repo_root=$(dirname "$script_dir")
 
 host=${SERVER_HOST:-127.0.0.1}
-port=${SERVER_PORT:-${VLLM_PORT:-30000}}
+port=${SERVER_PORT:-${VLLM_PORT:-6969}}
 base_url="http://${host}:${port}"
 bench_root=${BENCH_ROOT:-${repo_root}/llm/fia_bench}
 

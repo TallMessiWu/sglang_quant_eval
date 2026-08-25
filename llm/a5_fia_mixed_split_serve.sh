@@ -28,7 +28,7 @@ usage() {
 环境变量覆盖:
   MODEL_PATH            模型权重      (默认 /home/weights/Qwen3.5-27B)
   SERVER_HOST           监听地址      (默认 127.0.0.1)
-  SERVER_PORT           监听端口      (默认 $VLLM_PORT，再默认 30000)
+  SERVER_PORT           监听端口      (默认 $VLLM_PORT，再默认 6969)
   TP_SIZE               张量并行      (默认 1)
   CONTEXT_LENGTH        最大上下文    (默认 10240)
   CHUNKED_PREFILL_SIZE  prefill 分块  (默认 4096，同时是 mixed batch 里
@@ -60,7 +60,7 @@ repo_root=$(dirname "$script_dir")
 
 model_path=${MODEL_PATH:-/home/weights/Qwen3.5-27B}
 host=${SERVER_HOST:-127.0.0.1}
-port=${SERVER_PORT:-${VLLM_PORT:-30000}}
+port=${SERVER_PORT:-${VLLM_PORT:-6969}}
 tp_size=${TP_SIZE:-1}
 context_length=${CONTEXT_LENGTH:-10240}
 chunked_prefill_size=${CHUNKED_PREFILL_SIZE:-4096}

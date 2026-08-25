@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import re
 import sys
 import urllib.error
@@ -313,7 +314,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     capture_parser = subparsers.add_parser("capture", help="Capture a fixed batch")
     capture_parser.add_argument("--case", choices=("base", "mixed"), required=True)
-    capture_parser.add_argument("--base-url", default="http://127.0.0.1:30000")
+    capture_parser.add_argument(
+        "--base-url", default=f"http://127.0.0.1:{os.environ.get('VLLM_PORT', '6969')}"
+    )
     capture_parser.add_argument("--output", type=Path, required=True)
     capture_parser.add_argument("--replays", type=int, default=3)
     capture_parser.add_argument("--timeout", type=float, default=600.0)

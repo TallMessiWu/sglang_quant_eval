@@ -17,7 +17,7 @@ Required for the lora server:
 Optional environment:
   SGLANG_DIR          SGLang checkout (default: <repo>/sglang/ascend_moe_lora)
   SERVER_HOST         Listen address (default: 127.0.0.1)
-  SERVER_PORT         Listen port (default: VLLM_PORT or 30000)
+  SERVER_PORT         Listen port (default: VLLM_PORT or 6969)
   TP_SIZE             Tensor parallel size (default: number of NPU IDs, else 1)
   CONTEXT_LENGTH      Maximum context length (default: 4096)
   MEM_FRACTION_STATIC Static memory fraction (default: 0.80)
@@ -87,7 +87,7 @@ else
 fi
 
 host=${SERVER_HOST:-127.0.0.1}
-port=${SERVER_PORT:-${VLLM_PORT:-30000}}
+port=${SERVER_PORT:-${VLLM_PORT:-6969}}
 tp_size=${TP_SIZE:-$default_tp_size}
 context_length=${CONTEXT_LENGTH:-4096}
 mem_fraction_static=${MEM_FRACTION_STATIC:-0.80}

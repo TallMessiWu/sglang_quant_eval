@@ -18,7 +18,7 @@ export ASCEND_USE_FIA=1
 sglang serve \
     --model-path /mnt/share/weight/Qwen3.5-35B-A3B \
     --host 127.0.0.1 \
-    --port $VLLM_PORT \
+    --port ${VLLM_PORT:-6969} \
     --quantization mxfp_w4a8 \
     --device npu \
     --tp 1 \

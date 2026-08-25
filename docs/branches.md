@@ -17,14 +17,19 @@
 | --- | --- | --- | --- | --- |
 | SGLang [#32745](https://github.com/sgl-project/sglang/pull/32745) — Qwen3.5 GemmaRMSNorm on Ascend 950 | Open | `junlin_qwen3.5_dense_w8a8` | `cc552daed5` | `sglang/qwen3.5_dense_w8a8/`（主 clone） |
 | SGLang [#32266](https://github.com/sgl-project/sglang/pull/32266) — Qwen3.5 MoE W8A8 MXFP8 | Open Draft | `junlin_qwen3.5_moe_w8a8` | `3d72a9dc00` | `sglang/qwen3.5_moe_w8a8/` |
-| SGLang [#32601](https://github.com/sgl-project/sglang/pull/32601) — Qwen3.5 MoE W4A8 MXFP | Open Draft | `junlin_qwen3.5_moe_w4a8` | `5f45082517` | `sglang/qwen3.5_moe_w4a8/` |
-| SGLang [#32602](https://github.com/sgl-project/sglang/pull/32602) — Qwen3.5 MoE W4A4 MXFP4 | Open Draft | `junlin_qwen3.5_moe_w4a4` | `68121eeeea` | `sglang/qwen3.5_moe_w4a4/` |
+| SGLang [#32601](https://github.com/sgl-project/sglang/pull/32601) — Qwen3.5 MoE W4A8 MXFP | Open Draft | `junlin_qwen3.5_moe_w4a8` | `7d71e1cdf4` | `sglang/qwen3.5_moe_w4a8/` |
+| SGLang [#32602](https://github.com/sgl-project/sglang/pull/32602) — Qwen3.5 MoE W4A4 MXFP4 | Open Draft | `junlin_qwen3.5_moe_w4a4` | `65653414a3` | `sglang/qwen3.5_moe_w4a4/` |
 | SGLang [#34387](https://github.com/sgl-project/sglang/pull/34387) — A5 mixed chunked-prefill FIA split | Open Draft | `junlin_a5_fia_mixed_split` | `c61c0f16a2` | `sglang/a5_fia_mixed_split/` |
 | sgl-kernel-npu [#638](https://github.com/sgl-project/sgl-kernel-npu/pull/638) — portable Gemma RMSNorm API | Open | `codex/a5-gemma-rmsnorm-csrc` | `99421ab5b6` | `sgl-kernel-npu/` |
 
 核对时，上表 6 个 GitHub head SHA 均与本地 checkout 完全一致，本地 6 个 SGLang worktree 与 kernel checkout 均无未提交改动。#32745 与 #638 已从 draft 转为正式 PR。
 
-2026-08-25 把 #32266、#32601、#32602、#34387 重新基于 `upstream/main` 合并，四个 PR 的 `mergeable` 已从 `CONFLICTING` 回到 `MERGEABLE`。
+2026-08-25 把 #32266、#32601、#32602、#34387 重新基于 `upstream/main` 合并，四个 PR 的 `mergeable` 已从 `CONFLICTING` 回到 `MERGEABLE`。合并后又叠了两笔：
+
+- #32601 恢复 `--quantization mxfp_w4a8` 的 Linear 量化。分支尖端的 `6bcf2af6a2`（`:alembic:` 精度实验）把 `LinearBase` 全部路由到 `UnquantizedLinearMethod`，相对 main 是回退；现在回到 `7aa87ddfab` 的形态（Linear 保留 `NPUMXFP4W4A8LinearMethod` + K%32 对齐兜底），MoE 分支保留。要再做 expert-only 精度隔离，用 `ignored_layers` 排除非专家层，不要改 dispatch。
+- #32602 把 gmm1 + swiglu + fp4 requant 重新融进 `npu_grouped_matmul_swiglu_quant_v2`（上游 #30319 落地的是非融合四算子版）。DeepEP 保持上游非融合路径，不像旧版那样 raise。
+
+**待 A5 验证**：融合 gmm1 返回的 per-token scale 是否已配好对。`NPUW4A4MXFP4MoEMethod.apply()` 里那条 `pertoken_scale is not None` 分支在融合之前不可达，现在改成只在 scale 为 2 维时才 reshape（依据是 MXFP8 的 w2 gmm 对融合 scale 原样透传）。跑通 gmm2 即可确认。
 
 主仓 `sgl-kernel-npu` gitlink 已于 2026-08-25 记录到 PR #638 的 `99421ab5b6`，与子模块 checkout 一致，`git status` 不再显示 `M sgl-kernel-npu`。该 commit 位于开发 fork 的 `codex/a5-gemma-rmsnorm-csrc` 分支而非 `main`；#638 后续如有新提交或被合并压缩，gitlink 会重新落后，只在用户明确要记录新版本时才更新。
 

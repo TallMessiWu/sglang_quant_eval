@@ -27,14 +27,13 @@ Residual Gemma RMSNorm uses `npu_add_rms_norm(input, residual, 1 + weight, eps)`
 
 ## Build-time staging
 
-The source tree may contain the public 910 implementation and a private 950 template. During setuptools `build_py`:
+Providers live under `python/sgl_kernel_npu/target_providers/<target>/`; the path relative to the target directory is the final module path (`target_providers/Ascend950/norm/gemma_rmsnorm.py` becomes `sgl_kernel_npu/norm/gemma_rmsnorm.py`). During setuptools `build_py`, `build_tools/target_provider.py`:
 
-1. read `SGL_KERNEL_NPU_BUILD_TARGET`;
-2. stage exactly one implementation as `build/lib/sgl_kernel_npu/norm/gemma_rmsnorm.py`;
-3. remove the unused private template from staging;
-4. package the specialized staging tree.
+1. requires `SGL_KERNEL_NPU_BUILD_TARGET` (unset fails the build) and accepts only `Ascend910` or `Ascend950`;
+2. copies every `.py` from that target's tree into `build_lib/sgl_kernel_npu/`;
+3. fails if a provider would overwrite an existing common module.
 
-Reject import-time branches, runtime SoC queries, module-presence probes, and wheels containing both providers.
+`setup.py` excludes `target_providers` from the packaged modules, and CI requires both targets to offer the same module set. Reject import-time branches, runtime SoC queries, module-presence probes, and wheels containing both providers.
 
 ## Logical target versus compiler target
 
@@ -49,7 +48,8 @@ bash build.sh -a kernels 950
 
 python -m pytest \
   tests/python/sgl_kernel_npu/test_build_targets.py \
-  tests/python/sgl_kernel_npu/test_gemma_rmsnorm_provider.py -q
+  tests/python/sgl_kernel_npu/test_gemma_rmsnorm_provider.py \
+  tests/python/sgl_kernel_npu/test_target_provider.py -q
 
 pip install --force-reinstall --no-deps output/sgl_kernel_npu-*.whl
 ```

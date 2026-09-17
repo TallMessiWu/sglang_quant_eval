@@ -48,7 +48,7 @@ For Gemma RMSNorm and similar SoC-dependent Python providers:
 - keep the logical wheel target separate from the concrete CMake/AscendC target; A5 kernels compile with a concrete A5 SoC (`Ascend950PR_9599` by default), never the 910C compatibility target;
 - do not add runtime SoC queries, import probes, `is_npu_a5()` helpers, or dual-provider branches to SGLang.
 
-The source tree may contain private templates. Acceptance is based on staged and installed artifacts, not source-tree coexistence.
+Provider sources live in per-target trees under `target_providers/`. Acceptance is based on staged and installed artifacts, not source-tree coexistence.
 
 ## Build narrowly
 

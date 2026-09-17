@@ -27,7 +27,7 @@ git -C sgl-kernel-npu remote add upstream https://github.com/sgl-project/sgl-ker
 - SGLang 始终调用 `sgl_kernel_npu.norm.gemma_rmsnorm.npu_gemma_rms_norm`。
 - 910 wheel（A2/A3）只安装 native Gemma ACLNN provider。
 - 950 wheel（A5）只安装基于 `npu_rms_norm(input, 1 + weight, eps)` 的 ACLNN provider。
-- provider 在 setuptools `build_py` 的 staging 目录选择；最终 `build/lib`、wheel、`site-packages` 只含目标实现，不做运行时 SoC 分支。
+- provider 源码按 target 放在 `python/sgl_kernel_npu/target_providers/<target>/`（`Ascend910`、`Ascend950`），相对路径就是最终模块路径；setuptools `build_py` 只把 `SGL_KERNEL_NPU_BUILD_TARGET` 对应的那棵树 staging 进 `sgl_kernel_npu/`，该变量未设置时构建直接失败。最终 `build/lib`、wheel、`site-packages` 只含目标实现，不做运行时 SoC 分支。
 - ordinary 与 residual API 保持稳定；residual `add_gemma_rms_norm` 使用 `npu_add_rms_norm(..., 1 + weight, eps)`。
 
 逻辑 wheel target 与底层编译 target 分离：wheel target 只决定 Gemma provider，CMake target 决定 C++ kernel 如何编译。`csrc/CMakeLists.txt` 按 `Ascend950*` 选择 `arch35` 并启用 A5 专属算子（如 `kv_compress_epilog`），所以 A5 的 kernels 必须用具体 A5 型号编译，不能再用 `Ascend910_9382` 兼容目标。
@@ -77,7 +77,8 @@ pip install --force-reinstall --no-deps output/sgl_kernel_npu-*.whl
 # PR #638 的 provider/staging 单测
 python -m pytest \
   tests/python/sgl_kernel_npu/test_build_targets.py \
-  tests/python/sgl_kernel_npu/test_gemma_rmsnorm_provider.py -q
+  tests/python/sgl_kernel_npu/test_gemma_rmsnorm_provider.py \
+  tests/python/sgl_kernel_npu/test_target_provider.py -q
 
 # 安装后稳定 API
 python -c "from sgl_kernel_npu.norm.gemma_rmsnorm import npu_gemma_rms_norm; print(npu_gemma_rms_norm)"
@@ -86,7 +87,7 @@ python -c "from sgl_kernel_npu.norm.gemma_rmsnorm import npu_gemma_rms_norm; pri
 构建验收至少检查：
 
 1. 910 和 950 的 `build/lib/sgl_kernel_npu/norm/gemma_rmsnorm.py` 分别只包含目标 provider。
-2. wheel 内不残留相反 provider 的私有模板。
+2. wheel 内不含 `target_providers/` 目录，也没有另一个 target 的 provider。
 3. 安装后的 `site-packages` 与 wheel 内容一致。
 4. 950 跑 ordinary/residual 数值测试与 Qwen3.5 e2e；910B/910C 跑 native provider smoke。
 

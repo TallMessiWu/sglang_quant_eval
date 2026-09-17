@@ -30,7 +30,7 @@ git -C sgl-kernel-npu remote add upstream https://github.com/sgl-project/sgl-ker
 - provider 在 setuptools `build_py` 的 staging 目录选择；最终 `build/lib`、wheel、`site-packages` 只含目标实现，不做运行时 SoC 分支。
 - ordinary 与 residual API 保持稳定；residual `add_gemma_rms_norm` 使用 `npu_add_rms_norm(..., 1 + weight, eps)`。
 
-逻辑 wheel target 与底层编译 target 分离：950 wheel 的 Python provider 是 950 版本，但主 C++ kernel bundle 仍可能使用 `Ascend910_9382` 兼容 CMake target。
+逻辑 wheel target 与底层编译 target 分离：wheel target 只决定 Gemma provider，CMake target 决定 C++ kernel 如何编译。`csrc/CMakeLists.txt` 按 `Ascend950*` 选择 `arch35` 并启用 A5 专属算子（如 `kv_compress_epilog`），所以 A5 的 kernels 必须用具体 A5 型号编译，不能再用 `Ascend910_9382` 兼容目标。
 
 ## 构建
 
@@ -49,7 +49,7 @@ bash build.sh -a kernels
 
 # 显式目标
 bash build.sh -a kernels 910    # A2/A3 native Gemma provider
-bash build.sh -a kernels 950    # A5 ACLNN Gemma provider
+bash build.sh -a kernels 950    # A5 ACLNN Gemma provider，CMake 目标 Ascend950PR_9599
 ```
 
 支持的常用别名：
@@ -60,7 +60,7 @@ bash build.sh -a kernels 950    # A5 ACLNN Gemma provider
 | A3 | `910` / `910C` / `Ascend910_9382` | 910 native |
 | A5 | `950` / `Ascend950` / `Ascend950PR_*` / `Ascend950DT_*` | 950 ACLNN |
 
-不传目标时使用 `npu-smi` 检测；无设备环境回落到 `Ascend910_9382`。为 A5 发布或验收时建议显式传 `950`，并核对构建日志中的 `Wheel SOC_VERSION: Ascend950`。
+不传目标时使用 `npu-smi` 检测；无设备环境回落到 `Ascend910_9382`。自动检测和 `950` 别名都不区分 A5 具体型号，kernels 统一用官方 950 release 包所用的 `Ascend950PR_9599` 编译；其他型号（如 `Ascend950PR_958b`）显式传入即可原样生效。为 A5 发布或验收时建议显式传 `950`，并核对构建日志中的 `CMake SOC_VERSION: Ascend950PR_9599` 和 `Wheel SOC_VERSION: Ascend950`。不带 `-a` 的完整构建不支持 A5，DeepEP 与 kernels 需分别构建。
 
 产物位于 `output/`：
 

@@ -38,7 +38,7 @@ Reject import-time branches, runtime SoC queries, module-presence probes, and wh
 
 ## Logical target versus compiler target
 
-`Ascend950` identifies the Python wheel provider. The main C++ bundle may still compile with `Ascend910_9382` as a compatibility target while other kernels are not A5 compiler-compatible. This does not invalidate the 950 Python provider.
+`Ascend950` identifies the Python wheel provider; the CMake SoC decides how the C++ kernels compile. `csrc/CMakeLists.txt` derives `arch35` and the A5-only ops (such as `kv_compress_epilog`) from an `Ascend950*` SoC, so an A5 kernels build must use a concrete A5 target. Generic and detected A5 names map to `Ascend950PR_9599`, the target of the 950 release package; an explicit `Ascend950PR_*` or `Ascend950DT_*` overrides it. The full build rejects A5 because DeepEP and the kernels share one CMake SoC.
 
 ## Commands
 

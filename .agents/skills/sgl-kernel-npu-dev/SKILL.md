@@ -45,7 +45,7 @@ For Gemma RMSNorm and similar SoC-dependent Python providers:
 - expose one stable public import path and call signature to SGLang;
 - select the 910 or 950 source only while staging the wheel;
 - verify `build/lib`, wheel contents, and installed `site-packages` each contain only the selected provider;
-- keep logical wheel target separate from concrete CMake/AscendC compatibility target;
+- keep the logical wheel target separate from the concrete CMake/AscendC target; A5 kernels compile with a concrete A5 SoC (`Ascend950PR_9599` by default), never the 910C compatibility target;
 - do not add runtime SoC queries, import probes, `is_npu_a5()` helpers, or dual-provider branches to SGLang.
 
 The source tree may contain private templates. Acceptance is based on staged and installed artifacts, not source-tree coexistence.
@@ -59,7 +59,7 @@ bash build.sh -a kernels 910   # A2/A3 wheel
 bash build.sh -a kernels 950   # A5 wheel
 ```
 
-Use auto-detection only when testing detection itself. For A5 release/validation, pass `950` explicitly and inspect the logged wheel target. Do not build unrelated DeepEP, attentions, or memory-saver modules for a kernel-wheel-only change.
+Use auto-detection only when testing detection itself. For A5 release/validation, pass `950` explicitly and inspect the logged `CMake SOC_VERSION: Ascend950PR_9599` and `Wheel SOC_VERSION: Ascend950`. The full build rejects A5. Do not build unrelated DeepEP, attentions, or memory-saver modules for a kernel-wheel-only change.
 
 ## Validate in layers
 

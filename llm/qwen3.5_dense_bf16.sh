@@ -37,6 +37,21 @@ echo "🚀 [启动任务] 当前设备可见性: ASCEND_RT_VISIBLE_DEVICES=$ASCE
 # prefill+decode 一起绕开 ATB（decode 默认走 _npu_paged_attention，同源）。
 export ASCEND_USE_FIA=1
 
+# ================= 4. MTP（NEXTN 投机解码）总开关 =================
+# MTP=1 开启，默认关闭。draft 层在 Qwen3.5 checkpoint 内，不需要额外的 draft 权重路径。
+# topk=1 的链式 NEXTN 里 num-draft-tokens = num-steps + 1，要改一起改。
+# num-draft-tokens 同时是 GDN 算子一次 verify 的 token 数，不能超过 kernel 的 MAX_MTP=8。
+MTP_ARGS=()
+if [ "${MTP:-0}" = "1" ]; then
+    MTP_ARGS=(
+        --speculative-algorithm NEXTN
+        --speculative-num-steps 3
+        --speculative-eagle-topk 1
+        --speculative-num-draft-tokens 4
+    )
+    echo "🔮 [MTP] NEXTN 已开启：num-steps=3, eagle-topk=1, num-draft-tokens=4"
+fi
+
 # ========== 下方是原有的模型启动命令 ==========
 sglang serve \
     --model-path /mnt/share/weights/Qwen3.5-27B \
@@ -46,4 +61,5 @@ sglang serve \
     --tp 1 \
     --reasoning-parser qwen3 \
     --context-length 5000 \
-    --trust-remote-code
+    --trust-remote-code \
+    "${MTP_ARGS[@]}"

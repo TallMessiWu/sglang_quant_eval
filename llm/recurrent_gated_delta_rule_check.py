@@ -194,11 +194,22 @@ def main() -> int:
         ]
 
     if not args.dry_run:
-        import torch_npu  # noqa: F401  注册 torch.ops.npu
+        try:
+            import torch_npu  # noqa: F401  提供 torch.ops.npu 命名空间
+        except ImportError as exc:
+            print(f"import torch_npu 失败：{exc}", file=sys.stderr)
+            return 2
+        try:
+            # 自定义算子由 wheel 里的 libsgl_kernel_npu.so 注册，只 import torch_npu 探测不到
+            import sgl_kernel_npu  # noqa: F401
+        except ImportError as exc:
+            print(f"import sgl_kernel_npu 失败（wheel 未安装？）：{exc}", file=sys.stderr)
+            return 2
 
         if not hasattr(torch.ops.npu, "recurrent_gated_delta_rule"):
             print(
-                "torch.ops.npu.recurrent_gated_delta_rule 未注册：当前 wheel 没有编进该算子",
+                "torch.ops.npu.recurrent_gated_delta_rule 未注册："
+                "sgl_kernel_npu 已加载，但这个 wheel 没有把该算子编进去",
                 file=sys.stderr,
             )
             return 2

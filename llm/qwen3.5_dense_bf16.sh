@@ -52,6 +52,13 @@ if [ "${MTP:-0}" = "1" ]; then
     echo "🔮 [MTP] NEXTN 已开启：num-steps=3, eagle-topk=1, num-draft-tokens=4"
 fi
 
+# 额外参数透传，例如 EXTRA_ARGS="--disable-cuda-graph"
+EXTRA_ARGS_ARR=()
+if [ -n "${EXTRA_ARGS:-}" ]; then
+    read -r -a EXTRA_ARGS_ARR <<< "$EXTRA_ARGS"
+    echo "➕ [EXTRA] 追加启动参数：${EXTRA_ARGS}"
+fi
+
 # ========== 下方是原有的模型启动命令 ==========
 sglang serve \
     --model-path /mnt/share/weights/Qwen3.5-27B \
@@ -62,4 +69,4 @@ sglang serve \
     --reasoning-parser qwen3 \
     --context-length 5000 \
     --trust-remote-code \
-    "${MTP_ARGS[@]}"
+    "${MTP_ARGS[@]}" "${EXTRA_ARGS_ARR[@]}"

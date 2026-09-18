@@ -179,7 +179,30 @@ def main() -> int:
     p.add_argument("--dv", type=int, default=128, help="value head_dim")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--dry-run", action="store_true", help="只跑 CPU 参考实现，不调用 NPU")
+    p.add_argument(
+        "--model-config",
+        help="模型目录或 config.json，自动取 GDN 的 linear_num_*_heads / linear_*_head_dim",
+    )
     args = p.parse_args()
+
+    if args.model_config:
+        import json
+        from pathlib import Path
+
+        cfg_path = Path(args.model_config)
+        if cfg_path.is_dir():
+            cfg_path = cfg_path / "config.json"
+        cfg = json.loads(cfg_path.read_text())
+        cfg = cfg.get("text_config", cfg)
+        try:
+            args.nk = int(cfg["linear_num_key_heads"])
+            args.nv = int(cfg["linear_num_value_heads"])
+            args.dk = int(cfg["linear_key_head_dim"])
+            args.dv = int(cfg["linear_value_head_dim"])
+        except KeyError as exc:
+            print(f"{cfg_path} 里没有 GDN 头数字段 {exc}", file=sys.stderr)
+            return 2
+        print(f"取自 {cfg_path}: nk={args.nk} nv={args.nv} dk={args.dk} dv={args.dv}")
 
     if args.b is not None or args.mtp is not None:
         cases = [

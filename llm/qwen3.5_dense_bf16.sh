@@ -49,11 +49,13 @@ if [ "${MTP:-0}" = "1" ]; then
         --speculative-eagle-topk 1
         --speculative-num-draft-tokens 4
     )
-    # verify 用的 torch.ops.npu.recurrent_gated_delta_rule 只有 bf16 一份实例化
-    # （kernel 里是 RGDR<bfloat16_t, bfloat16_t>，host 的 UB 预算也按每元素 2 字节算，
-    # 而且没有任何按 dtype 的分发），而 MambaPool 的 ssm_dtype 默认是 float32。
-    # 位宽不匹配不会报错：算子按 2 字节步长读写 4 字节的 state，每隔一个元素落在 fp32 的
-    # 高半字（正好是它的 bf16 截断），数值看着正常但 state 是错位的，表现为输出流畅但复读。
+    # SSM state 必须是 bf16：verify 用的 recurrent_gated_delta_rule 只有
+    # RGDR<bfloat16_t, bfloat16_t> 一份实例化，host 的 UB 预算也按每元素 2 字节算，
+    # 而 MambaPool 的 ssm_dtype 默认是 float32。位宽不匹配不会报错：算子按 2 字节步长
+    # 读写 4 字节的 state，每隔一个元素落在 fp32 的高半字（正好是它的 bf16 截断），
+    # 数值看着正常但 state 是错位的，表现为输出流畅但复读。
+    # 上游修法见 SGLang #40419（让 MambaPool 在 NPU 投机路径直接建 bf16）；
+    # 合入并同步到本 worktree 后这一行就可以删掉。
     export SGLANG_MAMBA_SSM_DTYPE="${SGLANG_MAMBA_SSM_DTYPE:-bfloat16}"
     echo "🔮 [MTP] NEXTN 已开启：num-steps=3, eagle-topk=1, num-draft-tokens=4"
     echo "🔮 [MTP] SGLANG_MAMBA_SSM_DTYPE=$SGLANG_MAMBA_SSM_DTYPE（算子只支持 bf16 state）"

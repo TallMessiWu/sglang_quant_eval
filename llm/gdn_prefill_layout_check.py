@@ -17,7 +17,7 @@ state 相对于 verify 读到的就差一个转置 —— 表现为一开口就�
 用法（NPU 机器）：
     python3 llm/gdn_prefill_layout_check.py
     python3 llm/gdn_prefill_layout_check.py --dk 64 --dv 32 --tokens 8
-退出码：0 = prefill 是 V-major（与 decode/verify 一致）；1 = K-major（错配）；2 = 环境不可用。
+退出码：0 = 两条 prefill 路径布局一致；1 = 差一个转置或结果不一致；2 = 环境不可用。
 """
 
 from __future__ import annotations
@@ -85,51 +85,76 @@ def main() -> int:
     print(f"形状：nk={nk} nv={nv} dk={dk} dv={dv} tokens={t}")
     print(f"参考 state（V-major 语义）: {tuple(want_vk.shape)}")
 
-    results = {}
-    for name, init in (("K-major (nv, dk, dv)", torch.zeros(1, nv, dk, dv)),
-                       ("V-major (nv, dv, dk)", torch.zeros(1, nv, dv, dk))):
-        try:
-            _, final_state, _ = chunk_gated_delta_rule_npu(
-                q=q.unsqueeze(0).npu(),
-                k=k.unsqueeze(0).npu(),
-                v=v.unsqueeze(0).npu(),
-                g=g.unsqueeze(0).npu(),
-                beta=beta.unsqueeze(0).npu(),
-                scale=scale,
-                initial_state=init.to(torch.bfloat16).npu(),
-                output_final_state=True,
-                cu_seqlens=torch.tensor([0, t], dtype=torch.int64).npu(),
-                head_first=False,
-                use_qk_l2norm_in_kernel=True,
-            )
-        except Exception as exc:  # noqa: BLE001
-            print(f"  {name}: 调用失败 -> {type(exc).__name__}: {exc}")
-            continue
-        got = final_state.float().cpu().reshape(nv, *final_state.shape[-2:])
-        if got.shape[-2:] == want_vk.shape[-2:]:
-            err = (got - want_vk).abs().max().item()
-        else:
-            err = (got - want_vk.transpose(-1, -2)).abs().max().item()
-        results[name] = (tuple(got.shape), err)
-        print(f"  {name}: 返回 {tuple(got.shape)}  与参考的最大绝对误差 = {err:.4e}")
+    print()
+    print("=== 1. triton prefill（sgl_kernel_npu.fla.chunk，SGLang 现在调的就是它）===")
+    qn = torch.nn.functional.normalize(q.float(), p=2, dim=-1).to(torch.bfloat16)
+    kn = torch.nn.functional.normalize(k.float(), p=2, dim=-1).to(torch.bfloat16)
+    cu = torch.tensor([0, t], dtype=torch.int64).npu()
 
-    if not results:
-        print("两种布局都调用失败，看上面的报错", file=sys.stderr)
+    o_tri = s_tri = None
+    try:
+        o_tri, s_tri, _ = chunk_gated_delta_rule_npu(
+            q=qn.unsqueeze(0).npu(), k=kn.unsqueeze(0).npu(), v=v.unsqueeze(0).npu(),
+            g=g.unsqueeze(0).npu(), beta=beta.unsqueeze(0).npu(), scale=scale,
+            initial_state=torch.zeros(1, nv, dk, dv, dtype=torch.bfloat16).npu(),
+            output_final_state=True, cu_seqlens=cu,
+            head_first=False, use_qk_l2norm_in_kernel=False,
+        )
+        print(f"  输出 o {tuple(o_tri.shape)}   final_state {tuple(s_tri.shape)}")
+        lay = "K-major (nv, dk, dv)" if tuple(s_tri.shape[-2:]) == (dk, dv) else "V-major (nv, dv, dk)"
+        print(f"  -> state 布局: {lay}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  调用失败 -> {type(exc).__name__}: {exc}")
+
+    print()
+    print("=== 2. AscendC chunk 算子（#747 新增，SGLang 尚未改调它）===")
+    o_asc = s_asc = None
+    try:
+        from sgl_kernel_npu.fla.chunk_gated_delta_rule_npu import (
+            chunk_gated_delta_rule_npu as chunk_ascendc,
+        )
+
+        o_asc, s_asc = chunk_ascendc(
+            qn.npu(), kn.npu(), v.npu(),
+            beta=beta.npu(), initial_state=torch.zeros(1, nv, dv, dk, dtype=torch.bfloat16).npu(),
+            actual_seq_lengths=torch.tensor([t], dtype=torch.int32).npu(),
+            scale=scale, g=g.npu(),
+        )
+        print(f"  输出 o {tuple(o_asc.shape)}   final_state {tuple(s_asc.shape)}")
+        lay = "V-major (nv, dv, dk)" if tuple(s_asc.shape[-2:]) == (dv, dk) else "K-major (nv, dk, dv)"
+        print(f"  -> state 布局: {lay}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  调用失败 -> {type(exc).__name__}: {exc}")
+
+    if o_tri is None or o_asc is None:
+        print("\n两边没能都跑起来，看上面的报错")
         return 2
 
-    best = min(results.items(), key=lambda kv: kv[1][1])
-    name, (shape, err) = best
-    tol = 5e-2
     print()
-    if err > tol:
-        print(f"两种布局都对不上参考（最小误差 {err:.4e} > {tol}），说明不只是布局问题")
+    print("=== 3. 两者对比（attention 输出与布局无关，先看它）===")
+    a = o_tri.float().cpu().reshape(t, nv, dv)
+    b = o_asc.float().cpu().reshape(t, nv, dv)
+    out_err = (a - b).abs().max().item()
+    print(f"  attention 输出最大绝对差 = {out_err:.4e}")
+
+    sa = s_tri.float().cpu().reshape(nv, *s_tri.shape[-2:])
+    sb = s_asc.float().cpu().reshape(nv, *s_asc.shape[-2:])
+    straight = (sa - sb).abs().max().item() if sa.shape == sb.shape else float("inf")
+    flipped = (sa - sb.transpose(-1, -2)).abs().max().item() if sa.shape == sb.transpose(-1, -2).shape else float("inf")
+    print(f"  state 直接比   = {straight:.4e}")
+    print(f"  state 转置后比 = {flipped:.4e}")
+
+    print()
+    tol = 5e-2
+    if out_err > tol:
+        print(f"结论：两个 prefill 实现的输出本身就不一致（{out_err:.4e}），不只是 state 打包方式的问题")
         return 1
-    if "V-major" in name:
-        print(f"结论：prefill 是 V-major，{'与 decode/verify 一致'}，布局没问题")
-        return 0
-    print("结论：prefill 是 K-major，而 #747 之后 decode/verify 是 V-major —— 两者错配")
-    print("      prefill 写进 pool 的 state，verify 读到的是它的转置。")
-    return 1
+    if flipped < straight:
+        print("结论：两者算的是同一个东西，但 state 打包方式差一个转置。")
+        print("      SGLang 调的是 triton 那条（K-major），而 pool / verify 算子是 V-major -> 错配。")
+        return 1
+    print("结论：两者的 state 布局一致，prefill 不是问题所在。")
+    return 0
 
 
 if __name__ == "__main__":

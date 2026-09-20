@@ -133,17 +133,19 @@ def run_npu(case: Case, inp, strided_state: bool = False) -> tuple[torch.Tensor,
 
     strided_state=True 时按生产形态传入主 pool：SGLang 在 NPU + 投机解码下会把
     temporal_state 换成 transpose(-1, -2) 的非连续视图（memory_pool.py 里的
-    `if _is_npu: temporal_state = temporal_state.transpose(-1, -2)`），逻辑内容不变。
+    `if _is_npu: temporal_state = temporal_state.transpose(-1, -2)`）。算子 host 没有对
+    recurrent_state 调 .contiguous()，kernel 直接按物理内存读，所以生产里**物理排布不变**，
+    变的只是 torch 看到的逻辑形状。这里照同样的方式构造。
     """
     b, s, nv, dk, dv = case.b, case.mtp, case.nv, case.dk, case.dv
 
+    # phys 始终是 (…, nv, dv, dk) 的物理排布，也就是算子和参考实现共同的约定
+    phys = inp["recurrent_state"].npu().clone()
     if strided_state:
-        # 先按 (…, dk, dv) 连续存一份，再转置成视图 —— 逻辑内容和原张量一致，但不连续
-        base = inp["recurrent_state"].transpose(-1, -2).contiguous().npu()
-        recurrent_state = base.transpose(-1, -2)
+        recurrent_state = phys.transpose(-1, -2)
         assert not recurrent_state.is_contiguous()
     else:
-        recurrent_state = inp["recurrent_state"].npu().clone()
+        recurrent_state = phys
     intermediate = None
     if inp["intermediate_state"] is not None:
         intermediate = inp["intermediate_state"].npu().clone().view(-1, nv, dv, dk)
@@ -164,7 +166,7 @@ def run_npu(case: Case, inp, strided_state: bool = False) -> tuple[torch.Tensor,
         num_accepted_tokens=inp["num_accepted_tokens"].npu(),
         g=inp["g"].npu(),
     )
-    state = intermediate if intermediate is not None else recurrent_state
+    state = intermediate if intermediate is not None else phys
     return out.to(torch.float32).cpu(), state.to(torch.float32).cpu()
 
 
@@ -203,7 +205,7 @@ def main() -> int:
     p.add_argument(
         "--strided-state",
         action="store_true",
-        help="按生产形态把主 pool 作为 transpose(-1,-2) 的非连续视图传进去",
+        help="按生产形态把主 pool 作为 transpose(-1,-2) 的非连续视图传进去（物理排布不变）",
     )
     p.add_argument(
         "--matrix",

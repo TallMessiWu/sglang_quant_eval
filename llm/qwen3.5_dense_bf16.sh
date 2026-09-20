@@ -71,6 +71,6 @@ sglang serve \
     --device npu \
     --tp 1 \
     --reasoning-parser qwen3 \
-    --context-length 5000 \
+    --context-length "${CONTEXT_LENGTH:-131072}" \
     --trust-remote-code \
     "${MTP_ARGS[@]}" "${EXTRA_ARGS_ARR[@]}"

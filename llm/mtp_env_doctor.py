@@ -172,7 +172,8 @@ def main() -> int:
         line(WARN, "mamba2_state_dtype", f"{type(exc).__name__}: {exc}")
 
     src = inspect.getsource(importlib.import_module("sglang.srt.mem_cache.memory_pool"))
-    forced = "not supported by the NPU speculative verify kernels" in src
+    # 这条 warning 在源码里是跨行拼接的，别拿整句去匹配
+    forced = "ssm_dtype = torch.bfloat16" in src
     line(
         OK if forced else WARN,
         "投机路径强制 bf16 state",

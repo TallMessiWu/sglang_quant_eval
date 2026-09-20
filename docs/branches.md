@@ -1,6 +1,6 @@
 # 活跃分支、PR 与 worktree
 
-> 最近核对：2026-09-14（Asia/Shanghai）；#32745 与 #638 两行于 2026-09-17 合并上游后重新核对；sgl-kernel-npu #808 于 2026-09-17 新建后核对；SGLang #40419 与 kernel 分支 `gdn-state-dtype-check` 于 2026-09-20 新建后核对，#32745 的 head 同日回退到 `4f35f3ef7e`。GitHub 状态来自实时 PR 查询，本地状态来自 `git worktree list --porcelain`、`git branch --show-current` 和 `git rev-parse HEAD`。这些信息会漂移，操作前必须重新查询。
+> 最近核对：2026-09-14（Asia/Shanghai）；#32745 与 #638 两行于 2026-09-17 合并上游后重新核对；sgl-kernel-npu #808 于 2026-09-17 新建后核对；SGLang #40419 与 kernel 分支 `gdn-state-dtype-check` 于 2026-09-20 新建后核对，#32745 的 head 同日回退到 `4f35f3ef7e`；同日稍后按用户要求把 bf16 断言并入 #808、把 #40419 叠到 `junlin_qwen3.5_dense_w8a8_pr36426`，并重做两个 kernel 构建分支的 merge。GitHub 状态来自实时 PR 查询，本地状态来自 `git worktree list --porcelain`、`git branch --show-current` 和 `git rev-parse HEAD`。这些信息会漂移，操作前必须重新查询。
 
 ## 远程地址
 
@@ -16,13 +16,12 @@
 | 仓库 / PR | 状态 | head 分支 | GitHub / 本地 HEAD | merge-base（upstream/main） | 本地 worktree |
 | --- | --- | --- | --- | --- | --- |
 | SGLang [#32745](https://github.com/sgl-project/sglang/pull/32745) — Qwen3.5 dense serving on Ascend 950 | Open，MERGEABLE / BLOCKED（`REVIEW_REQUIRED`） | `junlin_qwen3.5_dense_w8a8` | `4f35f3ef7e` | `4fb9b5b5ba`（2026-09-17） | `sglang/qwen3.5_dense_w8a8/`（主 clone） |
-| SGLang [#40419](https://github.com/sgl-project/sglang/pull/40419) — NPU 投机解码用 bf16 SSM state | Open，MERGEABLE | `junlin_npu_mamba_ssm_dtype` | `f2fff72088` | `2d216a11f8`（2026-09-20） | `sglang/npu_mamba_ssm_dtype/` |
+| SGLang [#40419](https://github.com/sgl-project/sglang/pull/40419) — NPU 投机解码用 bf16 SSM state | Open，MERGEABLE | `junlin_npu_mamba_ssm_dtype` | `f2fff72088`（同一提交也 cherry-pick 到 `junlin_qwen3.5_dense_w8a8_pr36426`） | `2d216a11f8`（2026-09-20） | `sglang/npu_mamba_ssm_dtype/` |
 | SGLang [#32601](https://github.com/sgl-project/sglang/pull/32601) — Qwen3.5 MoE W4A8 MXFP | Open Draft，MERGEABLE | `junlin_qwen3.5_moe_w4a8` | `7d71e1cdf4` | `1fa32d50e1`（2026-08-25） | `sglang/qwen3.5_moe_w4a8/` |
 | SGLang [#32602](https://github.com/sgl-project/sglang/pull/32602) — Qwen3.5 MoE W4A4 MXFP4 | Open Draft，MERGEABLE | `junlin_qwen3.5_moe_w4a4` | `65653414a3` | `1fa32d50e1`（2026-08-25） | `sglang/qwen3.5_moe_w4a4/` |
 | SGLang [#34387](https://github.com/sgl-project/sglang/pull/34387) — A5 mixed chunked-prefill FIA split | Open Draft，**CONFLICTING / DIRTY** | `junlin_a5_fia_mixed_split` | `c61c0f16a2` | `1fa32d50e1`（2026-08-25） | `sglang/a5_fia_mixed_split/` |
 | sgl-kernel-npu [#638](https://github.com/sgl-project/sgl-kernel-npu/pull/638) — portable Gemma RMSNorm API | Open，MERGEABLE / BLOCKED（`REVIEW_REQUIRED`） | `codex/a5-gemma-rmsnorm-csrc` | `500ea7bb0e` | `67a38fe215`（2026-09-17） | `sgl-kernel-npu/` |
-| sgl-kernel-npu [#808](https://github.com/sgl-project/sgl-kernel-npu/pull/808) — recurrent_gated_delta_rule on Ascend 950 | Open Draft，MERGEABLE / BLOCKED | `ascend950-recurrent-gated-delta-rule` | `783b44c911` | `67a38fe215`（2026-09-17） | `sgl-kernel-npu-worktrees/ascend950-recurrent-gated-delta-rule/` |
-| sgl-kernel-npu（未提 PR）— recurrent_gated_delta_rule 拒绝非 bf16 state | 本地 + `origin`，2026-09-20 新建 | `gdn-state-dtype-check` | `5c7672b78f` | `004bc36`（2026-09-20） | `sgl-kernel-npu-worktrees/gdn-state-dtype-check/` |
+| sgl-kernel-npu [#808](https://github.com/sgl-project/sgl-kernel-npu/pull/808) — recurrent_gated_delta_rule on Ascend 950 | Open Draft，MERGEABLE / BLOCKED | `ascend950-recurrent-gated-delta-rule` | `6734df4e54`（2 提交：950 适配 + bf16 state 断言） | `67a38fe215`（2026-09-17） | `sgl-kernel-npu-worktrees/ascend950-recurrent-gated-delta-rule/` |
 
 核对时 6 个 GitHub head SHA 均与本地 checkout 完全一致，6 个 SGLang worktree 与 kernel checkout 均无未提交改动。#808 创建后 GitHub head 与其 worktree 的 `783b44c911` 一致，worktree 无未提交改动。
 
@@ -60,7 +59,16 @@
 
 **`recurrent_gated_delta_rule` 的 Ascend 950 适配（2026-09-17 开 Draft [#808](https://github.com/sgl-project/sgl-kernel-npu/pull/808)）**：用于在 Ascend 950 上给 Qwen3.5 开 MTP（NEXTN target verify 调用该算子，SGLang #20918 引入）。分支 `ascend950-recurrent-gated-delta-rule` 基于 `upstream/main` `67a38fe215`，单提交 `783b44c911`，worktree 在 `sgl-kernel-npu-worktrees/ascend950-recurrent-gated-delta-rule/`（见下文 kernel worktree 结构）。做法与上游 #802 的 `chunk_kda_fwd`、`causal_conv1d` 相同：host、kernel、schema、impl 与头文件声明移出 `SGL_KERNEL_ENABLE_A3_ONLY_OPS`，schema 不变；kernel 保持单一源文件和原有 pipeline（stage buffer、MTE2/V/MTE3 事件、`mix_qkv` 拆分、intermediate state 初始化、speculative token 之间 FP32 state 延续），只在 `__CCE_AICORE__ == 310` 下把 arch22 专属的 repeat-stride `Mul`/`MulAddDst`、`Brcb`、mask 寄存器 `ReduceSum`、`Sum`/`Rsqrt` L2 norm 换成 `op_kernel/arch35/recurrent_gated_delta_rule_regbase.h` 的 MicroAPI 实现（`RowDotRegbase`、`RankOneUpdateRegbase`、`L2NormalizeRowsRegbase`，循环写法参考 vllm-ascend #9224、#9382，L2 norm 用 arch35 RMSNorm 同款序列）。arch35 不再切 host UB 预算外的 `qTempInUb`/`kTempInUb`/`qSumLocal`/`kSumLocal`；host 在 arch35 上用 `GetCoreNumAiv()` 作为 block 数，910 仍是 `GetCoreNum()`。按用户决定 `MAX_MTP` 保持 8（#11236 的 16 另开 PR），以 Draft 提出。只做了静态与 CPU 验证：clang-format 18.1.8、codespell、`git diff --check`；只展开新增条件后 910 视角的 kernel/host 源码与 `main` 逐字节一致；numpy 模拟 arch35 寄存器循环（64 lane、`UpdateMask` 尾块、BRC/首元素 load-store、masked store、多 block 分片、intermediate/recurrent 初始化、`num_accepted_tokens`）对照测试文件的 golden，8 组形状（含 dk=100/200、dv=72/136 和多 vStep 分块）float64 最大绝对误差 2.2e-16，只证明下标与循环边界。**未做**：950 上 `bash build.sh -a kernels Ascend950PR_9599` 构建、`hasattr(torch.ops.npu, "recurrent_gated_delta_rule")`、`python3 tests/python/sgl_kernel_npu/test_recurrent_gated_delta_rule.py`（脚本数值不一致也退出 0，须看 `failed: N`）、Qwen3.5 NEXTN e2e（依赖 #638 + #32745），以及 910B/910C 回归。#651/#742 的 BF16 往返改动落在两个 arch 共用的 `Compute` 代码里，任一方先合入后 rebase 即可对齐。
 
-**Qwen3.5 MTP 在 Ascend 950 上复读的根因（2026-09-20 定位并修复）**：开 NEXTN 后输出流畅但几十步内塌成复读，接受率从 ~2.5 一路爬到满值 4.00；关掉 MTP 一切正常。根因是 SSM state 的 **dtype 位宽不匹配**，不是 layout。`torch.ops.npu.recurrent_gated_delta_rule` 只有 `RGDR<bfloat16_t, bfloat16_t>` 一份实例化，host 的 UB 预算按每元素 2 字节算（`coeff = (2 + 2) * aDk + 4`），且 `EXEC_KERNEL_CMD` 前没有任何按 dtype 的分发；而 `MambaPool` 的 `ssm_dtype` 默认是 `torch.float32`（`configs/mamba_utils.py`，可由 `mamba_ssm_dtype` 或 `SGLANG_MAMBA_SSM_DTYPE` 覆盖）。位宽对不上不会报错：kernel 用 2 字节步长走 4 字节 buffer，每隔一个元素落在 fp32 的高半字，而 fp32 的高 16 位正是它自己的 bf16 截断 —— 数值全程留在合理量程内，state 却是错位的，所以表现是文字通顺地逐渐失忆，而不是 NaN。只有 verify 路径会踩到：prefill/decode 走 triton，dtype 从张量上读。定位靠的是在真机 verify 里同时跑算子和 torch 参考的探针（`llm/patch_gdn_verify_probe.py`）拍到 state 是 `torch.float32`，再用 `llm/recurrent_gated_delta_rule_check.py --matrix` 只换 dtype 复现：bf16 最大误差 9.8e-04，fp32 返回 1e35 量级。两处修复：SGLang [#40419](https://github.com/sgl-project/sglang/pull/40419) 让 `MambaPool` 在 NPU 投机路径直接建 bf16；kernel 分支 `gdn-state-dtype-check` 给算子 host 补 `mix_qkv`/`beta`/两个 state 张量的 dtype 断言，让这种不匹配不可能再静默（未提 PR）。和 #808 无关，910B/910C 同样会中。过程中被证伪的假设记录在案：state 转置（#693 思路）、conv 算子的 spec 分支、两个 mamba state triton kernel、state 提交的 off-by-one，全部排除。
+**Ascend 950 上跑 Qwen3.5 MTP 的分支组合（2026-09-20 核对）**：
+
+| 仓 | 目录 | 分支 | HEAD | 叠了什么 |
+| --- | --- | --- | --- | --- |
+| SGLang | `sglang/qwen3.5_dense_w8a8_pr36426/` | `junlin_qwen3.5_dense_w8a8_pr36426` | `15459663f2` | #32745 + 上游 #36426 + #40419（cherry-pick） |
+| sgl-kernel-npu | `sgl-kernel-npu-worktrees/ascend950-mtp-experiment/` | `ascend950-mtp-experiment` | `98fb7a8ccb` | base `67a38fe215`（已含 #802、#804）+ #638 + #808 + #742（含 #651） |
+
+wheel 必须从 `ascend950-mtp-experiment` 构建，不能退回 `ascend950-mtp-integration`：后者的 `move_intermediate_cache` 仍是 `h_block_size=2`，在 950 上会 `ub overflow, requires 2097152 bits while 2031616 bits available`；#651（含在 #742 里）把它改成 1。`llm/qwen3.5_dense_bf16.sh` 的 MTP 开关不再设 `SGLANG_MAMBA_SSM_DTYPE`，改由 #40419 在 `MambaPool` 里自动覆盖，启动日志出现 "not supported by the NPU speculative verify kernels" 即生效。
+
+**Qwen3.5 MTP 在 Ascend 950 上复读的根因（2026-09-20 定位并修复）**：开 NEXTN 后输出流畅但几十步内塌成复读，接受率从 ~2.5 一路爬到满值 4.00；关掉 MTP 一切正常。根因是 SSM state 的 **dtype 位宽不匹配**，不是 layout。`torch.ops.npu.recurrent_gated_delta_rule` 只有 `RGDR<bfloat16_t, bfloat16_t>` 一份实例化，host 的 UB 预算按每元素 2 字节算（`coeff = (2 + 2) * aDk + 4`），且 `EXEC_KERNEL_CMD` 前没有任何按 dtype 的分发；而 `MambaPool` 的 `ssm_dtype` 默认是 `torch.float32`（`configs/mamba_utils.py`，可由 `mamba_ssm_dtype` 或 `SGLANG_MAMBA_SSM_DTYPE` 覆盖）。位宽对不上不会报错：kernel 用 2 字节步长走 4 字节 buffer，每隔一个元素落在 fp32 的高半字，而 fp32 的高 16 位正是它自己的 bf16 截断 —— 数值全程留在合理量程内，state 却是错位的，所以表现是文字通顺地逐渐失忆，而不是 NaN。只有 verify 路径会踩到：prefill/decode 走 triton，dtype 从张量上读。定位靠的是在真机 verify 里同时跑算子和 torch 参考的探针（`llm/patch_gdn_verify_probe.py`）拍到 state 是 `torch.float32`，再用 `llm/recurrent_gated_delta_rule_check.py --matrix` 只换 dtype 复现：bf16 最大误差 9.8e-04，fp32 返回 1e35 量级。两处修复：SGLang [#40419](https://github.com/sgl-project/sglang/pull/40419) 让 `MambaPool` 在 NPU 投机路径直接建 bf16；算子 host 补 `mix_qkv`/`beta`/两个 state 张量的 dtype 断言，让这种不匹配不可能再静默 —— 按用户要求并入 #808 的第二个提交 `6734df4e54`（#808 是 Draft，可直接拿来测），原独立分支 `gdn-state-dtype-check` 作废。和 #808 无关，910B/910C 同样会中。过程中被证伪的假设记录在案：state 转置（#693 思路）、conv 算子的 spec 分支、两个 mamba state triton kernel、state 提交的 off-by-one，全部排除。
 
 **集成分支 `ascend950-mtp-integration`（2026-09-18 新建，无 PR，已推到 `origin`，head `da04db0846`）**：#808 与 #638 文件零重叠（#638 只动 `build.sh`、`python/`、`tests/`；#808 只动 `csrc/`、`include/`），所以 #808 基于 `upstream/main` 独立开 PR，两者合并无冲突。Qwen3.5 MTP 的 e2e 需要两者同时生效（Gemma RMSNorm provider + recurrent 算子），因此把 #638 的 `500ea7bb0e` 与 #808 的 `783b44c911` 用 `merge-tree` + `commit-tree` 合成一个 merge 提交作为构建分支，本地没有对应 worktree。#808 或 #638 有新提交后重新合成即可。单独验证 #808（构建 + 算子测试）不需要这个分支：`upstream/main` 的 `build.sh` 已支持 `-a kernels Ascend950PR_9599`，也没有 #638 引入的 `SGL_KERNEL_NPU_BUILD_TARGET` 要求。
 
@@ -100,7 +108,7 @@ sglang/
 
 **`junlin_qwen3.5_dense_w8a8_pr36426`（2026-09-17 新建，2026-09-18 重建，无 PR，已推到 `origin`）**：给 `llm/qwen3.5_dense_offline_w8a8.sh`（`Qwen3.5-27B-mxw8a8`）提前合入上游 [#36426](https://github.com/sgl-project/sglang/pull/36426)（issue [#36423](https://github.com/sgl-project/sglang/issues/36423) 的修复，`zhujianwei-ops`，open，head `8786461159`），供 NPU 机器测试。
 
-重建后这个分支**不带任何自有改动**，精确等于 #32745 + #36426：HEAD `5aae20a88a` 是 #32745 的 `4f35f3ef7e` 与 #36426 head 的 `--no-ff` merge（无冲突），`git diff junlin_qwen3.5_dense_w8a8 HEAD` 与 #36426 自身的 diff 逐文件逐行一致（4 个文件、+54/-10）。重建之前它还带着 partial scale 与 graph rebind 两笔，现在这两笔已在 #32745 里，留在这边是重复。本地 CPU 回归 13 passed（`test_modelslim_mxfp8.py` 2 + `test_npu_gemma_rmsnorm.py` 11）。
+2026-09-20 起这个分支多了一笔自有提交 `15459663f2`（#40419 的 bf16 SSM state 修复，cherry-pick 自 `junlin_npu_mamba_ssm_dtype`），因为 Ascend 950 上跑 MTP 就用这个分支，而 #40419 还没合入上游；#40419 合入后把这笔删掉。在此之前它**不带任何自有改动**，精确等于 #32745 + #36426：`5aae20a88a` 是 #32745 的 `4f35f3ef7e` 与 #36426 head 的 `--no-ff` merge（无冲突），`git diff junlin_qwen3.5_dense_w8a8 HEAD` 与 #36426 自身的 diff 逐文件逐行一致（4 个文件、+54/-10）。重建之前它还带着 partial scale 与 graph rebind 两笔，现在这两笔已在 #32745 里，留在这边是重复。本地 CPU 回归 13 passed（`test_modelslim_mxfp8.py` 2 + `test_npu_gemma_rmsnorm.py` 11）。
 
 历史验证结论仍然有效：合入 #36426 之前，MXFP8 checkpoint 的 GDN `in_proj_qkvz` 退回 `UnquantizedLinearMethod`，float8 权重不带 scale 直接进 bf16 参数，输出乱码；合入后用户在 Ascend 950 上确认告警清零、回答正常。#36426 合入上游后删除该分支与 worktree。
 
@@ -121,11 +129,12 @@ kernel 仓功能分支的 worktree 统一放在主仓 `sgl-kernel-npu-worktrees/
 ```text
 sgl-kernel-npu/                                   # 子模块；#638
 sgl-kernel-npu-worktrees/
-├── ascend950-recurrent-gated-delta-rule/         # 派生 worktree；#808（Draft）
-└── gdn-state-dtype-check/                        # 派生 worktree；bf16 state 断言，未提 PR
+├── ascend950-recurrent-gated-delta-rule/         # 派生 worktree；#808（Draft，含 bf16 state 断言）
+├── ascend950-mtp-experiment/                     # 派生 worktree；**建 wheel 用这个**；无 PR
+└── gdn-state-dtype-check/                        # 已作废：提交已并入 #808，分支与目录保留
 ```
 
-分支 `ascend950-mtp-integration`（#638 + #808 的 merge）只在 `origin` 和本地 refs 里，没有 worktree；要改它就在上面两个分支上改后重新合成。
+分支 `ascend950-mtp-integration`（#638 + #808 的 merge，head `3c51550550`）只在 `origin` 和本地 refs 里，没有 worktree；2026-09-20 起改法是把新的 #808 head 直接 `git merge` 进来（临时 worktree 用完即删），不再 `merge-tree` 重合成，这样 `ascend950-mtp-experiment` 里 #742 的冲突解决不用重做。
 
 强制规则：**每个需要修改 SGLang 代码的分支，都必须在 `sglang/` 下有独立 worktree。** 不得在现有目录中切换功能分支，也不得直接在外部临时 worktree 修改。
 

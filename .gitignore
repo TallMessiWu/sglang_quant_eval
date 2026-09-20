@@ -14,3 +14,10 @@ llm/profiling/
 
 # 一次性渲染产物（进度图 HTML/PNG），只在本机有意义
 artifacts/
+
+# ais_bench 按端点生成的模型配置：run_ais_bench.sh 的产物，不用手动维护
+llm/.ais_bench_configs/
+
+# Python 字节码：曾被误提交，见 llm/__pycache__
+__pycache__/
+*.pyc

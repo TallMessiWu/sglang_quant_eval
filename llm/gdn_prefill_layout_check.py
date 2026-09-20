@@ -55,7 +55,7 @@ def main() -> int:
     p.add_argument("--nv", type=int, default=4)
     p.add_argument("--dk", type=int, default=64, help="故意和 dv 不同，用来区分布局")
     p.add_argument("--dv", type=int, default=32)
-    p.add_argument("--tokens", type=int, default=8)
+    p.add_argument("--tokens", type=int, default=128, help="FLA chunk 是 64，默认给两个整块")
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args()
 
@@ -139,6 +139,8 @@ def main() -> int:
 
     sa = s_tri.float().cpu().reshape(nv, *s_tri.shape[-2:])
     sb = s_asc.float().cpu().reshape(nv, *s_asc.shape[-2:])
+    mag_a, mag_b = sa.abs().max().item(), sb.abs().max().item()
+    print(f"  state 幅度：triton |max| = {mag_a:.4e}   AscendC |max| = {mag_b:.4e}")
     straight = (sa - sb).abs().max().item() if sa.shape == sb.shape else float("inf")
     flipped = (sa - sb.transpose(-1, -2)).abs().max().item() if sa.shape == sb.transpose(-1, -2).shape else float("inf")
     print(f"  state 直接比   = {straight:.4e}")
@@ -149,12 +151,25 @@ def main() -> int:
     if out_err > tol:
         print(f"结论：两个 prefill 实现的输出本身就不一致（{out_err:.4e}），不只是 state 打包方式的问题")
         return 1
-    if flipped < straight:
+    # 一方接近全零时，上面的差值只是在量对方的幅度，不能据此判断布局
+    if mag_a < tol * max(mag_b, 1.0):
+        print("结论：triton 这条路径根本没写回 final_state（幅度接近 0）。")
+        print("      那 SGLang 写进 pool 的就是空 state —— 比转置更糟，直接没有历史。")
+        return 1
+    if mag_b < tol * max(mag_a, 1.0):
+        print("结论：AscendC 算子没写回 final_state（幅度接近 0），它的调用方式需要再确认。")
+        return 2
+    rel = min(straight, flipped) / max(mag_a, mag_b)
+    if flipped < straight and rel < tol:
         print("结论：两者算的是同一个东西，但 state 打包方式差一个转置。")
         print("      SGLang 调的是 triton 那条（K-major），而 pool / verify 算子是 V-major -> 错配。")
         return 1
-    print("结论：两者的 state 布局一致，prefill 不是问题所在。")
-    return 0
+    if straight <= flipped and rel < tol:
+        print("结论：两者的 state 布局一致，prefill 不是问题所在。")
+        return 0
+    print(f"结论：输出一致但 state 两种比法都对不上（相对差 {rel:.3e}），")
+    print("      说明差异不只是打包方式，需要进一步查（比如末块衰减或 chunk 边界的处理）。")
+    return 1
 
 
 if __name__ == "__main__":

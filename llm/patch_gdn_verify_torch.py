@@ -88,11 +88,21 @@ def _dbg_torch_gdn_verify(
 ):
     """等价于 recurrent_gated_delta_rule（num_accepted_tokens 全 1 的 verify 形式）。
 
-    state 的最后两维保持算子的约定不变（axis-2 配 v、axis-3 配 k），所以这是
-    layout 中立的替换。intermediate_state[ssm_state_indices[b, t]] = 处理完 token t 的 state。
+    按算子的物理约定做（axis-2 配 v、axis-3 配 k），intermediate_state 是连续的，
+    所以直接写进去就和算子写的内存排布一致；主 pool 则要按 is_contiguous() 还原。
+    intermediate_state[ssm_state_indices[b, t]] = 处理完 token t 的 state。
     """
     idx = cache_indices.to(torch.int64)
-    state = recurrent_state[idx].to(torch.float32)  # [bs, nv, dv, dk]
+    # 算子的 host 没有对 recurrent_state 调 .contiguous()，kernel 按物理内存读成
+    # (nv, dv, dk)。而 SGLang 在 NPU + 投机解码下把 pool 换成 transpose(-1, -2) 的
+    # 视图（memory_pool.py: `if _is_npu: temporal_state = temporal_state.transpose(-1, -2)`），
+    # 逻辑视图是 (nv, dk, dv)。所以要先还原成物理排布，才是算子看到的那份。
+    phys = (
+        recurrent_state
+        if recurrent_state.is_contiguous()
+        else recurrent_state.transpose(-1, -2)
+    )
+    state = phys[idx].to(torch.float32)  # [bs, nv, dv, dk]
 
     mix = mix_qkv.view(batch_size, seq_len, -1).to(torch.float32)
     q, k, v = torch.split(mix, [nk * dk, nk * dk, nv * dv], dim=-1)
@@ -124,7 +134,7 @@ def _dbg_torch_gdn_verify(
                 intermediate_state.dtype
             )
     if intermediate_state is None:
-        recurrent_state[idx] = state.to(recurrent_state.dtype)
+        phys[idx] = state.to(recurrent_state.dtype)
     return out.to(mix_qkv.dtype)
 '''
 
@@ -289,6 +299,24 @@ def self_test() -> int:
         print(
             f"gdn fallback bs={bs} seq={seq} nk={nk} nv={nv}: "
             f"输出{'一致' if ok_o else '不一致'}，state{'一致' if ok_s else '不一致'}"
+        )
+
+        # 生产形态：pool 是 transpose(-1, -2) 的非连续视图。算子读的是物理内存，
+        # 所以物理内容相同的视图必须给出和连续版本完全相同的结果。
+        strided_pool = recurrent_state.transpose(-1, -2)
+        assert not strided_pool.is_contiguous()
+        got_inter_s = intermediate.clone()
+        got_out_s = gdn_fb(
+            mix, strided_pool, beta, scale, ssm_idx, nk, nv, dk, dv,
+            got_inter_s, idx, g, bs, seq,
+        )
+        ok_t = torch.allclose(got_out_s, want_out, rtol=1e-4, atol=1e-4) and torch.allclose(
+            got_inter_s, want_inter, rtol=1e-4, atol=1e-4
+        )
+        failures += 0 if ok_t else 1
+        print(
+            f"gdn fallback（pool 为非连续转置视图，生产形态）: "
+            f"{'一致' if ok_t else '不一致'}"
         )
 
     print("self-test 通过" if not failures else f"self-test 失败 {failures} 项")

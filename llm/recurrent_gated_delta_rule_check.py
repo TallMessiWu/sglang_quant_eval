@@ -39,8 +39,11 @@ class Case:
         )
 
 
-def make_inputs(case: Case, seed: int):
-    """在 CPU 上按测试脚本的分布造输入；mix_qkv 按 [q, k, v] 沿最后一维拼接。"""
+def make_inputs(case: Case, seed: int, state_dtype: torch.dtype = torch.bfloat16):
+    """在 CPU 上按测试脚本的分布造输入；mix_qkv 按 [q, k, v] 沿最后一维拼接。
+
+    state_dtype 单独给，因为生产里 q/k/v/beta 是 bf16 而 SSM pool 是 float32。
+    """
     gen = torch.Generator().manual_seed(seed)
     b, s, nk, nv, dk, dv = case.b, case.mtp, case.nk, case.nv, case.dk, case.dv
     max_slots = b + 1
@@ -55,8 +58,10 @@ def make_inputs(case: Case, seed: int):
 
     return {
         "mix_qkv": torch.cat([q, k, v], dim=-1).contiguous(),
-        "recurrent_state": rand(max_slots, nv, dv, dk),
-        "intermediate_state": rand(max_slots, s, nv, dv, dk) if s > 1 else None,
+        "recurrent_state": rand(max_slots, nv, dv, dk, dtype=state_dtype),
+        "intermediate_state": (
+            rand(max_slots, s, nv, dv, dk, dtype=state_dtype) if s > 1 else None
+        ),
         "cache_indices": cache_indices if s > 1 else None,
         "ssm_state_indices": (
             cache_indices.to(torch.int64)[:, None] * s + torch.arange(s)
@@ -123,11 +128,22 @@ def reference(case: Case, inp) -> tuple[torch.Tensor, torch.Tensor]:
     return out.view(b, s, nv, dv), state
 
 
-def run_npu(case: Case, inp) -> tuple[torch.Tensor, torch.Tensor]:
-    """在 NPU 上调用算子，返回 (attention 输出, 写回后的 state)。"""
+def run_npu(case: Case, inp, strided_state: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
+    """在 NPU 上调用算子，返回 (attention 输出, 写回后的 state)。
+
+    strided_state=True 时按生产形态传入主 pool：SGLang 在 NPU + 投机解码下会把
+    temporal_state 换成 transpose(-1, -2) 的非连续视图（memory_pool.py 里的
+    `if _is_npu: temporal_state = temporal_state.transpose(-1, -2)`），逻辑内容不变。
+    """
     b, s, nv, dk, dv = case.b, case.mtp, case.nv, case.dk, case.dv
 
-    recurrent_state = inp["recurrent_state"].npu().clone()
+    if strided_state:
+        # 先按 (…, dk, dv) 连续存一份，再转置成视图 —— 逻辑内容和原张量一致，但不连续
+        base = inp["recurrent_state"].transpose(-1, -2).contiguous().npu()
+        recurrent_state = base.transpose(-1, -2)
+        assert not recurrent_state.is_contiguous()
+    else:
+        recurrent_state = inp["recurrent_state"].npu().clone()
     intermediate = None
     if inp["intermediate_state"] is not None:
         intermediate = inp["intermediate_state"].npu().clone().view(-1, nv, dv, dk)
@@ -178,6 +194,22 @@ def main() -> int:
     p.add_argument("--dk", type=int, default=128, help="key/query head_dim")
     p.add_argument("--dv", type=int, default=128, help="value head_dim")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument(
+        "--state-dtype",
+        choices=["bfloat16", "float32"],
+        default="bfloat16",
+        help="SSM state 的 dtype；生产（MambaPool 的 ssm_dtype）是 float32",
+    )
+    p.add_argument(
+        "--strided-state",
+        action="store_true",
+        help="按生产形态把主 pool 作为 transpose(-1,-2) 的非连续视图传进去",
+    )
+    p.add_argument(
+        "--matrix",
+        action="store_true",
+        help="对每个形状跑 dtype x 连续性 四种组合，用来定位生产形态下才出现的问题",
+    )
     p.add_argument("--dry-run", action="store_true", help="只跑 CPU 参考实现，不调用 NPU")
     p.add_argument(
         "--model-config",
@@ -238,26 +270,55 @@ def main() -> int:
             return 2
         print("算子已注册：torch.ops.npu.recurrent_gated_delta_rule")
 
+    if args.matrix:
+        variants = [
+            (torch.bfloat16, False),
+            (torch.bfloat16, True),
+            (torch.float32, False),
+            (torch.float32, True),
+        ]
+    else:
+        variants = [
+            (getattr(torch, args.state_dtype), args.strided_state),
+        ]
+
     failed = 0
+    total = 0
     for case in cases:
         if case.mtp > 8:
             print(f"跳过 {case}：MTP 超过 kernel 的 MAX_MTP=8")
             continue
         print(f"用例 {case}")
-        inp = make_inputs(case, args.seed)
-        ref_out, ref_state = reference(case, inp)
-        if args.dry_run:
-            print(f"    参考实现输出 {tuple(ref_out.shape)}，state {tuple(ref_state.shape)}")
-            continue
-        npu_out, npu_state = run_npu(case, inp)
-        ok = report("attention 输出", npu_out, ref_out)
-        ok &= report("state", npu_state, ref_state.view_as(npu_state))
-        failed += 0 if ok else 1
+        for state_dtype, strided in variants:
+            inp = make_inputs(case, args.seed, state_dtype)
+            ref_out, ref_state = reference(case, inp)
+            if args.dry_run:
+                print(
+                    f"  state dtype={str(state_dtype).split('.')[-1]} "
+                    f"非连续={strided}: 参考实现输出 {tuple(ref_out.shape)}，"
+                    f"state {tuple(ref_state.shape)}"
+                )
+                continue
+            label = (
+                f"state dtype={str(state_dtype).split('.')[-1]} 非连续={strided}"
+                + ("  ← 生产形态" if (state_dtype is torch.float32 and strided) else "")
+            )
+            print(f"  {label}")
+            total += 1
+            try:
+                npu_out, npu_state = run_npu(case, inp, strided)
+            except Exception as exc:  # noqa: BLE001  算子直接报错也是结论
+                print(f"    算子调用失败: {type(exc).__name__}: {exc}")
+                failed += 1
+                continue
+            ok = report("attention 输出", npu_out, ref_out)
+            ok &= report("state", npu_state, ref_state.view_as(npu_state))
+            failed += 0 if ok else 1
 
     if args.dry_run:
         print("dry-run 完成（未调用 NPU）")
         return 0
-    print(f"用例总数 {len(cases)}，失败 {failed}")
+    print(f"检查总数 {total}，失败 {failed}")
     return 1 if failed else 0
 
 

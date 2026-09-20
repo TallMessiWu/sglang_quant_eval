@@ -49,7 +49,8 @@ def _dbg_span(name, t):
         return f"{name}=None"
     f = t.detach().to(torch.float32)
     return (
-        f"{name}[{tuple(t.shape)},{t.dtype},contig={t.is_contiguous()}]"
+        f"{name}[{tuple(t.shape)},{t.dtype},contig={t.is_contiguous()}"
+        f",stride={tuple(t.stride())}]"
         f" min={f.min().item():.4g} max={f.max().item():.4g}"
         f" nan={int(torch.isnan(f).sum())} inf={int(torch.isinf(f).sum())}"
     )

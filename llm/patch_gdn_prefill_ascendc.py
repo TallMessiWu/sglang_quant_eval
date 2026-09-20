@@ -68,18 +68,20 @@ NEW = '''        # --- AscendC prefill switch (patch_gdn_prefill_ascendc.py) ---
             else:
                 from sgl_kernel_npu.fla.l2norm import l2norm_fwd as _l2norm
 
-                _q = _l2norm(q.squeeze(0))
-                _k = _l2norm(k.squeeze(0))
+                # q/k/v are strided views carved out of mixed_qkv, so squeezing
+                # leaves a row stride the kernels' view() calls reject.
+                _q = _l2norm(q.squeeze(0).contiguous())
+                _k = _l2norm(k.squeeze(0).contiguous())
                 _lens = _torch.diff(query_start_loc).to(_torch.int32)
                 _out, _state = _op(
-                    _q,
-                    _k,
-                    v.squeeze(0),
-                    beta=beta.squeeze(0),
+                    _q.contiguous(),
+                    _k.contiguous(),
+                    v.squeeze(0).contiguous(),
+                    beta=beta.squeeze(0).contiguous(),
                     initial_state=recurrent_state,
                     actual_seq_lengths=_lens,
                     scale=q.shape[-1] ** -0.5,
-                    g=g.squeeze(0).to(_torch.float32),
+                    g=g.squeeze(0).to(_torch.float32).contiguous(),
                 )
                 # h (per-chunk states) is only consumed by the mamba page
                 # tracking, which skips on None.

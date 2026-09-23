@@ -248,3 +248,49 @@ strided 优化版存档在分支 **`junlin_qwen3_dense_w4a8_strided`**（72fa200
 `ModelSlimConfig.get_moe_scheme` 用一张 `[(scheme_name, scheme_class), ...]` 列表按顺序匹配，命中第一条就返回。上游 [#30318](https://github.com/sgl-project/sglang/pull/30318) / [#30319](https://github.com/sgl-project/sglang/pull/30319) 已把 `W4A8_MXFP` → `ModelSlimW4A8MXFP4MoE`、`W4A4_MXFP4` → `ModelSlimW4A4MXFP4MoE` 注册进去；长期分支里再追加一条同名条目**不会冲突也不会报错**，只是排在后面永远匹配不到，整套自研 scheme 变成死代码。
 
 同理，`hardware_backend/npu/quantization/moe_methods.py` 里上游已有 `NPUW4A8MXFP4MoEMethod` / `NPUW4A4MXFP4MoEMethod`。要加在线量化就在这些类里按权重 dtype 分支（BF16/FP16 = 在线，uint8 = 离线 checkpoint），不要另起一个平行类。
+
+---
+
+## 异步 device fault（`507035` / `vector core exception`）先去 plog 查 `fault kernel_name`
+
+（2026-09-23 踩，Qwen3.5 MTP on Ascend 950）
+
+stderr 里那段 `EZ9999` 只说"某个 AI Core 任务访问了非法 GM 地址"，**不说是哪个算子**；Python 栈指向的是**下一个同步点**，不是出错的 kernel。overlap 调度下一轮 decode 里往往只有一个同步点（verify replay 前的 `forward_batch.seq_lens.cpu()`），于是栈永远落在同一个地方，跟真凶无关。
+
+runtime 会把出错任务的 kernel 名单独写进 plog，崩过一次就能查，不用重跑：
+
+```bash
+./llm/npu_fault_kernel.sh <PID>      # PID 取报错里的 EZ9999[PID: ...]，是 scheduler 子进程
+```
+
+它 grep 的是这类行（`~/ascend/log/{run,debug}/plog/` 与 `device-*/`）：
+
+```
+AI Core kernel execution failed, ... fault kernel_name=cache_loc_assign_1, ...
+[Dump][Exception] ... exceptionType=2(aicore), kernelName=cache_loc_assign_1
+```
+
+**先做这一步再猜**。这次靠它一步从"GDN/MTP 的某个算子"缩到 `cache_loc_assign`，而那个算子和 GDN、投机解码的 kernel 全都无关。
+
+## `cache_loc_update` 按 `batch * MAX_STEP` 读写 `out_cache_loc`，并发下随机踩非法 GM 地址
+
+（2026-09-23 定位，kernel [#824](https://github.com/sgl-project/sgl-kernel-npu/pull/824)）
+
+`csrc/cache_location_assign` 的 host 把 `cacheLocSize` 写死成 `batchSize * MAX_STEP`（`MAX_STEP = 16`，#411 从 5 改来），**完全不看 `out_cache_loc` 实际多长**：`PreProcess` 按这个数 `DataCopy` 读进 UB，`ProcessForCacheUpdate` 结尾再 `DataCopyPad` 整块写回。SGLang 投机解码只分配 `batch_size * draft_token_num`（NEXTN 下 4），于是每次 verify 准备都越界读写 `batch * 12` 个 int32。
+
+**这个越界在数值上是隐形的**：尾部读出来什么就写回什么，比对内容、放哨兵张量都发现不了。唯一症状是踩到未映射显存时的 fault。所以它能潜伏很久，而且"输出正常"不能作为没问题的证据。
+
+崩溃要同时满足三个条件，这就是"跑到测试集一半才炸"的由来：
+
+1. **bs ≥ 9** —— 越界才超出分配器的 512B 最小块（bs=15 时张量 240B、越界 720B）；
+2. **张量落在某个 2MB segment 的最后一个块** —— 实测约 0.6~0.8%；
+3. **那个 segment 的下一页没有映射** —— 实测 20 次跨段里只中 1 次。
+
+实测证据（`llm/patch_cache_loc_probe.py` 打桩，gsm8k 并发跑）：3256 次调用里 20 次跨段，前 19 次全在同一地址 `0x120bff5ffe00`（邻页已映射，安然无恙），第 20 次在另一个 segment 的尾部 `0x12057fbffe00`，越过段尾 448B，进程当场死在这次调用上。
+
+- **kernel 侧正解**：host 改用 `outCacheLoc.numel()`（#824）。修完后残余的只有"读取个数向上对齐到 8 个 int32"，最多 28B，且可证明总落在分配块自身的 512B 取整余量里。
+- **SGLang 侧临时措施**：按 `batch * 16` 分配、返回前缀视图（`junlin_qwen3.5_dense_w8a8_pr36426` 的 `b35cc57288`）。它把 kernel 的常量硬编码进了调用方，**#824 合入并重建 wheel 后要整个 revert**。
+- 与 Ascend 代际无关，910B/910C 同样中招；与 GDN、MTP 的 kernel 也无关，只是投机解码是唯一调用方，所以只有开 MTP 才看得见。
+- 这个仓自己的 `tests/python/sgl_kernel_npu/test_cache_update.py` 同样越界（bs=300 给 ~450 个元素，算子按 4800 个读写，越出约 17KB），一直没炸纯属运气。
+
+排查工具（都在 `llm/`，不用跑测试集）：`patch_cache_loc_probe.py` 打印每次调用的几何关系（`observe` 观察 / `strict` 跨段即抛 / `guard` 等价于修复 / `force` 强制跨段），`cache_loc_update_oob_check.py` 离线复现。**必须跑出并发**，单条 curl 只有 bs=1，永远看不到问题。

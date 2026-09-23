@@ -22,21 +22,29 @@ device 端按这个数读进来、再整块写回去。而 SGLang 只给 `batch_
                      抛 Python 异常。得到的是干净的 Python 栈和完整几何信息，而不是一个
                      指不到地方的 device fault。
     guard            按 batch*16 分配、返回前缀视图（就是修复本身），并打印。
-                     用来做 A/B：同样的请求，observe 会看到越界，guard 不会。
+                     注意它同时改变了分配块的大小（bs>=9 时 512B -> 1024B），所以"guard 不崩"
+                     既可能是消掉了越界，也可能只是挪动了整个分配器布局。用 tail 区分。
+    tail             **决定性对照**：分配和 guard 一模一样大的块，但把视图挪到块的末尾，
+                     于是越界原样恢复。guard 与 tail 的分配大小、块序列完全相同，只差视图
+                     起始偏移。tail 崩而 guard 不崩 => 越界就是原因；两个都不崩 => guard
+                     当初是靠挪布局蒙对的，得换方向查。
     force            照原样分配 batch*draft，但把它放在一块**独占 segment 的末尾**，
                      让越界部分直接越过整个 segment。目的是把"跑半个测试集才偶发"变成
                      "第一次 verify 就必现"。默认只对前 1 次调用生效
                      （SGLANG_CACHE_LOC_PROBE_FORCE_CALLS 可改）。
                      注意：不 fault 不代表没越界，只说明后面那页恰好是映射过的。
+                     实测 bs=1 时越过一整块 12MB segment 也没 fault，所以这个模式的
+                     阴性结果没有说服力，优先用 tail。
 
 辅助环境变量：
     SGLANG_CACHE_LOC_PROBE_EVERY=200     每多少次调用打一行汇总（0 = 不打）
+    SGLANG_CACHE_LOC_PROBE_VERBOSE=1     每次 bs 变化都打印（默认只打印首次和越界跨段的调用）
     SGLANG_CACHE_LOC_PROBE_SEGMENT=...   段大小，默认 2MB；分配器实现不同可改，测试也用它
 
 用法（NPU 机器，SGLang 源码安装）：
     python3 llm/patch_cache_loc_probe.py --apply
     SGLANG_CACHE_LOC_PROBE=observe MTP=1 ./llm/qwen3.5_dense_bf16.sh 0
-    # 另开一个终端发一条请求即可，日志里 grep cache-loc-probe
+    # 必须跑出并发（gsm8k），单条 curl 只有 bs=1，覆盖不到出问题的区间
     python3 llm/patch_cache_loc_probe.py --restore
 
 与 llm/patch_cache_loc_update_capacity.py 互斥（两者改同一处）：先 --restore 那个再用这个。
@@ -96,6 +104,8 @@ _cache_loc_probe_state = {
     "calls": 0,
     "crossing": 0,
     "forced": 0,
+    "logged_crossing": 0,
+    "max_bs": 0,
     "last_key": None,
     "logger": None,
 }
@@ -109,6 +119,7 @@ def _cache_loc_probe_cfg():
         int(os.environ.get("SGLANG_CACHE_LOC_PROBE_SEGMENT", 2 << 20)),
         int(os.environ.get("SGLANG_CACHE_LOC_PROBE_EVERY", 200)),
         int(os.environ.get("SGLANG_CACHE_LOC_PROBE_FORCE_CALLS", 1)),
+        os.environ.get("SGLANG_CACHE_LOC_PROBE_VERBOSE", "") == "1",
     )
 
 
@@ -127,6 +138,20 @@ def _cache_loc_probe_alloc(mode, have_n, touch_n, device, force_calls):
             (max(have_n, touch_n),), dtype=torch.int32, device=device
         )
         return backing[:have_n], "guard: allocated batch*MAX_STEP, returning the prefix view"
+    if mode == "tail":
+        # Same allocation as guard, but the view sits at the end of the block, so the
+        # overrun comes back. guard and tail allocate identical sizes in identical
+        # order -- only the view offset differs -- which separates "the overrun" from
+        # "guard also moved every later allocation".
+        n = max(have_n, touch_n)
+        backing = torch.empty((n,), dtype=torch.int32, device=device)
+        # Keep the view 32 B aligned: the kernel loads it with DataCopy, which
+        # requires it, and an unaligned view would confound the experiment.
+        off_n = ((n - have_n) // 8) * 8
+        return (
+            backing[off_n:off_n + have_n],
+            "tail: block sized like guard, view moved to its end",
+        )
     if mode == "force" and _cache_loc_probe_state["forced"] < force_calls:
         _cache_loc_probe_state["forced"] += 1
         # >= 10MB and a multiple of 2MB, so the caching allocator gives this
@@ -149,7 +174,7 @@ def _cache_loc_probe_update(
     draft_token_num,
     device,
 ):
-    mode, segment, every, force_calls = _cache_loc_probe_cfg()
+    mode, segment, every, force_calls, verbose = _cache_loc_probe_cfg()
     have_n = batch_size * draft_token_num
     touch_n = batch_size * _CACHE_LOC_MAX_STEP
 
@@ -172,8 +197,19 @@ def _cache_loc_probe_update(
     if crosses:
         st["crossing"] += 1
 
+    if batch_size > st["max_bs"]:
+        st["max_bs"] = batch_size
+    # A crossing call is the rare, interesting one -- always report the first 20,
+    # then thin out. bs churn is noisy under load, so it only prints on request.
+    if crosses:
+        st["logged_crossing"] += 1
     key = (batch_size, draft_token_num, mode, crosses)
-    if st["calls"] == 1 or key != st["last_key"]:
+    should_log = st["calls"] == 1 or (
+        crosses and (st["logged_crossing"] <= 20 or st["logged_crossing"] % 100 == 0)
+    )
+    if verbose and key != st["last_key"]:
+        should_log = True
+    if should_log:
         st["last_key"] = key
         log.warning(
             "[cache-loc-probe] call#%d mode=%s bs=%d draft=%d | tensor %d int32 (%d B) at 0x%x "
@@ -186,8 +222,10 @@ def _cache_loc_probe_update(
         )
     if every > 0 and st["calls"] % every == 0:
         log.warning(
-            "[cache-loc-probe] summary: %d calls, %d of them (%.1f%%) had their overrun leave the segment",
-            st["calls"], st["crossing"], 100.0 * st["crossing"] / st["calls"],
+            "[cache-loc-probe] summary: %d calls, max bs seen %d, %d calls (%.2f%%) had their "
+            "overrun leave the segment",
+            st["calls"], st["max_bs"], st["crossing"],
+            100.0 * st["crossing"] / st["calls"],
         )
 
     if mode == "strict" and crosses:

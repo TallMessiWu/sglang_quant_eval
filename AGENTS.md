@@ -62,6 +62,8 @@
 ## 提交与发布
 
 - 用户要求提交时使用 `gitmoji-commit` skill 生成 Gitmoji 英文提交信息。
+- 提交完直接 push，不要停下来问；未经确认不得 `--force` / `--force-with-lease` 改写已发布历史。push 后核对本地与远端 SHA（ahead/behind `0 0`）并报出。
+- 每个 PR 只担一个职责；可分离的移植另开 PR，且要用户点名后才建。细节见 [docs/agents/upstream-conventions.md](docs/agents/upstream-conventions.md)。
 - SGLang 改动在对应 `sglang/<worktree>/` 中提交并推到 `origin`；主仓无需更新 SGLang 指针。
 - `sgl-kernel-npu` 是主仓子模块：在子模块内提交/推送后，只有用户要记录该版本时才更新主仓 gitlink。
 - 不主动覆盖、重置或清理用户的分支、worktree、子模块改动。
@@ -77,4 +79,5 @@
 - Ascend API：[docs/npu-api/](docs/npu-api/)
 - 领域语言：[CONTEXT.md](CONTEXT.md)
 - Agent issue/triage/domain 约定：[docs/agents/](docs/agents/)
+- 上游文本命名与 PR 职责边界：[docs/agents/upstream-conventions.md](docs/agents/upstream-conventions.md)
 - 启动与评测脚本：`llm/`、`diffusion/`

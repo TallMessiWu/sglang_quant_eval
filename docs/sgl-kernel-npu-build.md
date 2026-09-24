@@ -32,6 +32,20 @@ git -C sgl-kernel-npu remote add upstream https://github.com/sgl-project/sgl-ker
 
 逻辑 wheel target 与底层编译 target 分离：wheel target 只决定 Gemma provider，CMake target 决定 C++ kernel 如何编译。`csrc/CMakeLists.txt` 按 `Ascend950*` 选择 `arch35` 并启用 A5 专属算子（如 `kv_compress_epilog`），所以 A5 的 kernels 必须用具体 A5 型号编译，不能再用 `Ascend910_9382` 兼容目标。
 
+## 机器与 SOC 命名
+
+跑 A5 验证的评测服务器是 **Ascend950PR = A5**，不是 A3/910_93。判据是 `npu-smi info` 的 **Chip Name** 列——`build.sh` 的自动探测就是 grep 这一列（A5 从设备级查询 `npu-smi info -t board -i 0` 读到 `Chip Name: Ascend950*`；A2/A3 需要 `-c 0`，见 `build.sh` 的 `detect_soc_version()`）：
+
+| 代际 | `npu-smi` Chip Name | 探测出的 SOC_VERSION |
+| --- | --- | --- |
+| A2 | `910B*` | `Ascend910B1` |
+| A3 | `Ascend910*` | `Ascend910_9382` |
+| A5 | `Ascend950*` | `Ascend950` |
+
+构建别名（`910B` / `910` / `910C` / `950`）与 wheel provider 的对应见下节「构建」的表，不在这里重复。
+
+探测不到设备（无 `npu-smi` 的构建容器）时回落 `Ascend910_9382`，即 A3 兼容目标；出 A5 的 wheel 前先核对这一列，或显式传 `950`。评测服务器上本仓的 checkout 与 benchmark 数据在 `hajimi` 用户下（`llm/a5_fia_mixed_split_bench.sh` 默认取 `/home/hajimi/benchmark/`）。
+
 ## 构建
 
 先看当前分支帮助，避免沿用旧命令：
@@ -96,6 +110,8 @@ python -c "from sgl_kernel_npu.norm.gemma_rmsnorm import npu_gemma_rms_norm; pri
 ## 环境问题
 
 旧版文档记录过 CANN beta 头文件缺失和 `-Wframe-larger-than` 被 `-Werror` 提升等环境问题。这些不是默认源码修改步骤；只有当前构建日志再次出现相同错误时，才按实际 CANN 安装定位。不要预先修改编译参数或系统头文件。
+
+已知具体形态：评测服务器的 CANN 是 beta 版 `cann-9.1.T560`，`include/experiment/` 头文件树不全（缺 `prof_common.h`、`aprof_pub.h` 等），从源码编译 AscendC 算子会踩到。纯 triton 内核不受影响（运行时 JIT，如 `norm/split_qkv_rmsnorm_rope.py`，见 [known-pitfalls.md](known-pitfalls.md) 第一节）。
 
 常用定位：
 

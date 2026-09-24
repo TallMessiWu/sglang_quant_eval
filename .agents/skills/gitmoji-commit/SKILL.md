@@ -1,6 +1,6 @@
 ---
 name: gitmoji-commit
-description: Analyzes staged code changes and conversation context to generate a Gitmoji-compliant commit message in English, then executes the commit locally (without pushing).
+description: Analyzes staged code changes and conversation context to generate a Gitmoji-compliant commit message in English, then commits it and pushes to the remote (a force-push needs confirmation).
 ---
 
 # Gitmoji Commit Skill
@@ -9,7 +9,7 @@ This Skill automates the Git commit process. You will analyze code changes and c
 
 ## Core Principles
 1.  **Always use ENGLISH** for the commit Subject and Body.
-2.  **STRICTLY NO PUSHING (`git push`)**, only execute local commits (`git commit`).
+2.  **COMMIT, THEN PUSH**: Execute the commit, then push to the current branch's remote. Do **not** stop at a local commit and hand the push over as a suggestion. The only push that needs confirmation is one that rewrites published history (`--force` / `--force-with-lease`).
 3.  **ALWAYS use Gitmoji CODE, NEVER raw emoji characters**: You MUST write `:sparkles:` — **NEVER** `✨`. Raw Unicode emoji characters are strictly forbidden in commit messages. This applies everywhere: the subject, body, and proposed message shown to the user.
 4.  **Formatting Standard**: `<emoji-code> <type>(<scope>): <subject>`
     * **Emoji**: Always use the Gitmoji text code (e.g., `:sparkles:`, `:bug:`, `:recycle:`). Raw Unicode characters (e.g., `✨`, `🐛`, `♻️`) are **FORBIDDEN**.
@@ -121,24 +121,28 @@ Select the **most accurate** Emoji and Type from the reference table based on yo
 *(Agent Note: Prioritize the most specific context when choosing. E.g., if updating version in `package.json`, `:arrow_up:` or `:heavy_plus_sign:` is better than the generic `:package:` or `:wrench:`. If purely tweaking CSS, you must use `:lipstick:`)*
 
 ### 4. User Interaction & Execution
-You **MUST** display the proposed commit command to the user and request confirmation first.
+Display the proposed commit command, then execute it. **Do not wait for confirmation** — a normal commit + push is pre-authorized.
 
 **Example Conversation**:
 > **Agent**: The staging area contains dependency updates in `package.json`.
-> Proposed commit message:
 > `git commit -m ":arrow_up: chore(deps): upgrade vue version to 3.4"`
->
-> Shall I execute this?
+> → committed `a1b2c3d`, pushed to `origin/main`
 
-**ONLY after the user explicitly replies with "Yes", "Confirm", "OK", etc.,** proceed to run the command:
 ```powershell
-# Simple Commit
+# Simple Commit + Push
 git commit -m ":your-emoji: type(scope): subject"
+git push origin HEAD
 
-# Complex Commit
+# Complex Commit + Push
 git commit -m ":your-emoji: type(scope): subject" -m "1. Detail one\n2. Detail two"
+git push origin HEAD
 ```
 
+Still stop and ask in these cases only:
+- The push would rewrite published history (`--force` / `--force-with-lease`).
+- The target branch is not the one this work belongs to, or you are unsure which remote/branch to push.
+- The user explicitly asked not to push this time.
+
 ## Important Notes
-- If the user is unsatisfied with the proposed message, adjust it based on their feedback and ask for confirmation again.
-- Once successfully committed, inform the user and remind them to manually push the changes.
+- If the user is unsatisfied with the proposed message, adjust it based on their feedback; amend the commit and re-push (`--force-with-lease`, which does need confirmation).
+- Once committed and pushed, report the local SHA, the remote branch, and that ahead/behind is `0 0`. Do not end the turn with an unpushed commit unless the user asked for one.

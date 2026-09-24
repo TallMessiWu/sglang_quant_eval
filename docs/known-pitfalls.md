@@ -16,6 +16,16 @@ python3 -c "from sglang.srt.models.qwen3 import Qwen3ForCausalLM; print('OK')"
 若是 `sgl_kernel_npu` 版本太旧、缺某个 kernel 符号（如跑 Qwen3.5 缺 `split_qkvgate_gemma_rmsnorm_rope`），
 需从源码升级 `sgl_kernel_npu`，编译安装过程见 [sgl-kernel-npu-build.md](sgl-kernel-npu-build.md)。
 
+**先看到真错误再动手**：`registry.py` 的 `logger.warning("Ignore import error ...")` 会把真实 traceback 吞掉，只看注册表或跑服务只会得到一句伪装成「没实现」的报错。直接 import 该模型模块才能暴露它：
+
+```bash
+python3 -c "import sglang.srt.models.qwen3_5"
+```
+
+**实例（2026-07-13，Qwen3.5 27B dense）**：报 `Qwen3_5ForConditionalGeneration has no SGLang implementation and the Transformers implementation is not compatible`。真因不是没实现——`models/qwen3_5.py` 已实现并注册了 `EntryClass`，但它 import 了 `sgl_kernel_npu.norm.split_qkv_rmsnorm_rope.split_qkvgate_gemma_rmsnorm_rope`，服务器上 2026.3.1 版 `sgl_kernel_npu` 没有这个符号 → 模块 import 失败 → 该架构不进 `supported_archs` → fallback 到 transformers。qwen3 不依赖这个算子，所以只有 qwen3.5 中招。
+
+**修法不必重编 wheel**：`split_qkvgate_gemma_rmsnorm_rope` 是纯 `@triton.jit` 内核（`sgl-kernel-npu` 的 `python/sgl_kernel_npu/norm/split_qkv_rmsnorm_rope.py`），运行时 JIT，与 SOC / AscendC 编译无关。把本仓较新版本的 `sgl_kernel_npu/norm/` Python 源码覆盖到已装包的 `site-packages` 同名路径即可，不用整包 `bash build.sh`；qwen3.5 dense 也用不到 attentions / prof 那几个模块，别为它去碰 A5 上会踩的编译坑（见 [sgl-kernel-npu-build.md](sgl-kernel-npu-build.md)）。
+
 ---
 
 ## 模块级 `import torch_npu` 会炸掉全平台 CI

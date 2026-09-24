@@ -133,6 +133,46 @@ A5 probe（同 shape 分别拿 `torch_npu.float4_e2m1fn_x2`=296 vs `torch.float4
 
 ---
 
+## 在线 W4A4 双级路径：`w_l0_scale.squeeze(-1)` 会在中维为 1 时把维度吃掉
+
+（2026-07-25 踩，Qwen3.5 MoE 在线 W4A4）
+
+`linear_method_npu.py` 里 `npu_dynamic_dual_level_mx_quant` 返回的 L0 scale 要按 `reshape(shape[0], -1)` 处理：
+
+```python
+# 错：L0 scale 中维为 1（如 [4, 1]）时 squeeze(-1) 把维度吃掉，transpose(0, 1) 随即塌成错误形状/报错
+w_l0_scale = w_l0_scale.squeeze(-1).transpose(0, 1).contiguous()
+# 对
+w_l0_scale = w_l0_scale.reshape(shape[0], -1).transpose(0, 1).contiguous()
+```
+
+**判据**：`[4, 1] -> [1, 4]`。2026-09-24 复查：9 个 worktree 里 8 个（`upstream-main`、`qwen3.5_moe_w8a8`、`qwen3.5_moe_w4a8`、`qwen3.5_dense_w8a8*` 等）**仍是 `squeeze(-1)` 写法**，属尚未修的潜在 bug；动 W4A4 双级路径时一并换掉。
+
+---
+
+## W4A4 MoE 的 packed 权重保持 ND，不能套用 W4A8 的 NZ cast
+
+（2026-07-25 踩，Qwen3.5 MoE 在线 W4A4）
+
+W4A8 路径会把 weight 转 `FRACTAL_NZ` 再喂 grouped matmul，**W4A4 不能照抄**：
+
+- `w13` / `w2` 用 `transpose(1, 2)` 后**保留 strided view**，不要再 `.contiguous()`（理由同上面的 MoE MXFP8 一节）。
+- `npu_grouped_matmul` 接受 ND 或 `FRACTAL_NZ`，**不接受 `FRACTAL_NZ_C0_32`**；套用 W4A8 的 NZ helper 会在 warmup / 图捕获阶段直接报非法 format。
+
+---
+
+## ModelSlim 导出配置：fused expert 的三个 shard 必须同精度，排除 router gate 用 `*gate`
+
+（2026-07-25 / 2026-07-27 踩，Qwen3.5 MoE W4A8 / W4A4 的 YAML）
+
+vLLM-Ascend 把 Qwen3.5 的 fused `experts` 映射成 `experts.0.gate_proj` / `up_proj` / `down_proj`，三者共享同一精度，所以 include/exclude 规则要按整体写：
+
+- `exclude: ["*mlp.experts.*gate*"]` 会把 `gate_proj` 留成 FLOAT，而同一个 expert 的 `up_proj` / `down_proj` 是 W4 → 能加载、精度不对，且日志里看不出来。
+- 正确写法：按 `*mlp.experts*` 整体量化，只排除 `mtp*`；确实要排除 router gate 时用**后缀** `*gate`，不要用 `*gate*`。
+- 位宽口径：W4A8 = `act=mxfp8` + `weight=mxfp4`；W4A4 = 两者都 `mxfp4`。混合 scheme 要显式保留 attention 的 MXFP8 例外，别叫它「全层 W4A8」。
+
+---
+
 ## A8W4 `npu_quant_matmul` 的 bias 必须是 BF16 二维 `[1,N]`
 
 Qwen3.5 在线 W4A8 的首次图片请求会进入视觉塔 QKV；该层带一维 bias。若沿用其他量化 matmul 的 FP32 `[N]` 处理，A5 会在 `NPUMXFP4W4A8LinearMethod.apply` 报 `The dimension of bias should be 2. Actual bias dimension is: 1.`。MindIE-SD 的同类 W4A8 路径会将 bias 转为 BF16，并把 `[N]` 扩成 `[1,N]`。
@@ -258,6 +298,16 @@ strided 优化版存档在分支 **`junlin_qwen3_dense_w4a8_strided`**（72fa200
 `ModelSlimConfig.get_moe_scheme` 用一张 `[(scheme_name, scheme_class), ...]` 列表按顺序匹配，命中第一条就返回。上游 [#30318](https://github.com/sgl-project/sglang/pull/30318) / [#30319](https://github.com/sgl-project/sglang/pull/30319) 已把 `W4A8_MXFP` → `ModelSlimW4A8MXFP4MoE`、`W4A4_MXFP4` → `ModelSlimW4A4MXFP4MoE` 注册进去；长期分支里再追加一条同名条目**不会冲突也不会报错**，只是排在后面永远匹配不到，整套自研 scheme 变成死代码。
 
 同理，`hardware_backend/npu/quantization/moe_methods.py` 里上游已有 `NPUW4A8MXFP4MoEMethod` / `NPUW4A4MXFP4MoEMethod`。要加在线量化就在这些类里按权重 dtype 分支（BF16/FP16 = 在线，uint8 = 离线 checkpoint），不要另起一个平行类。
+
+---
+
+## 在线 W4A4 的 `get_name()` 与静态 MXFP4 同名，靠 `is_static_cfg()` 区分
+
+（2026-07-25 踩，Qwen3.5 MoE 在线 W4A4）
+
+`Mxfp4W4A4Config.get_name()` 返回 `"mxfp4"`（`npu_mxfp4_w4a4.py`），与静态 MXFP4 checkpoint 的 scheme **同名**；通用 MoE loader 靠 `Mxfp4W4A4Config.is_static_cfg()` 判断这是「已序列化的静态 MXFP4 checkpoint」还是「BF16 权重现量化」。
+
+**在线 W4A4 必须 `return False`**：返回 `True` 会被当成静态 checkpoint 走加载，报出来的错落在下一层的形状/dtype 检查上，完全不指向这里。回归测试是 `test_online_config_is_not_static()`。新加在线 scheme 时，先确认它的 `get_name()` 有没有和离线 scheme 撞名。
 
 ---
 

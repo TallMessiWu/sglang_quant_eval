@@ -35,6 +35,8 @@ Offline 启动脚本通常不显式传 `--quantization modelslim`；以 checkpoi
 
 “已实现”不等于当前分支已完成硬件验收；以 PR 正文的最新 Validation/TODO 和真实 A5/A2/A3 日志为准。
 
+**在线 W4A8 的精度目前是空白，别把补丁或旧数字当现状**：本仓没有任何在线 W4A8 的端到端精度记录。目前唯一的实测是 2026-07-28 在 TP=4 上的 GSM8K —— BF16 `93.33` / 离线 W4A8 `93.71` / **在线 `mxfp_w4a8` `65.58`**；同月那个「让非 expert 的 `LinearBase` 回退 BF16」的实验随后被判为相对 main 的回退而撤销（见 [branches.md](branches.md) 的 #32601 一节），**所以精度问题并没有因此闭环**。要做的是用 `ignored_layers` 排除非专家层重测，而不是改 dispatch。
+
 MoE 的离线 MXFP4 路径已由上游 #30318 / #30319 落地，#32601 与 #32602 只剩在线量化入口；相关去重与注册表陷阱见 [known-pitfalls.md](known-pitfalls.md)。
 
 ## SGLang 关键路径

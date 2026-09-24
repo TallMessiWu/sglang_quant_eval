@@ -9,12 +9,22 @@
     python3 llm/recurrent_gated_delta_rule_check.py                    # 默认几组形状
     python3 llm/recurrent_gated_delta_rule_check.py --b 4 --mtp 4 --nk 16 --nv 32
     python3 llm/recurrent_gated_delta_rule_check.py --dry-run          # 不碰 NPU，只跑参考实现
+
+两个 wheel 的 A/B（例如 PR #808 的 arch35 实现 vs #823 的只放开编译）：
+    # 各自装好 wheel 后，用同一个 seed 各跑一次，把输出存下来
+    python3 llm/recurrent_gated_delta_rule_check.py --bench 100 --dump /tmp/pr808.pt
+    python3 llm/recurrent_gated_delta_rule_check.py --bench 100 --dump /tmp/pr823.pt
+    # 再直接比两边的输出（不经过容差，逐元素比）
+    python3 llm/recurrent_gated_delta_rule_check.py --compare /tmp/pr808.pt /tmp/pr823.pt
 """
 
 from __future__ import annotations
 
 import argparse
+import os
+import statistics
 import sys
+import time
 from dataclasses import dataclass
 
 import torch
@@ -128,8 +138,10 @@ def reference(case: Case, inp) -> tuple[torch.Tensor, torch.Tensor]:
     return out.view(b, s, nv, dv), state
 
 
-def run_npu(case: Case, inp, strided_state: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
-    """在 NPU 上调用算子，返回 (attention 输出, 写回后的 state)。
+def upload(case: Case, inp, strided_state: bool = False):
+    """把一组输入搬到 NPU，返回 (args, kwargs, 写回目标, 可复位的物理张量)。
+
+    只搬一次，供 run_npu 和 bench_npu 共用：计时时不能把 H2D 拷贝算进去。
 
     strided_state=True 时按生产形态传入主 pool：SGLang 在 NPU + 投机解码下会把
     temporal_state 换成 transpose(-1, -2) 的非连续视图（memory_pool.py 里的
@@ -150,9 +162,8 @@ def run_npu(case: Case, inp, strided_state: bool = False) -> tuple[torch.Tensor,
     if inp["intermediate_state"] is not None:
         intermediate = inp["intermediate_state"].npu().clone().view(-1, nv, dv, dk)
 
-    out = torch.ops.npu.recurrent_gated_delta_rule(
-        inp["mix_qkv"].npu(),
-        recurrent_state,
+    args = (inp["mix_qkv"].npu(), recurrent_state)
+    kwargs = dict(
         beta=inp["beta"].npu(),
         scale=inp["scale"],
         actual_seq_lengths=inp["actual_seq_lengths"].npu(),
@@ -166,8 +177,42 @@ def run_npu(case: Case, inp, strided_state: bool = False) -> tuple[torch.Tensor,
         num_accepted_tokens=inp["num_accepted_tokens"].npu(),
         g=inp["g"].npu(),
     )
-    state = intermediate if intermediate is not None else phys
-    return out.to(torch.float32).cpu(), state.to(torch.float32).cpu()
+    # 算子原地写 state：intermediate 存在时写它，否则写主 pool 的物理张量 phys
+    # （strided 时传进去的是 phys 的转置视图，写回的物理内存还是 phys）
+    written = intermediate if intermediate is not None else phys
+    return args, kwargs, written
+
+
+def run_npu(case: Case, inp, strided_state: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
+    """在 NPU 上调用一次算子，返回 (attention 输出, 写回后的 state)。"""
+    args, kwargs, written = upload(case, inp, strided_state)
+    out = torch.ops.npu.recurrent_gated_delta_rule(*args, **kwargs)
+    return out.to(torch.float32).cpu(), written.to(torch.float32).cpu()
+
+
+def bench_npu(case: Case, inp, strided_state: bool, iters: int, rounds: int, warmup: int):
+    """计时：每轮连续发射 iters 次，轮末 synchronize，取每次调用的耗时（毫秒）。
+
+    算子原地改 state，连续调用会让 state 漂移；每轮开始前从快照复位，复位不计时。
+    形状固定、kernel 无数据相关分支，所以漂移不影响耗时，只是别拿这里的数值当精度用。
+    """
+    args, kwargs, written = upload(case, inp, strided_state)
+    snapshot = written.clone()
+
+    for _ in range(warmup):
+        torch.ops.npu.recurrent_gated_delta_rule(*args, **kwargs)
+    torch.npu.synchronize()
+
+    per_round = []
+    for _ in range(rounds):
+        written.copy_(snapshot)
+        torch.npu.synchronize()
+        t0 = time.perf_counter()
+        for _ in range(iters):
+            torch.ops.npu.recurrent_gated_delta_rule(*args, **kwargs)
+        torch.npu.synchronize()
+        per_round.append((time.perf_counter() - t0) / iters * 1e3)
+    return min(per_round), statistics.median(per_round)
 
 
 def report(name: str, got: torch.Tensor, want: torch.Tensor) -> bool:
@@ -185,6 +230,56 @@ def report(name: str, got: torch.Tensor, want: torch.Tensor) -> bool:
         idx = int(bad.nonzero()[0])
         print(f"      首个不一致: index={idx} npu={got[idx].item():.9f} ref={want[idx].item():.9f}")
     return ok
+
+
+def compare_dumps(path_a: str, path_b: str) -> int:
+    """逐元素比两个 --dump 的结果。
+
+    比的是「同一份输入、同一个 seed，两个 wheel 各自算出什么」，不走 TOLERANCE：
+    两边各自跟 golden 比都在容差内，也可能彼此差很多，那更值得知道。
+    """
+    dumps = {}
+    for path in (path_a, path_b):
+        d = torch.load(path, map_location="cpu", weights_only=False)
+        meta = d.get("meta", {})
+        print(f"{path}: seed={meta.get('seed')} wheel={meta.get('wheel')}")
+        dumps[path] = d
+
+    a, b = dumps[path_a]["results"], dumps[path_b]["results"]
+    only_a, only_b = set(a) - set(b), set(b) - set(a)
+    for key in sorted(only_a):
+        print(f"  只在 {path_a} 里: {key}")
+    for key in sorted(only_b):
+        print(f"  只在 {path_b} 里: {key}")
+
+    shared = sorted(set(a) & set(b))
+    worst = 0.0
+    differing = 0
+    for key in shared:
+        print(f"用例 {key}")
+        for field in ("out", "state"):
+            ta, tb = a[key][field], b[key][field]
+            if ta.shape != tb.shape:
+                print(f"    {field}: 形状不同 {tuple(ta.shape)} vs {tuple(tb.shape)}")
+                differing += 1
+                continue
+            diff = (ta - tb).abs().max().item()
+            worst = max(worst, diff)
+            same = torch.equal(ta, tb)
+            if not same:
+                differing += 1
+            print(f"    {field}: {'逐位相同' if same else '有差异'}  最大绝对差={diff:.3e}")
+        ba, bb = a[key].get("bench"), b[key].get("bench")
+        if ba and bb:
+            speedup = bb[0] / ba[0] if ba[0] else float("nan")
+            print(
+                f"    耗时: {os.path.basename(path_a)} {ba[0]:.4f}ms"
+                f"  {os.path.basename(path_b)} {bb[0]:.4f}ms"
+                f"  （前者快 {speedup:.2f}x，取每组最快一轮）"
+            )
+
+    print(f"共 {len(shared)} 个用例，{differing} 项有差异，全局最大绝对差={worst:.3e}")
+    return 1 if (differing or only_a or only_b) else 0
 
 
 def main() -> int:
@@ -214,10 +309,33 @@ def main() -> int:
     )
     p.add_argument("--dry-run", action="store_true", help="只跑 CPU 参考实现，不调用 NPU")
     p.add_argument(
+        "--bench",
+        type=int,
+        default=0,
+        metavar="N",
+        help="每轮连续发射 N 次算子并计时；0（默认）不测性能",
+    )
+    p.add_argument("--bench-rounds", type=int, default=5, help="计时轮数，报告最快与中位那轮")
+    p.add_argument("--bench-warmup", type=int, default=10, help="计时前的预热次数")
+    p.add_argument(
+        "--dump",
+        metavar="PATH",
+        help="把每个用例的输出（和 --bench 的耗时）存到文件，供 --compare 跨 wheel 对比",
+    )
+    p.add_argument(
+        "--compare",
+        nargs=2,
+        metavar=("A", "B"),
+        help="比较两个 --dump 文件，逐元素对比输出并列出耗时；不碰 NPU",
+    )
+    p.add_argument(
         "--model-config",
         help="模型目录或 config.json，自动取 GDN 的 linear_num_*_heads / linear_*_head_dim",
     )
     args = p.parse_args()
+
+    if args.compare:
+        return compare_dumps(*args.compare)
 
     if args.model_config:
         import json
@@ -286,6 +404,7 @@ def main() -> int:
 
     failed = 0
     total = 0
+    results = {}
     for case in cases:
         if case.mtp > 8:
             print(f"跳过 {case}：MTP 超过 kernel 的 MAX_MTP=8")
@@ -317,9 +436,39 @@ def main() -> int:
             ok &= report("state", npu_state, ref_state.view_as(npu_state))
             failed += 0 if ok else 1
 
+            record = {"out": npu_out, "state": npu_state}
+            if args.bench:
+                best, med = bench_npu(
+                    case, inp, strided, args.bench, args.bench_rounds, args.bench_warmup
+                )
+                print(
+                    f"    耗时: 最快 {best:.4f}ms  中位 {med:.4f}ms"
+                    f"  （{args.bench} 次/轮 × {args.bench_rounds} 轮）"
+                )
+                record["bench"] = (best, med)
+            if args.dump:
+                results[f"{case} | state={str(state_dtype).split('.')[-1]} | 非连续={strided}"] = record
+
     if args.dry_run:
         print("dry-run 完成（未调用 NPU）")
         return 0
+
+    if args.dump:
+        import sgl_kernel_npu  # noqa: PLC0415  只为记录这次用的是哪个 wheel
+
+        torch.save(
+            {
+                "meta": {
+                    "seed": args.seed,
+                    "wheel": getattr(sgl_kernel_npu, "__file__", None),
+                    "argv": sys.argv[1:],
+                },
+                "results": results,
+            },
+            args.dump,
+        )
+        print(f"已写入 {args.dump}（{len(results)} 个用例）")
+
     print(f"检查总数 {total}，失败 {failed}")
     return 1 if failed else 0
 

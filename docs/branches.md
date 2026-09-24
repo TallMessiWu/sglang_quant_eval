@@ -1,6 +1,6 @@
 # 活跃分支、PR 与 worktree
 
-> 最近核对：2026-09-14（Asia/Shanghai）；#32745 与 #638 两行于 2026-09-17 合并上游后重新核对；sgl-kernel-npu #808 于 2026-09-17 新建后核对；SGLang #40419 与 kernel 分支 `gdn-state-dtype-check` 于 2026-09-20 新建后核对，#32745 的 head 同日回退到 `4f35f3ef7e`；同日稍后按用户要求把 bf16 断言并入 #808、把 #40419 叠到 `junlin_qwen3.5_dense_w8a8_pr36426`，并重做两个 kernel 构建分支的 merge；同日 #32745 与该测试分支合入 `upstream/main` `c1a1eb5f66`（CONFLICTING → MERGEABLE）。GitHub 状态来自实时 PR 查询，本地状态来自 `git worktree list --porcelain`、`git branch --show-current` 和 `git rev-parse HEAD`。这些信息会漂移，操作前必须重新查询。
+> 最近核对：2026-09-14（Asia/Shanghai）；#32745 与 #638 两行于 2026-09-17 合并上游后重新核对；sgl-kernel-npu #808 于 2026-09-17 新建后核对；SGLang #40419 与 kernel 分支 `gdn-state-dtype-check` 于 2026-09-20 新建后核对，#32745 的 head 同日回退到 `4f35f3ef7e`；同日稍后按用户要求把 bf16 断言并入 #808、把 #40419 叠到 `junlin_qwen3.5_dense_w8a8_pr36426`，并重做两个 kernel 构建分支的 merge；同日 #32745 与该测试分支合入 `upstream/main` `c1a1eb5f66`（CONFLICTING → MERGEABLE）。GitHub 状态来自实时 PR 查询，本地状态来自 `git worktree list --porcelain`、`git branch --show-current` 和 `git rev-parse HEAD`。这些信息会漂移，操作前必须重新查询。2026-09-24 按用户要求复核 sgl-kernel-npu 侧 #808/#823 两对共四个分支：GitHub 两个 PR 均为 OPEN + Draft + MERGEABLE（本次已算出 mergeable，不再是 UNKNOWN），本地 head 与 GitHub head 一致，四个分支与 `origin` 零分叉、worktree 干净；**SGLang 侧 PR 状态本轮未复核**。同时更正了「两个实验分支只差 195 行」这条已过期的结论（见下文）。
 
 ## 远程地址
 
@@ -22,6 +22,7 @@
 | SGLang [#34387](https://github.com/sgl-project/sglang/pull/34387) — A5 mixed chunked-prefill FIA split | Open Draft，**CONFLICTING / DIRTY** | `junlin_a5_fia_mixed_split` | `c61c0f16a2` | `1fa32d50e1`（2026-08-25） | `sglang/a5_fia_mixed_split/` |
 | sgl-kernel-npu [#638](https://github.com/sgl-project/sgl-kernel-npu/pull/638) — portable Gemma RMSNorm API | Open，MERGEABLE / BLOCKED（`REVIEW_REQUIRED`） | `codex/a5-gemma-rmsnorm-csrc` | `500ea7bb0e` | `67a38fe215`（2026-09-17） | `sgl-kernel-npu/` |
 | sgl-kernel-npu [#808](https://github.com/sgl-project/sgl-kernel-npu/pull/808) — recurrent_gated_delta_rule on Ascend 950 | Open Draft，MERGEABLE / BLOCKED | `ascend950-recurrent-gated-delta-rule` | `33b689ce48`（950 适配 + bf16 state 断言 + 合上游） | `004bc36`（2026-09-20） | `sgl-kernel-npu-worktrees/ascend950-recurrent-gated-delta-rule/` |
+| sgl-kernel-npu [#823](https://github.com/sgl-project/sgl-kernel-npu/pull/823) — 同一算子，只放开编译（#808 的严格子集，对照用） | Open Draft，MERGEABLE | `ascend950-rgdr-ungate-probe` | `26c905a`（只改 3 个注册文件，+19/-19） | `004bc36`（2026-09-23） | `sgl-kernel-npu-worktrees/ascend950-rgdr-ungate-probe/` |
 
 核对时 6 个 GitHub head SHA 均与本地 checkout 完全一致，6 个 SGLang worktree 与 kernel checkout 均无未提交改动。#808 创建后 GitHub head 与其 worktree 的 `783b44c911` 一致，worktree 无未提交改动。
 
@@ -59,12 +60,19 @@
 
 **`recurrent_gated_delta_rule` 的 Ascend 950 适配（2026-09-17 开 Draft [#808](https://github.com/sgl-project/sgl-kernel-npu/pull/808)）**：用于在 Ascend 950 上给 Qwen3.5 开 MTP（NEXTN target verify 调用该算子，SGLang #20918 引入）。分支 `ascend950-recurrent-gated-delta-rule` 基于 `upstream/main` `67a38fe215`，单提交 `783b44c911`，worktree 在 `sgl-kernel-npu-worktrees/ascend950-recurrent-gated-delta-rule/`（见下文 kernel worktree 结构）。做法与上游 #802 的 `chunk_kda_fwd`、`causal_conv1d` 相同：host、kernel、schema、impl 与头文件声明移出 `SGL_KERNEL_ENABLE_A3_ONLY_OPS`，schema 不变；kernel 保持单一源文件和原有 pipeline（stage buffer、MTE2/V/MTE3 事件、`mix_qkv` 拆分、intermediate state 初始化、speculative token 之间 FP32 state 延续），只在 `__CCE_AICORE__ == 310` 下把 arch22 专属的 repeat-stride `Mul`/`MulAddDst`、`Brcb`、mask 寄存器 `ReduceSum`、`Sum`/`Rsqrt` L2 norm 换成 `op_kernel/arch35/recurrent_gated_delta_rule_regbase.h` 的 MicroAPI 实现（`RowDotRegbase`、`RankOneUpdateRegbase`、`L2NormalizeRowsRegbase`，循环写法参考 vllm-ascend #9224、#9382，L2 norm 用 arch35 RMSNorm 同款序列）。arch35 不再切 host UB 预算外的 `qTempInUb`/`kTempInUb`/`qSumLocal`/`kSumLocal`；host 在 arch35 上用 `GetCoreNumAiv()` 作为 block 数，910 仍是 `GetCoreNum()`。按用户决定 `MAX_MTP` 保持 8（#11236 的 16 另开 PR），以 Draft 提出。只做了静态与 CPU 验证：clang-format 18.1.8、codespell、`git diff --check`；只展开新增条件后 910 视角的 kernel/host 源码与 `main` 逐字节一致；numpy 模拟 arch35 寄存器循环（64 lane、`UpdateMask` 尾块、BRC/首元素 load-store、masked store、多 block 分片、intermediate/recurrent 初始化、`num_accepted_tokens`）对照测试文件的 golden，8 组形状（含 dk=100/200、dv=72/136 和多 vStep 分块）float64 最大绝对误差 2.2e-16，只证明下标与循环边界。**未做**：950 上 `bash build.sh -a kernels Ascend950PR_9599` 构建、`hasattr(torch.ops.npu, "recurrent_gated_delta_rule")`、`python3 tests/python/sgl_kernel_npu/test_recurrent_gated_delta_rule.py`（脚本数值不一致也退出 0，须看 `failed: N`）、Qwen3.5 NEXTN e2e（依赖 #638 + #32745），以及 910B/910C 回归。#651/#742 的 BF16 往返改动落在两个 arch 共用的 `Compute` 代码里，任一方先合入后 rebase 即可对齐。
 
-**Ascend 950 上跑 Qwen3.5 MTP 的分支组合（2026-09-20 核对，同日合上游后更新）**：
+**只放开编译的对照分支（2026-09-23 建，已推 `origin`）**：同事反馈在 Ascend 950 上「只把这个算子从 A3-only 放开、kernel 不动就能跑」。为验证，从 #808 的 base `004bc36` 拉两个分支做 A/B（按用户要求不 fetch 上游，base 与 #808 完全一致）：
+
+- `ascend950-rgdr-ungate-probe` → [#823](https://github.com/sgl-project/sgl-kernel-npu/pull/823)（Draft，base `main`，MERGEABLE，+19/-19，worktree 同名，head `26c905a`）：只改 `csrc/CMakeLists.txt`、`csrc/pytorch_extensions.cpp`、`include/sgl_kenel_npu_ops.h` 三个注册文件，把 host 源、kernel 源、schema、impl 与声明移出 `SGL_KERNEL_ENABLE_A3_ONLY_OPS`。这三个文件与 #808 head 逐字节一致；kernel 与 host 一行未动，仍是 arch22 向量块、`GetCoreNum()` 和完整 UB 切分，**也不含** bf16 dtype 断言。2026-09-24 实测 `git diff 823 808`：**3 文件 / +195 / −0**，即新增 `op_kernel/arch35/recurrent_gated_delta_rule_regbase.h` +141、`op_kernel/recurrent_gated_delta_rule_kernel.cpp` +35（`__CCE_AICORE__ == 310` 分支）、`op_host/recurrent_gated_delta_rule.cpp` +19（4 条 bf16 断言 + `#ifdef SGL_KERNEL_ARCH_35` 下 `GetCoreNumAiv()`）。所以 #823 是 #808 在**树层面**的严格子集，两臂可直接对照。
+- `ascend950-mtp-experiment-ungate`（worktree 同名，head `476b1b9`）：上一条 + #638 `500ea7bb0e` + #742（含 #651）`185d8a7`，对齐 `ascend950-mtp-experiment` 的组合。#742 与 base 里 #747 在 `mamba/causal_conv1d.py`、`test_conv1d_update.py`、`test_mamba_state_update.py` 上冲突，直接取 `ascend950-mtp-experiment` 的已解决版本（这三个文件 #808 没碰，取完与该分支逐字节一致）。~~与 `ascend950-mtp-experiment` 的全部差异正好是 #808 的 kernel/host 195 行。~~ **2026-09-24 更正**：`476b1b9` 11:16 建，`f30a2d9` 11:23 才把 `cache-loc-assign-bounds` `2685ca1` 合进来，两者差异**不止 195 行**——实测 `git diff ascend950-mtp-experiment-ungate ascend950-mtp-experiment` 为 **6 文件 / +286 / −5**，两组：(1) #808 的 arch35 三文件 195 行；(2) cache-loc 修复——`csrc/cache_location_assign/op_host/cache_loc_assign.cpp` 18 行（改用 `outCacheLoc.numel()` 而非 `batchSize * MAX_STEP`）、新增 `tests/python/sgl_kernel_npu/test_cache_loc_bounds.py` 76 行、`scripts/run_kernel_tests.sh` +2。**所以直接拿这两个 worktree 做 wheel A/B 是混淆的**：比的是「#808 arch35 + cache-loc」vs「两者都没有」。干净 A/B 用两个 PR 分支（#808 vs #823），或先给 ungate 补上 `2685ca1` 再比。
+
+判据：950 上 `bash build.sh -a kernels Ascend950PR_9599` 是否编过，以及 `test_recurrent_gated_delta_rule.py` 的 `failed: N`（脚本数值不一致也退出 0）。两个 wheel 的精度与性能 A/B 用 `llm/recurrent_gated_delta_rule_check.py`：`--bench N --dump <file>` 各跑一次，再 `--compare A B` 逐元素比输出并列耗时（2026-09-23 加，CPU 上只验过 `--dry-run` 与 `--compare`，NPU 路径未跑）。**读结论前必须先确认构建目标**：CMake 会打印 `SGL_KERNEL_ARCH=... SGL_KERNEL_ENABLE_A3_ONLY_OPS=... (SOC=...)`，只有 `arch35` 才说明问题；若是兼容目标 `Ascend910_9382`，那是 arch22 且 `A3_ONLY_OPS` 默认 ON，算子本来就编进去了，「放开就能跑」不成立。若原生 950 上放开即可用，#808 的 arch35 MicroAPI 部分应从「能否运行的前提」降级为性能优化，并拆成独立 PR（最小放开 + bf16 断言先合）。
+
+**Ascend 950 上跑 Qwen3.5 MTP 的分支组合（2026-09-20 核对，同日合上游后更新；kernel 行 HEAD 于 2026-09-24 复核，SGLang 行本轮未复核）**：
 
 | 仓 | 目录 | 分支 | HEAD | 叠了什么 |
 | --- | --- | --- | --- | --- |
 | SGLang | `sglang/qwen3.5_dense_w8a8_pr36426/` | `junlin_qwen3.5_dense_w8a8_pr36426` | `1eca006f8d` | #32745 + 上游 #36426 + #40419（cherry-pick），base `c1a1eb5f66` |
-| sgl-kernel-npu | `sgl-kernel-npu-worktrees/ascend950-mtp-experiment/` | `ascend950-mtp-experiment` | `1df42b260b` | base `004bc36`（已含 #802、#804、**#747**）+ #638 + #808 + #742（含 #651） |
+| sgl-kernel-npu | `sgl-kernel-npu-worktrees/ascend950-mtp-experiment/` | `ascend950-mtp-experiment` | `f30a2d9e58` | base `004bc36`（已含 #802、#804、**#747**）+ #638 + #808 + #742（含 #651）+ `cache-loc-assign-bounds` `2685ca1` |
 
 wheel 必须从 `ascend950-mtp-experiment` 构建，不能退回 `ascend950-mtp-integration`：后者的 `move_intermediate_cache` 仍是 `h_block_size=2`，在 950 上会 `ub overflow, requires 2097152 bits while 2031616 bits available`；#651（含在 #742 里）把它改成 1。`llm/qwen3.5_dense_bf16.sh` 的 MTP 开关不再设 `SGLANG_MAMBA_SSM_DTYPE`，改由 #40419 在 `MambaPool` 里自动覆盖，启动日志出现 "not supported by the NPU speculative verify kernels" 即生效。
 
@@ -139,10 +147,12 @@ sgl-kernel-npu/                                   # 子模块；#638
 sgl-kernel-npu-worktrees/
 ├── ascend950-recurrent-gated-delta-rule/         # 派生 worktree；#808（Draft，含 bf16 state 断言）
 ├── ascend950-mtp-experiment/                     # 派生 worktree；**建 wheel 用这个**；无 PR
+├── ascend950-rgdr-ungate-probe/                  # 派生 worktree；只放开编译的对照分支；无 PR
+├── ascend950-mtp-experiment-ungate/              # 派生 worktree；上一条的 MTP e2e 组合；无 PR
 └── gdn-state-dtype-check/                        # 已作废：提交已并入 #808，分支与目录保留
 ```
 
-分支 `ascend950-mtp-integration`（#638 + #808 的 merge，head `3c51550550`）只在 `origin` 和本地 refs 里，没有 worktree；2026-09-20 起改法是把新的 #808 head 直接 `git merge` 进来（临时 worktree 用完即删），不再 `merge-tree` 重合成，这样 `ascend950-mtp-experiment` 里 #742 的冲突解决不用重做。
+分支 `ascend950-mtp-integration`（#638 + #808 的 merge，head `2200ad20ce`，2026-09-24 核对；功能上已被 `ascend950-mtp-experiment` 取代）只在 `origin` 和本地 refs 里，没有 worktree；2026-09-20 起改法是把新的 #808 head 直接 `git merge` 进来（临时 worktree 用完即删），不再 `merge-tree` 重合成，这样 `ascend950-mtp-experiment` 里 #742 的冲突解决不用重做。
 
 强制规则：**每个需要修改 SGLang 代码的分支，都必须在 `sglang/` 下有独立 worktree。** 不得在现有目录中切换功能分支，也不得直接在外部临时 worktree 修改。
 

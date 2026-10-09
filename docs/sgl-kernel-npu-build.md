@@ -44,7 +44,7 @@ git -C sgl-kernel-npu remote add upstream https://github.com/sgl-project/sgl-ker
 
 构建别名（`910B` / `910` / `910C` / `950`）与 wheel provider 的对应见下节「构建」的表，不在这里重复。
 
-探测不到设备（无 `npu-smi` 的构建容器）时回落 `Ascend910_9382`，即 A3 兼容目标；出 A5 的 wheel 前先核对这一列，或显式传 `950`。评测服务器上本仓的 checkout 与 benchmark 数据在 `hajimi` 用户下（`llm/a5_fia_mixed_split_bench.sh` 默认取 `/home/hajimi/benchmark/`）。
+探测不到设备（无 `npu-smi` 的构建容器）时回落 `Ascend910_9382`，即 A3 兼容目标；出 A5 的 wheel 前先核对这一列，或显式传 `950`。评测服务器上本仓的 checkout 与 benchmark 数据在 `hajimi` 用户下（`llm/benchmarks/a5_fia_mixed_split_bench.sh` 默认取 `/home/hajimi/benchmark/`）。
 
 ## 构建
 

@@ -27,11 +27,11 @@ fault 冒出来时日志里会多一行：
 这本身也是结论（说明是时序/流间竞态而不是确定性的越界）。
 
 用法（NPU 机器，SGLang 源码安装）：
-    python3 llm/patch_mtp_phase_sync.py --apply
+    python3 llm/patches/patch_mtp_phase_sync.py --apply
     SGLANG_MTP_PHASE_SYNC=1 MTP=1 ./llm/qwen3.5_dense_bf16.sh 0   # 然后照常跑 gsm8k
     grep phase-sync <服务日志>
-    python3 llm/patch_mtp_phase_sync.py --restore
-    python3 llm/patch_mtp_phase_sync.py --show
+    python3 llm/patches/patch_mtp_phase_sync.py --restore
+    python3 llm/patches/patch_mtp_phase_sync.py --show
 """
 
 from __future__ import annotations

@@ -15,11 +15,11 @@ torch 替换保持和算子完全相同的 layout 约定（state 的 axis-2/axis
 所以它是 layout 中立的：只验证 kernel 实现，不改变 state 语义。
 
 用法（NPU 机器，SGLang 源码安装）：
-    python3 llm/patch_gdn_verify_torch.py --self-test    # 先在 CPU 上验证兜底实现本身
-    python3 llm/patch_gdn_verify_torch.py --conv         # 只换 conv
-    python3 llm/patch_gdn_verify_torch.py --gdn          # 只换 GDN
-    python3 llm/patch_gdn_verify_torch.py --both
-    python3 llm/patch_gdn_verify_torch.py --restore
+    python3 llm/patches/patch_gdn_verify_torch.py --self-test    # 先在 CPU 上验证兜底实现本身
+    python3 llm/patches/patch_gdn_verify_torch.py --conv         # 只换 conv
+    python3 llm/patches/patch_gdn_verify_torch.py --gdn          # 只换 GDN
+    python3 llm/patches/patch_gdn_verify_torch.py --both
+    python3 llm/patches/patch_gdn_verify_torch.py --restore
 每次改完都要重启服务。建议配 EXTRA_ARGS="--disable-cuda-graph"，替换实现里有额外的临时张量。
 """
 

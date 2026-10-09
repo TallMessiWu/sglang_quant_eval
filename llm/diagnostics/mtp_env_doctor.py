@@ -13,7 +13,7 @@
   - MambaPool 的 ssm_dtype 实际取值
 
 用法（NPU 机器）：
-    python3 llm/mtp_env_doctor.py
+    python3 llm/diagnostics/mtp_env_doctor.py
 """
 
 from __future__ import annotations

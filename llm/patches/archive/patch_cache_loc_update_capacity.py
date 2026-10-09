@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""给 torch.ops.npu.cache_loc_update 的输出张量补足它实际会读写的容量（可回滚）。
+"""历史归档：cache_loc 容量 workaround 仅用于定位；仓库已明确撤回，正式修复应在 kernel 侧。
+
+给 torch.ops.npu.cache_loc_update 的输出张量补足它实际会读写的容量（可回滚）。
 
 根因（MTP 并发下的 "vector core exception / 507035"，plog 里
 `fault kernel_name=cache_loc_assign`）：
@@ -21,9 +23,9 @@ batch * draft_token_num 个元素的视图。kernel 把结果按前缀和紧凑�
 用来先确认根因、先把评测跑起来，kernel 修好后删掉。
 
 用法（NPU 机器，SGLang 源码安装）：
-    python3 llm/patch_cache_loc_update_capacity.py --apply
-    python3 llm/patch_cache_loc_update_capacity.py --restore
-    python3 llm/patch_cache_loc_update_capacity.py --show
+    python3 llm/patches/archive/patch_cache_loc_update_capacity.py --apply
+    python3 llm/patches/archive/patch_cache_loc_update_capacity.py --restore
+    python3 llm/patches/archive/patch_cache_loc_update_capacity.py --show
 """
 
 from __future__ import annotations

@@ -15,10 +15,10 @@
 ssm_state_indices / cache_indices / num_accepted_tokens 的实际取值、state 是否连续等）。
 
 用法（NPU 机器）：
-    python3 llm/patch_gdn_verify_probe.py --apply
+    python3 llm/patches/patch_gdn_verify_probe.py --apply
     GDN_PROBE_CALLS=4 MTP=1 EXTRA_ARGS="--disable-cuda-graph" llm/qwen3.5_dense_bf16.sh 0
     # 发一个请求，然后到服务端日志里看 [GDN-PROBE] 开头的行
-    python3 llm/patch_gdn_verify_probe.py --restore
+    python3 llm/patches/patch_gdn_verify_probe.py --restore
 
 GDN_PROBE_CALLS 控制探测多少次调用（默认 4，即第一次 verify 的前 4 个 GDN 层）。
 探针会跑两遍数学，只适合调试，不要留在正常服务里。

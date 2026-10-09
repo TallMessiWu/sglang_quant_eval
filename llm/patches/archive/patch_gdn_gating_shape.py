@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""补上 GDN prefill 的 gating 维度：sgl-kernel-npu #747 把它从 [1, T, H] 改成了 [T, H]。
+"""历史归档：gating 补维已在当前 NPU MTP 功能分支实现，保留供旧部署还原。
+
+补上 GDN prefill 的 gating 维度：sgl-kernel-npu #747 把它从 [1, T, H] 改成了 [T, H]。
 
 sgl-kernel-npu #747（67be199，已合入）把 fused_gdn_gating_npu 的输出从
     g = torch.empty(1, batch, num_heads, ...)
@@ -17,9 +19,9 @@ sgl-kernel-npu #747（67be199，已合入）把 fused_gdn_gating_npu 的输出�
 fused_gdn_gating_kernel_without_sigmoid（torch.empty_like(a)，#747 没改），而且本来就有 unsqueeze(0)。
 
 用法（NPU 机器，SGLang 源码安装）：
-    python3 llm/patch_gdn_gating_shape.py --apply
-    python3 llm/patch_gdn_gating_shape.py --restore
-    python3 llm/patch_gdn_gating_shape.py --show
+    python3 llm/patches/archive/patch_gdn_gating_shape.py --apply
+    python3 llm/patches/archive/patch_gdn_gating_shape.py --restore
+    python3 llm/patches/archive/patch_gdn_gating_shape.py --show
 改完要重启服务。
 """
 

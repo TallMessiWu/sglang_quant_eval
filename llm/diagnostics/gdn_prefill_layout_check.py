@@ -15,8 +15,8 @@ state 相对于 verify 读到的就差一个转置 —— 表现为一开口就�
 就能区分，再拿 CPU float32 参考实现比对，给出确定结论。
 
 用法（NPU 机器）：
-    python3 llm/gdn_prefill_layout_check.py
-    python3 llm/gdn_prefill_layout_check.py --dk 64 --dv 32 --tokens 8
+    python3 llm/diagnostics/gdn_prefill_layout_check.py
+    python3 llm/diagnostics/gdn_prefill_layout_check.py --dk 64 --dv 32 --tokens 8
 退出码：0 = 两条 prefill 路径布局一致；1 = 差一个转置或结果不一致；2 = 环境不可用。
 """
 
@@ -31,7 +31,7 @@ import torch
 def reference_state(q, k, v, g, beta, scale, nk, nv, dk, dv):
     """CPU float32 参考：返回 S[v][k] 语义的最终 state，形状 (nv, dv, dk)。
 
-    与 llm/recurrent_gated_delta_rule_check.py 里那份（已在 950 上和算子对过）同源。
+    与 llm/diagnostics/recurrent_gated_delta_rule_check.py 里那份（已在 950 上和算子对过）同源。
     """
     t = q.shape[0]
     qn = torch.nn.functional.normalize(q.float(), p=2, dim=-1) * scale

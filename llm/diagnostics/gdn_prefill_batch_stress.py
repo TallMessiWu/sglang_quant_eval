@@ -2,7 +2,7 @@
 """多序列压力自检：torch.ops.npu.chunk_gated_delta_rule（GDN prefill 的 AscendC 算子）。
 
 为什么需要：单请求 e2e（llm/curl.sh）里 prefill 永远是 b=1，
-llm/gdn_prefill_layout_check.py 也只测过 b=1、小头数、不带 chunk_state。而并发下的
+llm/diagnostics/gdn_prefill_layout_check.py 也只测过 b=1、小头数、不带 chunk_state。而并发下的
 prefill 是 **多条变长序列 + chunk_state + 真实头数（nk=16, nv=48, dk=dv=128）**，
 这个组合此前只在崩溃的 e2e 里出现过。这里不加载模型、用随机输入把它单独跑出来，
 每次调用后立刻 synchronize，所以 device fault 会直接落在出错的那一次调用上。
@@ -14,9 +14,9 @@ prefill 是 **多条变长序列 + chunk_state + 真实头数（nk=16, nv=48, dk
   3. 整批结果与"逐条 b=1 调用"的结果一致（同一个 kernel，只差分组，应当几乎逐位相同）。
 
 用法（NPU 机器，装好 sgl-kernel-npu wheel）：
-    python3 llm/gdn_prefill_batch_stress.py --model-config /mnt/share/weights/Qwen3.5-27B
-    python3 llm/gdn_prefill_batch_stress.py --trials 50 --max-batch 32 --max-len 2048
-    python3 llm/gdn_prefill_batch_stress.py --chunk-state off     # 只测不带 chunk_state
+    python3 llm/diagnostics/gdn_prefill_batch_stress.py --model-config /mnt/share/weights/Qwen3.5-27B
+    python3 llm/diagnostics/gdn_prefill_batch_stress.py --trials 50 --max-batch 32 --max-len 2048
+    python3 llm/diagnostics/gdn_prefill_batch_stress.py --chunk-state off     # 只测不带 chunk_state
 退出码：0 = 全部通过；1 = 有 trial 不一致或 fault；2 = 环境不可用。
 """
 

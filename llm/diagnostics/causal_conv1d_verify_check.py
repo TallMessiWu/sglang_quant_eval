@@ -16,9 +16,9 @@ num_accepted_tokens=...)，本脚本按同样的参数形式调用并和 CPU flo
 token 都被接受”时的窗口，spec_utils.conv_state_rollback 再按 accept 长度右移回退。
 
 用法：
-    python3 llm/causal_conv1d_verify_check.py                       # 默认几组形状
-    python3 llm/causal_conv1d_verify_check.py --model-config /mnt/share/weights/Qwen3.5-27B
-    python3 llm/causal_conv1d_verify_check.py --dry-run             # 只跑 CPU 参考实现
+    python3 llm/diagnostics/causal_conv1d_verify_check.py                       # 默认几组形状
+    python3 llm/diagnostics/causal_conv1d_verify_check.py --model-config /mnt/share/weights/Qwen3.5-27B
+    python3 llm/diagnostics/causal_conv1d_verify_check.py --dry-run             # 只跑 CPU 参考实现
 退出码：0 全部通过；1 有用例不通过；2 环境/算子不可用。
 """
 

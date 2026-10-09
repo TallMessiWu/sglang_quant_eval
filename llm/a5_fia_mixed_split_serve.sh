@@ -2,7 +2,7 @@
 #
 # A5 混合 chunked-prefill FIA 拆分：起服务
 #
-# 用 a5_fia_mixed_split_bench.sh 打流量。off/on 两组必须分别重启本脚本，
+# 用 benchmarks/a5_fia_mixed_split_bench.sh 打流量。off/on 两组必须分别重启本脚本，
 # 因为开关是启动期读取的环境变量。
 #
 # 拆分只在调度器真的形成 mixed batch 时才生效，所以这里必须带

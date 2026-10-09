@@ -320,7 +320,7 @@ stderr 里那段 `EZ9999` 只说"某个 AI Core 任务访问了非法 GM 地址"
 runtime 会把出错任务的 kernel 名单独写进 plog，崩过一次就能查，不用重跑：
 
 ```bash
-./llm/npu_fault_kernel.sh <PID>      # PID 取报错里的 EZ9999[PID: ...]，是 scheduler 子进程
+./llm/diagnostics/npu_fault_kernel.sh <PID>      # PID 取报错里的 EZ9999[PID: ...]，是 scheduler 子进程
 ```
 
 它 grep 的是这类行（`~/ascend/log/{run,debug}/plog/` 与 `device-*/`）：
@@ -346,11 +346,11 @@ AI Core kernel execution failed, ... fault kernel_name=cache_loc_assign_1, ...
 2. **张量落在某个 2MB segment 的最后一个块** —— 实测约 0.6~0.8%；
 3. **那个 segment 的下一页没有映射** —— 实测 20 次跨段里只中 1 次。
 
-实测证据（`llm/patch_cache_loc_probe.py` 打桩，gsm8k 并发跑）：3256 次调用里 20 次跨段，前 19 次全在同一地址 `0x120bff5ffe00`（邻页已映射，安然无恙），第 20 次在另一个 segment 的尾部 `0x12057fbffe00`，越过段尾 448B，进程当场死在这次调用上。
+实测证据（`llm/patches/patch_cache_loc_probe.py` 打桩，gsm8k 并发跑）：3256 次调用里 20 次跨段，前 19 次全在同一地址 `0x120bff5ffe00`（邻页已映射，安然无恙），第 20 次在另一个 segment 的尾部 `0x12057fbffe00`，越过段尾 448B，进程当场死在这次调用上。
 
 - **kernel 侧正解**：host 改用 `outCacheLoc.numel()`（#824）。修完后残余的只有"读取个数向上对齐到 8 个 int32"，最多 28B，且可证明总落在分配块自身的 512B 取整余量里。
-- **不要在 SGLang 侧绕**：调用方多分配到 `batch * 16` 也能让越界落回张量内，但那是把 kernel 的常量硬编码进调用方（上游已经把它从 5 改到过 16），修的不是根因。2026-09-23 一度这么提交过，当天即 revert（`junlin_qwen3.5_dense_w8a8_pr36426` 的 `b35cc57288` → `05f11fdab0`）；`llm/patch_cache_loc_update_capacity.py` 和打桩脚本的 `guard` 模式只用于定位，不要当修复用。
+- **不要在 SGLang 侧绕**：调用方多分配到 `batch * 16` 也能让越界落回张量内，但那是把 kernel 的常量硬编码进调用方（上游已经把它从 5 改到过 16），修的不是根因。2026-09-23 一度这么提交过，当天即 revert（`junlin_qwen3.5_dense_w8a8_pr36426` 的 `b35cc57288` → `05f11fdab0`）；`llm/patches/archive/patch_cache_loc_update_capacity.py` 和打桩脚本的 `guard` 模式只用于定位，不要当修复用。
 - 与 Ascend 代际无关，910B/910C 同样中招；与 GDN、MTP 的 kernel 也无关，只是投机解码是唯一调用方，所以只有开 MTP 才看得见。
 - 这个仓自己的 `tests/python/sgl_kernel_npu/test_cache_update.py` 同样越界（bs=300 给 ~450 个元素，算子按 4800 个读写，越出约 17KB），一直没炸纯属运气。
 
-排查工具（都在 `llm/`，不用跑测试集）：`patch_cache_loc_probe.py` 打印每次调用的几何关系（`observe` 观察 / `strict` 跨段即抛 / `guard` 等价于修复 / `force` 强制跨段），`cache_loc_update_oob_check.py` 离线复现。**必须跑出并发**，单条 curl 只有 bs=1，永远看不到问题。
+排查工具（不用跑测试集）：`llm/patches/patch_cache_loc_probe.py` 打印每次调用的几何关系（`observe` 观察 / `strict` 跨段即抛 / `guard` 等价于修复 / `force` 强制跨段），`llm/diagnostics/cache_loc_update_oob_check.py` 离线复现。**必须跑出并发**，单条 curl 只有 bs=1，永远看不到问题。

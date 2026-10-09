@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""临时补丁：把 NPU 投机路径的 SSM state 转置加回去，好让**旧 wheel**继续能用。
+"""历史归档：仅适配 #747 之前的旧 wheel，新 wheel 应还原并使用配套实现。
+
+临时补丁：把 NPU 投机路径的 SSM state 转置加回去，好让**旧 wheel**继续能用。
 
 背景：state layout 是跨仓契约，两边必须成对过。
   - kernel #747（`67be199`，已合入）把 FLA triton kernel 从 `b_h[BK, BV]` 翻成
@@ -17,9 +19,9 @@ wheel 停在 #747 之前、而 SGLang 已过 #39589 时，prefill（triton）和
 只影响投机解码；非投机路径本来就不走这段。
 
 用法（NPU 机器，SGLang 源码安装）：
-    python3 llm/patch_npu_spec_state_transpose.py --apply
-    python3 llm/patch_npu_spec_state_transpose.py --restore
-    python3 llm/patch_npu_spec_state_transpose.py --show
+    python3 llm/patches/archive/patch_npu_spec_state_transpose.py --apply
+    python3 llm/patches/archive/patch_npu_spec_state_transpose.py --restore
+    python3 llm/patches/archive/patch_npu_spec_state_transpose.py --show
 改完要重启服务。
 """
 

@@ -11,7 +11,7 @@ os.environ.get(...) 只会得到 LazyObject，一调用就 RuntimeError（TMAN-C
 每个端点一份文件，并发跑多个服务不会互相覆盖。
 
 单独跑也可以，打印生成的文件路径：
-    python3 gen_ais_bench_model_cfg.py --out-dir ./.ais_bench_configs \\
+    python3 llm/ais_bench/gen_ais_bench_model_cfg.py --out-dir ./.ais_bench_configs \\
         --name sglang_localhost_6969 --host-ip localhost --host-port 6969
 """
 

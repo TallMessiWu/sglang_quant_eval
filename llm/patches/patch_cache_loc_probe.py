@@ -42,12 +42,12 @@ device 端按这个数读进来、再整块写回去。而 SGLang 只给 `batch_
     SGLANG_CACHE_LOC_PROBE_SEGMENT=...   段大小，默认 2MB；分配器实现不同可改，测试也用它
 
 用法（NPU 机器，SGLang 源码安装）：
-    python3 llm/patch_cache_loc_probe.py --apply
+    python3 llm/patches/patch_cache_loc_probe.py --apply
     SGLANG_CACHE_LOC_PROBE=observe MTP=1 ./llm/qwen3.5_dense_bf16.sh 0
     # 必须跑出并发（gsm8k），单条 curl 只有 bs=1，覆盖不到出问题的区间
-    python3 llm/patch_cache_loc_probe.py --restore
+    python3 llm/patches/patch_cache_loc_probe.py --restore
 
-与 llm/patch_cache_loc_update_capacity.py 互斥（两者改同一处）：先 --restore 那个再用这个。
+与 llm/patches/archive/patch_cache_loc_update_capacity.py 互斥（两者改同一处）：先 --restore 那个再用这个。
 """
 
 from __future__ import annotations
@@ -296,7 +296,7 @@ def main() -> int:
     if CAPACITY_MARKER in text:
         print(
             "这个文件上已经打了 patch_cache_loc_update_capacity.py（两者改同一处）。\n"
-            "先 python3 llm/patch_cache_loc_update_capacity.py --restore 再来。",
+            "先 python3 llm/patches/archive/patch_cache_loc_update_capacity.py --restore 再来。",
             file=sys.stderr,
         )
         return 1

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ais_bench 精度评测的公共入口，gsm8k.sh / gpqa.sh / mmmu.sh 都走这里。
-# 直接调用时第一个参数是数据集名：./run_ais_bench.sh <dataset> [附加参数...]
+# 直接调用时第一个参数是数据集名：./llm/ais_bench/run_ais_bench.sh <dataset> [附加参数...]
 #
 # 支持的环境变量：
 #
@@ -41,6 +41,7 @@ dataset="$1"
 shift
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+llm_dir="$(dirname -- "$script_dir")"
 
 if ! command -v ais_bench >/dev/null 2>&1; then
     echo "RED: 找不到 ais_bench，确认它在 PATH 里" >&2
@@ -78,7 +79,7 @@ else
         ais_python=python3
     fi
 
-    cfg_dir="$script_dir/.ais_bench_configs"
+    cfg_dir="$llm_dir/.ais_bench_configs"
     cfg_name="sglang_$(printf '%s' "$endpoint" | tr -c 'A-Za-z0-9' '_')"
 
     gen_args=(--out-dir "$cfg_dir" --name "$cfg_name" --template "$template")

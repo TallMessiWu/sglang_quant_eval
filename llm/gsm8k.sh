@@ -4,7 +4,7 @@ set -euo pipefail
 # GSM8K 精度评测，跑在已经起好的服务上（本仓是 SGLang，OpenAI 兼容接口）。
 #
 # 用环境变量指定服务，不用复制 ais_bench 的 config 文件（为什么不能在 config 里
-# 读环境变量、这些开关又是怎么生效的，见 run_ais_bench.sh 顶部注释）：
+# 读环境变量、这些开关又是怎么生效的，见 ais_bench/run_ais_bench.sh 顶部注释）：
 #
 #   VLLM_IP         服务 IP 或主机名，默认 localhost
 #   VLLM_PORT       服务端口，默认 6969
@@ -24,4 +24,4 @@ set -euo pipefail
 # 生成一份改好地址的配置再跑，那个目录是脚本产物，不用手动维护。
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-exec "$script_dir/run_ais_bench.sh" gsm8k_gen_0_shot_cot_chat_prompt "$@"
+exec "$script_dir/ais_bench/run_ais_bench.sh" gsm8k_gen_0_shot_cot_chat_prompt "$@"

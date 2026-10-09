@@ -16,9 +16,9 @@ recurrent_gated_delta_rule 就会越界写。它是 AIV-only 算子，所以表�
 任何 device 同步，所以零开销。越界时直接抛 AssertionError，指出真实原因。
 
 用法（NPU 机器，SGLang 源码安装）：
-    python3 llm/patch_gdn_verify_bounds.py --apply
-    python3 llm/patch_gdn_verify_bounds.py --restore
-    python3 llm/patch_gdn_verify_bounds.py --show
+    python3 llm/patches/patch_gdn_verify_bounds.py --apply
+    python3 llm/patches/patch_gdn_verify_bounds.py --restore
+    python3 llm/patches/patch_gdn_verify_bounds.py --show
 """
 
 from __future__ import annotations

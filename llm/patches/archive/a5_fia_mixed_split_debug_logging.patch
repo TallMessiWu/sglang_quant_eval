@@ -1,3 +1,6 @@
+Archived: git apply --check fails against the current FIA worktree.
+Regenerate against the target checkout before reusing this debug patch.
+
 Debug tracing for the A5 mixed-chunk FIA split.
 
 Adds one-shot logger.info probes along the whole MIXED dispatch chain, so a
@@ -27,8 +30,8 @@ Two lines are failure signals, not normal output:
 Apply / revert from the SGLang worktree root, not from this repo:
 
   cd sglang/a5_fia_mixed_split
-  git apply    ../../llm/a5_fia_mixed_split_debug_logging.patch   # add prints
-  git apply -R ../../llm/a5_fia_mixed_split_debug_logging.patch   # remove them
+  git apply    ../../llm/patches/archive/a5_fia_mixed_split_debug_logging.patch   # add prints
+  git apply -R ../../llm/patches/archive/a5_fia_mixed_split_debug_logging.patch   # remove them
 
 This is a debugging aid -- do not commit it to the SGLang branch. Run
 `git status` before committing there. Hand-maintained against SGLang commit

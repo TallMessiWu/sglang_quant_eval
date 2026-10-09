@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""把 sgl_kernel_npu 里两个 mamba state Triton kernel 换成纯 torch 实现（可回滚）。
+"""历史归档：mamba state Triton kernel 的根因假设已被排除，保留历史 A/B 和还原入口。
+
+把 sgl_kernel_npu 里两个 mamba state Triton kernel 换成纯 torch 实现（可回滚）。
 
 背景：在 Ascend 950 上 tests/python/sgl_kernel_npu/test_mamba_state_update.py 的
 test_conv_state_rollback 失败（结构性错误，不是精度问题），而 conv_state_rollback 与
@@ -10,9 +12,9 @@ move_intermediate_cache 都在 MTP verify 之后提交 / 回滚 state，写坏�
 文件，不需要重新编译 wheel；重装 wheel 后失效。
 
 用法：
-    python3 llm/patch_mamba_triton_fallback.py --self-test   # 只在 CPU 上验证 torch 实现的语义
-    python3 llm/patch_mamba_triton_fallback.py --apply       # 打补丁（自动备份）
-    python3 llm/patch_mamba_triton_fallback.py --restore     # 还原
+    python3 llm/patches/archive/patch_mamba_triton_fallback.py --self-test   # 只在 CPU 上验证 torch 实现的语义
+    python3 llm/patches/archive/patch_mamba_triton_fallback.py --apply       # 打补丁（自动备份）
+    python3 llm/patches/archive/patch_mamba_triton_fallback.py --restore     # 还原
 """
 
 from __future__ import annotations

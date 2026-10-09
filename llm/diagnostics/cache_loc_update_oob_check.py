@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """离线复现：torch.ops.npu.cache_loc_update 对 out_cache_loc 的越界读写（不加载模型）。
 
-背景见 llm/patch_cache_loc_update_capacity.py：kernel 把 out_cache_loc 当成
+背景见 llm/patches/archive/patch_cache_loc_update_capacity.py：kernel 把 out_cache_loc 当成
 `batch * MAX_STEP(16)` 个 int32 来读、再整块写回，而 SGLang 只分配
 `batch * draft_token_num` 个。越界部分"读什么写回什么"，所以从数值上看不出来，只有当
 张量贴着已映射显存的末尾时才会 fault——e2e 里就是偶发的 vector core exception。
@@ -17,9 +17,9 @@
 先拿结果和 `req_to_token[req, start:end]` 比对，确认多分配不改变取值。
 
 用法（NPU 机器，装好 sgl-kernel-npu wheel）：
-    python3 llm/cache_loc_update_oob_check.py
-    python3 llm/cache_loc_update_oob_check.py --bs 64 --segments 16   # 越界更远、扫得更多
-    python3 llm/cache_loc_update_oob_check.py --mode roomy            # 只验证补丁侧不 fault
+    python3 llm/diagnostics/cache_loc_update_oob_check.py
+    python3 llm/diagnostics/cache_loc_update_oob_check.py --bs 64 --segments 16   # 越界更远、扫得更多
+    python3 llm/diagnostics/cache_loc_update_oob_check.py --mode roomy            # 只验证补丁侧不 fault
 退出码：0 = 没有 fault 且取值正确；1 = fault 或取值不对；2 = 环境不可用。
 注意：tight 没 fault 不代表没有越界（越界写在源码里是确定的），只说明这次扫到的块后面
 恰好都是已映射的显存；可以加大 --segments / --bs 再试。

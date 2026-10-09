@@ -33,22 +33,22 @@ usage() {
   a5_fia_mixed_split_bench.sh inspect <服务日志>
 
 示例:
-  ./llm/a5_fia_mixed_split_bench.sh run off
-  ./llm/a5_fia_mixed_split_bench.sh run on
-  ./llm/a5_fia_mixed_split_bench.sh compare
+  ./llm/benchmarks/a5_fia_mixed_split_bench.sh run off
+  ./llm/benchmarks/a5_fia_mixed_split_bench.sh run on
+  ./llm/benchmarks/a5_fia_mixed_split_bench.sh compare
 
   # 精度：off/on 生成文本逐字节比对
-  ./llm/a5_fia_mixed_split_bench.sh verify
+  ./llm/benchmarks/a5_fia_mixed_split_bench.sh verify
 
   # 底噪基线：同为 off 的两次运行互比，量硬件本身的不确定性
-  ./llm/a5_fia_mixed_split_bench.sh verify \
+  ./llm/benchmarks/a5_fia_mixed_split_bench.sh verify \
       llm/fia_bench/off/20260812-100000 llm/fia_bench/off/20260812-101500
 
   # 先确认负载造对了：看 mixed batch 的实际形态
-  ./llm/a5_fia_mixed_split_bench.sh inspect on.log
+  ./llm/benchmarks/a5_fia_mixed_split_bench.sh inspect on.log
 
   # 只想抓一段 trace 看 ascend.fia_mixed.* marker
-  ./llm/a5_fia_mixed_split_bench.sh run on --profile
+  ./llm/benchmarks/a5_fia_mixed_split_bench.sh run on --profile
 
 环境变量覆盖:
   SERVER_HOST      服务地址        (默认 127.0.0.1)
@@ -72,7 +72,7 @@ if [[ $# -lt 1 ]]; then
 fi
 
 script_dir=$(dirname "$(readlink -f "$0")")
-repo_root=$(dirname "$script_dir")
+repo_root=$(dirname "$(dirname "$script_dir")")
 
 host=${SERVER_HOST:-127.0.0.1}
 port=${SERVER_PORT:-${VLLM_PORT:-6969}}
@@ -169,7 +169,7 @@ case "$action" in
 
         echo
         echo "✅ 完成: ${run_dir}/benchmark.jsonl"
-        echo "   两组都跑完后执行: ./llm/a5_fia_mixed_split_bench.sh compare"
+        echo "   两组都跑完后执行: ./llm/benchmarks/a5_fia_mixed_split_bench.sh compare"
         ;;
 
     compare)

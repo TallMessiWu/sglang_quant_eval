@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""实验补丁：给 NEXTN verify 的 GDN 算子喂 V-major 的 SSM state（可回滚）。
+"""历史归档：verify 转置假设已被排除，当前 V-major wheel 配对不应再叠加此实验。
+
+实验补丁：给 NEXTN verify 的 GDN 算子喂 V-major 的 SSM state（可回滚）。
 
 背景：`torch.ops.npu.recurrent_gated_delta_rule` 的契约是 state 形如
 (N, nv, dv, dk)，也就是**行按 v 走、列按 k 走**（host 里 `dv = size(2)`、
@@ -14,9 +16,9 @@ head_v_dim)`。dk == dv == 128 时两者互为转置且不会报错，于是每�
 intermediate cache，用来验证上面的判断。它会带来明显的拷贝开销，只用于定位问题，不是最终修法。
 
 用法（在 NPU 机器上，SGLang 以源码方式安装）：
-    python3 llm/patch_gdn_verify_state_major.py --apply     # 打补丁（自动备份）
-    python3 llm/patch_gdn_verify_state_major.py --restore    # 还原
-    python3 llm/patch_gdn_verify_state_major.py --show       # 只打印目标文件路径
+    python3 llm/patches/archive/patch_gdn_verify_state_major.py --apply     # 打补丁（自动备份）
+    python3 llm/patches/archive/patch_gdn_verify_state_major.py --restore    # 还原
+    python3 llm/patches/archive/patch_gdn_verify_state_major.py --show       # 只打印目标文件路径
 
 补丁生效需要重启服务；建议同时关闭 NPU graph（补丁里有额外的张量分配）：
     MTP=1 EXTRA_ARGS="--disable-cuda-graph" llm/qwen3.5_dense_bf16.sh 0

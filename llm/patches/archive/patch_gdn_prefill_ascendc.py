@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""把 NPU 的 GDN prefill 从 triton 切到 #747 新增的 AscendC chunk 算子（可回滚）。
+"""历史归档：AscendC prefill 和 chunk_state 已在当前 NPU MTP 功能分支实现，保留供旧部署还原。
+
+把 NPU 的 GDN prefill 从 triton 切到 #747 新增的 AscendC chunk 算子（可回滚）。
 
 为什么要切：#747 之后 pool、decode triton、verify 算子三方都是 V-major
 （state 形状 (nv, dv, dk)），只有 SGLang 仍在调的那条 triton prefill
@@ -20,9 +22,9 @@
     （`if h is not None`），只影响跨 page 的状态跟踪
 
 用法（NPU 机器，SGLang 源码安装）：
-    python3 llm/patch_gdn_prefill_ascendc.py --apply
-    python3 llm/patch_gdn_prefill_ascendc.py --restore
-    python3 llm/patch_gdn_prefill_ascendc.py --show
+    python3 llm/patches/archive/patch_gdn_prefill_ascendc.py --apply
+    python3 llm/patches/archive/patch_gdn_prefill_ascendc.py --restore
+    python3 llm/patches/archive/patch_gdn_prefill_ascendc.py --show
 改完要重启服务。算子没注册时会自动回退到 triton，并打一条 warning。
 """
 

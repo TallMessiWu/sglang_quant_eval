@@ -7,8 +7,8 @@ set -euo pipefail
 # 不说是哪个；runtime 会把出错任务的 kernel 名另外写进 plog（形如
 # "fault kernel_name=..., func_name=..."）。这一步不用重跑服务，崩溃过一次就能查。
 #
-#   ./npu_fault_kernel.sh 2324816     # 报错里的 PID：EZ9999[PID: 2324816]，是 scheduler 子进程
-#   ./npu_fault_kernel.sh             # 不给 PID：取最近修改的 5 个 plog
+#   ./llm/diagnostics/npu_fault_kernel.sh 2324816     # 报错里的 PID：EZ9999[PID: 2324816]，是 scheduler 子进程
+#   ./llm/diagnostics/npu_fault_kernel.sh             # 不给 PID：取最近修改的 5 个 plog
 #
 # 日志根目录默认 ~/ascend/log，设过 ASCEND_PROCESS_LOG_PATH 的话以它为准。
 

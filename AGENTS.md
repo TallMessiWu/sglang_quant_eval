@@ -4,7 +4,8 @@
 
 - SGLang fork：<https://github.com/TallMessiWu/sglang>
 - 关联 Issue：[Diffusion #14424](https://github.com/sgl-project/sglang/issues/14424)、[LLM #21584](https://github.com/sgl-project/sglang/issues/21584)
-- 当前 PR、分支、HEAD、worktree 与远程地址：[docs/branches.md](docs/branches.md)
+- 重构目标与验收进度、PR 合入顺序与依赖：[docs/mxfp-refactoring-plan.md](docs/mxfp-refactoring-plan.md)
+- PR 与分支映射、HEAD、worktree 与远程地址：[docs/branches.md](docs/branches.md)
 - 能力矩阵与关键代码路径：[docs/quantization-overview.md](docs/quantization-overview.md)
 - 已知故障模式与机制：[docs/known-pitfalls.md](docs/known-pitfalls.md)
 
@@ -22,7 +23,7 @@
 4. 进入与目标分支对应的 worktree 修改；**不要在现有 worktree 内 `git checkout`/`git switch` 到另一功能分支**。
 5. 新建修改分支时，同时创建 `sglang/<worktree-name>/`。如果该分支已在 `sglang/` 外注册，先停止修改，再将其迁移或移除后重建到 `sglang/`。
 6. `sglang/` 整体被主仓 `.gitignore` 忽略，不是子模块；SGLang 提交和推送都在具体 worktree 内完成，主仓不记录其 gitlink。
-7. worktree、PR 或远程映射变化后，更新 [docs/branches.md](docs/branches.md)，不要把易漂移的 HEAD/PR 状态复制回本文件。
+7. worktree、PR 编号与分支映射或 remote 变化后，更新 [docs/branches.md](docs/branches.md)；PR 合入状态、依赖及重构目标进度统一更新 [docs/mxfp-refactoring-plan.md](docs/mxfp-refactoring-plan.md)，不要另建重复状态表，也不要把易漂移的 HEAD/PR 状态复制回本文件。
 
 当前映射见 [docs/branches.md](docs/branches.md)。历史遗留、位于系统临时目录的 `junlin_codeowners` worktree 已清除；复用该分支必须先在 `sglang/` 下新建 worktree。
 
@@ -71,8 +72,9 @@
 
 ## 文档入口
 
-- 重构目标、任务编号与验收跟踪：[docs/mxfp-refactoring-plan.md](docs/mxfp-refactoring-plan.md)
-- 活跃 PR / branch / worktree / remote：[docs/branches.md](docs/branches.md)
+- 重构目标 G1–G5、任务编号与验收进度：[目标跟踪表](docs/mxfp-refactoring-plan.md#refactoring-status)
+- PR 合入计划、新旧编号与合入情况：[PR 跟踪表](docs/mxfp-refactoring-plan.md#pr-merge-status)；前置与并行范围：[依赖说明](docs/mxfp-refactoring-plan.md#merge-dependencies)
+- PR / branch / worktree / remote 定位与历史记录：[docs/branches.md](docs/branches.md)
 - 量化状态、入口与代码路径：[docs/quantization-overview.md](docs/quantization-overview.md)
 - 详细陷阱：[docs/known-pitfalls.md](docs/known-pitfalls.md)
 - `sgl-kernel-npu` 构建与 target wheel：[docs/sgl-kernel-npu-build.md](docs/sgl-kernel-npu-build.md)

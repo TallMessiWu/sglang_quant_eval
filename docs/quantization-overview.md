@@ -1,6 +1,8 @@
 # Ascend MXFP 量化概览
 
-本文保存相对稳定的能力矩阵、实现入口和跨仓参考关系。实时 PR、分支、HEAD 与 worktree 不在这里维护，统一见 [branches.md](branches.md)。
+本文保存相对稳定的能力矩阵、实现入口和跨仓参考关系。分支、HEAD 与 worktree 定位统一见 [branches.md](branches.md)。
+
+PR 合入情况、重构目标、任务拆分与验收进度统一见 [MXFP 重构计划](mxfp-refactoring-plan.md)；早期架构审阅保存在 [2026-10-10 HTML 报告](reports/mxfp-architecture-roadmap-2026-10-10.html)，其中状态仅代表当时快照。
 
 ## 参考优先级
 

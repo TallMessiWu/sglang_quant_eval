@@ -11,6 +11,8 @@
 - **关联 Issue**: [sgl-project/sglang#14424](https://github.com/sgl-project/sglang/issues/14424) (Diffusion)、[sgl-project/sglang#21584](https://github.com/sgl-project/sglang/issues/21584) (LLM Qwen3)。
 - **Fork**: <https://github.com/TallMessiWu/sglang>
 
+重构目标、任务编号、验收标准与进度统一跟踪在 [MXFP 重构计划](docs/mxfp-refactoring-plan.md)。原版 [交互式架构报告](docs/reports/mxfp-architecture-roadmap-2026-10-10.html) 保留为 2026-10-10 快照，下载后可在浏览器离线打开。
+
 ## 📁 仓库结构
 
 - `sglang/` — SGLang fork 的本地、gitignored `git worktree` 容器。`qwen3.5_dense_w8a8/` 是持有共享 `.git` 的主 clone，其他活跃 PR 分支是同级 worktree。所有需要修改 SGLang 代码的分支都必须在此目录下拥有独立 worktree；实时映射见 `docs/branches.md`。

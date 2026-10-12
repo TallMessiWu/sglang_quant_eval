@@ -11,6 +11,8 @@ This repository (`sglang_quant_eval`) researches and implements **MXFP8 / MXFP4*
 - **Related Issues**: [sgl-project/sglang#14424](https://github.com/sgl-project/sglang/issues/14424) (Diffusion), [sgl-project/sglang#21584](https://github.com/sgl-project/sglang/issues/21584) (LLM Qwen3).
 - **Fork**: <https://github.com/TallMessiWu/sglang>
 
+Refactoring goals, task IDs, acceptance criteria, and progress: [MXFP refactoring plan](docs/mxfp-refactoring-plan.md) (Chinese). The original [interactive architecture report](docs/reports/mxfp-architecture-roadmap-2026-10-10.html) is preserved as a 2026-10-10 snapshot; download and open it locally to use the interactive views.
+
 ## 📁 Repository Structure
 
 - `sglang/` — Local, gitignored `git worktree` container for the SGLang fork. `qwen3.5_dense_w8a8/` is the main clone that owns the shared `.git`; the other active PR branches are sibling worktrees. Every SGLang branch that will be modified must have its own worktree directly under this directory. See `docs/branches.md` for the live mapping.

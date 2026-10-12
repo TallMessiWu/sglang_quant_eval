@@ -71,6 +71,7 @@
 
 ## 文档入口
 
+- 重构目标、任务编号与验收跟踪：[docs/mxfp-refactoring-plan.md](docs/mxfp-refactoring-plan.md)
 - 活跃 PR / branch / worktree / remote：[docs/branches.md](docs/branches.md)
 - 量化状态、入口与代码路径：[docs/quantization-overview.md](docs/quantization-overview.md)
 - 详细陷阱：[docs/known-pitfalls.md](docs/known-pitfalls.md)

@@ -1,17 +1,9 @@
 #!/bin/bash
 
-if [ $# -eq 0 ]; then
-    unset ASCEND_RT_VISIBLE_DEVICES
-else
-    OLD_IFS="$IFS"
-    IFS=","; export ASCEND_RT_VISIBLE_DEVICES="$*"; IFS="$OLD_IFS"
-fi
-
+# 用法: $0 [-f|--force] [NPU_ID ... | all]
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
-if [ -x "$SCRIPT_DIR/npu-cleaner.sh" ]; then
-    "$SCRIPT_DIR/npu-cleaner.sh" "$@"
-    sleep 1
-fi
+source "$SCRIPT_DIR/common/npu-launch.sh" || exit $?
+npu_prepare_launch "$@" || exit $?
 
 export ASCEND_USE_FIA=1
 

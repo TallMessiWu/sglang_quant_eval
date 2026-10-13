@@ -15,18 +15,10 @@ if [ -f "$MODEL_PATH/quant_model_description.json" ]; then
     exit 1
 fi
 
-if [ $# -eq 0 ]; then
-    unset ASCEND_RT_VISIBLE_DEVICES
-else
-    OLD_IFS="$IFS"
-    IFS=","; export ASCEND_RT_VISIBLE_DEVICES="$*"; IFS="$OLD_IFS"
-fi
-
+# 用法: $0 [-f|--force] [NPU_ID ... | all]
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
-if [ $# -gt 0 ] && [ -x "$SCRIPT_DIR/npu-cleaner.sh" ]; then
-    "$SCRIPT_DIR/npu-cleaner.sh" "$@"
-    sleep 1
-fi
+source "$SCRIPT_DIR/common/npu-launch.sh" || exit $?
+npu_prepare_launch "$@" || exit $?
 
 # A5 prefill/decode 使用 FIA，避免默认 ATB 路径。
 export ASCEND_USE_FIA=1

@@ -4,6 +4,7 @@
 
 | 目录 | 用途 | 保留原因 |
 | --- | --- | --- |
+| `common/` | NPU 启动前清理与设备参数处理 | 所有带清理步骤的启动脚本共用，统一确认与取消行为 |
 | `ais_bench/` | 公共评测入口、模型配置生成器 | 三个评测入口共用；旧版 AIS Bench 仍需要生成配置 |
 | `benchmarks/` | FIA mixed split 的服务压测、算子 benchmark | 服务性能与算子性能需要分别验证 |
 | `diagnostics/` | 环境检查、plog 定位、算子正确性与压力检查 | 跨仓契约和并发故障仍需要独立验证 |
@@ -21,6 +22,32 @@
 VLLM_PORT=6969 ./llm/gsm8k.sh --batch-size 16
 VLLM_PORT=6969 ./llm/gpqa.sh
 VLLM_PORT=6969 ./llm/mmmu.sh
+```
+
+## 启动前清理与确认
+
+`qwen*.sh` 和 `a5_fia_mixed_split_serve.sh` 共用清理规则：
+
+- 指定卡号时清理所选卡；不指定卡号时不清理，并 unset `ASCEND_RT_VISIBLE_DEVICES`。
+- 只有自己的进程（按 UID 判断）或没有进程时，不询问，直接继续。
+- 涉及其他用户时显示 PID、用户名与命令，**Enter 确认，Esc 取消整个启动**；确认前不会终止任何进程，包括自己的。
+- `-f` / `--force` 跳过确认，但不会提升系统权限；清理失败仍中止启动。`sudo` 下按 `SUDO_UID` 判断发起用户。
+- 没有交互终端且涉及其他用户时默认取消，只有显式 `-f` 才继续。
+- `-f` 不会进入 `ASCEND_RT_VISIBLE_DEVICES`；`all` 表示清理所有卡并取消设备可见性限制。仅传 `-f` 而无卡号不会清理任何卡。
+
+```bash
+./llm/npu-cleaner.sh 0 1                     # 单独清理；涉及别人时确认
+./llm/qwen3.5_dense_bf16.sh 0 1              # 确认取消会阻止模型启动
+./llm/qwen3.5_dense_bf16.sh -f 0 1           # 显式跳过确认
+./llm/a5_fia_mixed_split_serve.sh on -f 0    # 模式参数在前
+```
+
+原本不调用清理器的 Diffusion 与 MoE LoRA 脚本保持不清理进程的行为。
+
+隔离回归测试（模拟 NPU 查询、UID 与 kill，不会终止真实进程）：
+
+```bash
+python3 -m unittest discover -s llm/tests -p 'test_npu_cleaner.py' -v
 ```
 
 ## Dense W4A8 在线 / 离线

@@ -19,7 +19,8 @@ set -euo pipefail
 usage() {
     cat <<'EOF'
 用法:
-  a5_fia_mixed_split_serve.sh <off|on> [NPU 卡号...]
+  a5_fia_mixed_split_serve.sh <off|on> [-f|--force] [NPU 卡号... | all]
+  涉及其他用户进程时 Enter 确认、Esc 取消；-f 跳过确认。
 
 示例:
   ./llm/a5_fia_mixed_split_serve.sh off 0
@@ -68,25 +69,8 @@ bench_root=${BENCH_ROOT:-${repo_root}/llm/fia_bench}
 profile_dir="${bench_root}/${mode}"
 
 # ================= 1. 前置清理 NPU =================
-if [[ $# -eq 0 ]]; then
-    echo "⚠️  未传入 NPU 卡号，将 unset ASCEND_RT_VISIBLE_DEVICES"
-    unset ASCEND_RT_VISIBLE_DEVICES || true
-else
-    cleaner_path="$script_dir/npu-cleaner.sh"
-    if [[ -x "$cleaner_path" ]]; then
-        echo "🧹 [前置任务] 准备释放 NPU ($*) 的资源..."
-        "$cleaner_path" "$@"
-        sleep 1
-        echo "✅ [前置任务] 清理完毕！"
-    else
-        echo "⚠️  未找到可执行的清理脚本 $cleaner_path，跳过清理直接启动。"
-    fi
-
-    old_ifs="$IFS"
-    IFS=","
-    export ASCEND_RT_VISIBLE_DEVICES="$*"
-    IFS="$old_ifs"
-fi
+source "$script_dir/common/npu-launch.sh" || exit $?
+npu_prepare_launch "$@" || exit $?
 
 # ================= 2. 环境变量 =================
 # A5(Ascend 950) 走 FIA 融合注意力算子 npu_fused_infer_attention_score；

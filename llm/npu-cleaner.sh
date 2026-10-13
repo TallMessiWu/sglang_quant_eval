@@ -61,6 +61,19 @@ echo "⚠️ NPU ($TARGETS) 上已有进程: ${pids_to_kill[*]}"
 # ps 仅补充展示信息；其成功与否、UID 或 sudo 身份均不能豁免确认。
 pid_list=$(IFS=,; echo "${pids_to_kill[*]}")
 ps -p "$pid_list" -o pid,user,args || true
+
+# 在确认前显示每个 PID 的当前工作目录，由用户判断是否可以终止。
+echo "进程当前工作目录（pwdx）："
+for pid in "${pids_to_kill[@]}"; do
+    if ! command -v pwdx >/dev/null 2>&1; then
+        printf '%s: <工作目录不可获取：未安装 pwdx>\n' "$pid"
+    elif cwd_info=$(pwdx "$pid" 2>&1); then
+        printf '%s\n' "$cwd_info"
+    else
+        printf '%s: <工作目录不可获取> (%s)\n' "$pid" "$cwd_info"
+    fi
+done
+
 if "$force"; then
     echo "已指定 -f/--force，跳过确认。"
 else

@@ -33,6 +33,7 @@ class NpuCleanerTests(unittest.TestCase):
         self.kill_log = self.root / "kill.log"
         self.launch_log = self.root / "launch.log"
         self.query_log = self.root / "query.log"
+        self.pwdx_log = self.root / "pwdx.log"
         self.online = self.root / "online"
         self.offline = self.root / "offline"
         self.online.mkdir()
@@ -43,6 +44,13 @@ class NpuCleanerTests(unittest.TestCase):
             'kill() { printf "%s\\n" "$*" >> "$TEST_KILL_LOG"; '
             'return "${TEST_KILL_STATUS:-0}"; }\n'
             'sleep() { :; }\nexport -f kill sleep\n'
+            'if [[ "${TEST_PWDX_MISSING:-0}" == 1 ]]; then\n'
+            '    command() {\n'
+            '        if [[ "${1:-}" == -v && "${2:-}" == pwdx ]]; then return 1; fi\n'
+            '        builtin command "$@"\n'
+            '    }\n'
+            '    export -f command\n'
+            'fi\n'
         )
         self.mock(
             "npu-smi",
@@ -68,6 +76,19 @@ class NpuCleanerTests(unittest.TestCase):
             '    *) exit 1 ;;\nesac\n',
         )
         self.mock(
+            "pwdx",
+            'printf "%s\\n" "$1" >> "$TEST_PWDX_LOG"\n'
+            'if [[ "$1" == "${TEST_PWDX_FAILURE_PID:-}" ]]; then\n'
+            '    printf "%s: %s\\n" "$1" "${TEST_PWDX_ERROR:-Permission denied}" >&2\n'
+            '    exit 1\nfi\n'
+            'case "$1" in\n'
+            f'    {OWN_PID}) directory=/work/alice/models ;;\n'
+            f'    {OTHER_PID}) directory="/work/bob/my project" ;;\n'
+            f'    {OTHER_CARD_PID}) directory=/work/carol/models ;;\n'
+            '    *) exit 1 ;;\nesac\n'
+            'printf "%s: %s\\n" "$1" "$directory"\n',
+        )
+        self.mock(
             "sglang",
             'printf "visible:%s\\nargs:%s\\n" "${ASCEND_RT_VISIBLE_DEVICES-<unset>}" '
             '"$*" >> "$TEST_LAUNCH_LOG"\n',
@@ -81,6 +102,7 @@ class NpuCleanerTests(unittest.TestCase):
             TEST_KILL_LOG=str(self.kill_log),
             TEST_LAUNCH_LOG=str(self.launch_log),
             TEST_QUERY_LOG=str(self.query_log),
+            TEST_PWDX_LOG=str(self.pwdx_log),
             TEST_IDENTITY_LOG=str(self.identity_log),
             TEST_SMI_ROWS=ROWS,
             TEST_UID="1000",
@@ -95,7 +117,7 @@ class NpuCleanerTests(unittest.TestCase):
         path.chmod(0o755)
 
     def clear_logs(self):
-        for path in (self.kill_log, self.launch_log, self.query_log, self.identity_log):
+        for path in (self.kill_log, self.launch_log, self.query_log, self.identity_log, self.pwdx_log):
             path.unlink(missing_ok=True)
 
     @staticmethod
@@ -127,7 +149,7 @@ class NpuCleanerTests(unittest.TestCase):
             timeout=5,
         )
 
-    def run_interactive(self, key, script=CLEANER, overrides=None, args=("0",)):
+    def run_interactive(self, key, script=CLEANER, overrides=None, args=("0",), before_key=None):
         self.clear_logs()
         master, slave = pty.openpty()
 
@@ -161,6 +183,8 @@ class NpuCleanerTests(unittest.TestCase):
                 if not sent and "Esc 取消：".encode() in output:
                     self.assertEqual(self.contents(self.kill_log), "")
                     self.assertEqual(self.contents(self.launch_log), "")
+                    if before_key is not None:
+                        before_key(output.decode(errors="replace"))
                     os.write(master, key)
                     sent = True
             self.assertTrue(sent, output.decode(errors="replace"))
@@ -213,6 +237,73 @@ class NpuCleanerTests(unittest.TestCase):
         code, output = self.run_interactive(b"\x1b")
         self.assertEqual(code, 130, output)
         self.assertEqual(self.contents(self.kill_log), "")
+
+    def test_pwdx_directories_are_shown_before_confirmation(self):
+        def check_display(output):
+            self.assertEqual(self.contents(self.pwdx_log), f"{OWN_PID}\n{OTHER_PID}\n")
+            for info in (f"{OWN_PID}: /work/alice/models", f"{OTHER_PID}: /work/bob/my project"):
+                self.assertIn(info, output)
+                self.assertLess(output.index(info), output.index("Enter 确认"))
+            self.assertNotIn(OTHER_CARD_PID, self.contents(self.pwdx_log))
+
+        code, output = self.run_interactive(b"\x1b", before_key=check_display)
+        self.assertEqual(code, 130, output)
+        self.assertEqual(self.contents(self.kill_log), "")
+
+    def test_pwdx_failure_does_not_skip_confirmation(self):
+        for error in ("Permission denied", "No such process"):
+            with self.subTest(error=error):
+                def check_display(output):
+                    self.assertIn(f"{OWN_PID}: <工作目录不可获取>", output)
+                    self.assertIn(error, output)
+                    self.assertIn(f"{OTHER_PID}: /work/bob/my project", output)
+                    self.assertEqual(self.contents(self.pwdx_log), f"{OWN_PID}\n{OTHER_PID}\n")
+
+                code, output = self.run_interactive(
+                    b"\x1b",
+                    overrides={"TEST_PWDX_FAILURE_PID": OWN_PID, "TEST_PWDX_ERROR": error},
+                    before_key=check_display,
+                )
+                self.assertEqual(code, 130, output)
+                self.assertEqual(self.contents(self.kill_log), "")
+
+    def test_missing_pwdx_is_explicit_and_confirmation_still_required(self):
+        def check_display(output):
+            for pid in (OWN_PID, OTHER_PID):
+                self.assertIn(f"{pid}: <工作目录不可获取：未安装 pwdx>", output)
+            self.assertEqual(self.contents(self.pwdx_log), "")
+
+        code, output = self.run_interactive(
+            b"\x1b", overrides={"TEST_PWDX_MISSING": "1"}, before_key=check_display
+        )
+        self.assertEqual(code, 130, output)
+        self.assertEqual(self.contents(self.kill_log), "")
+
+    def test_pwdx_queries_only_deduplicated_selected_pids(self):
+        row = f"| 0 | {OWN_PID} | python |\n"
+        result = self.run_script(args=("-f", "0"), overrides={"TEST_SMI_ROWS": row * 2 + f"| 1 | {OTHER_CARD_PID} |\n"})
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.contents(self.pwdx_log), f"{OWN_PID}\n")
+        self.assertIn(f"{OWN_PID}: /work/alice/models", result.stdout)
+        self.assertLess(result.stdout.index("/work/alice/models"), result.stdout.index("锁定进程"))
+
+    def test_empty_target_card_does_not_query_pwdx(self):
+        result = self.run_script(overrides={"TEST_SMI_ROWS": f"| 1 | {OTHER_CARD_PID} |\n"})
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.contents(self.pwdx_log), "")
+
+    def test_every_launcher_shows_pwdx_before_confirmation(self):
+        def check_display(output):
+            for info in (f"{OWN_PID}: /work/alice/models", f"{OTHER_PID}: /work/bob/my project"):
+                self.assertIn(info, output)
+                self.assertLess(output.index(info), output.index("Enter 确认"))
+
+        for script in LAUNCHERS:
+            with self.subTest(script=script.name):
+                code, output = self.run_interactive(b"\x1b", script, before_key=check_display)
+                self.assertEqual(code, 130, output)
+                self.assertEqual(self.contents(self.kill_log), "")
+                self.assertEqual(self.contents(self.launch_log), "")
 
     def test_other_keys_do_not_authorize_cleanup(self):
         code, output = self.run_interactive(b"y\x1b")

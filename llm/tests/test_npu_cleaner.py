@@ -66,9 +66,15 @@ class NpuCleanerTests(unittest.TestCase):
         self.mock(
             "ps",
             'if [[ "${4:-}" != uid= ]]; then\n'
-            '    printf "    PID USER     COMMAND\\n%s alice python own\\n%s bob python other\\n" '
-            f'"{OWN_PID}" "{OTHER_PID}"\n'
-            '    exit "${TEST_PS_STATUS:-0}"\nfi\n'
+            '    if [[ "${TEST_PS_STATUS:-0}" != 0 ]]; then exit "$TEST_PS_STATUS"; fi\n'
+            '    if [[ "$2" == "${TEST_PS_MISSING_PID:-}" ]]; then exit 1; fi\n'
+            '    case "$2" in\n'
+            f'        {OWN_PID}) user=alice; cmd="${{TEST_PS_COMMAND:-python own}}" ;;\n'
+            f'        {OTHER_PID}) user=bob; cmd="python other" ;;\n'
+            f'        {OTHER_CARD_PID}) user=carol; cmd="python unselected" ;;\n'
+            '        *) exit 1 ;;\n    esac\n'
+            '    printf " %-32s %s\\n" "$user" "$cmd"\n'
+            '    exit 0\nfi\n'
             'printf "ps uid\\n" >> "$TEST_IDENTITY_LOG"\n'
             'case "$2" in\n'
             f'    {OWN_PID}) echo "${{TEST_FIRST_UID:-1000}}" ;;\n'
@@ -123,6 +129,11 @@ class NpuCleanerTests(unittest.TestCase):
     @staticmethod
     def contents(path):
         return path.read_text() if path.exists() else ""
+
+    def process_row(self, output, pid):
+        rows = [line for line in output.splitlines() if line.split() and line.split()[0] == pid]
+        self.assertEqual(len(rows), 1, output)
+        return rows[0]
 
     def command(self, script, args):
         if script.name == "a5_fia_mixed_split_serve.sh":
@@ -230,7 +241,7 @@ class NpuCleanerTests(unittest.TestCase):
     def test_enter_confirms_all_selected_processes(self):
         code, output = self.run_interactive(b"\n")
         self.assertEqual(code, 0, output)
-        self.assertIn("bob python other", output)
+        self.assertRegex(self.process_row(output, OTHER_PID), rf"^{OTHER_PID}\s+bob\s+python other\s+/work/bob/my project$")
         self.assertEqual(self.contents(self.kill_log), f"-9 -- {OWN_PID} {OTHER_PID}\n")
 
     def test_escape_cancels_without_killing_any_process(self):
@@ -238,12 +249,43 @@ class NpuCleanerTests(unittest.TestCase):
         self.assertEqual(code, 130, output)
         self.assertEqual(self.contents(self.kill_log), "")
 
+    def test_process_table_has_working_directory_as_last_column(self):
+        result = self.run_script(args=("-f", "0"))
+        self.assertEqual(result.returncode, 0, result.stdout)
+        headers = [line for line in result.stdout.splitlines() if line.split() == ["PID", "USER", "COMMAND", "工作目录"]]
+        self.assertEqual(len(headers), 1, result.stdout)
+        for pid, user, command, directory in (
+            (OWN_PID, "alice", "python own", "/work/alice/models"),
+            (OTHER_PID, "bob", "python other", "/work/bob/my project"),
+        ):
+            rows = [line for line in result.stdout.splitlines() if line.split() and line.split()[0] == pid]
+            self.assertEqual(len(rows), 1, result.stdout)
+            self.assertRegex(rows[0], rf"^{pid}\s+{user}\s+{command}\s+{directory}$")
+        self.assertNotIn("进程当前工作目录", result.stdout)
+        self.assertNotIn(f"{OWN_PID}: /work/alice/models", result.stdout)
+
+    def test_table_keeps_long_commands_and_aligns_working_directories(self):
+        command = 'python /work/alice/server.py --model-path "/weights/a model with spaces" --port 6969'
+        result = self.run_script(args=("-f", "0"), overrides={"TEST_PS_COMMAND": command})
+        self.assertEqual(result.returncode, 0, result.stdout)
+        own_row = self.process_row(result.stdout, OWN_PID)
+        other_row = self.process_row(result.stdout, OTHER_PID)
+        self.assertIn(command, own_row)
+        self.assertEqual(own_row.index("/work/alice/models"), other_row.index("/work/bob/my project"))
+
+    def test_unavailable_process_metadata_does_not_shift_directory_rows(self):
+        result = self.run_script(args=("-f", "0"), overrides={"TEST_PS_MISSING_PID": OWN_PID})
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertRegex(self.process_row(result.stdout, OWN_PID), rf"^{OWN_PID}\s+\?\s+\?\s+/work/alice/models$")
+        self.assertRegex(self.process_row(result.stdout, OTHER_PID), rf"^{OTHER_PID}\s+bob\s+python other\s+/work/bob/my project$")
+
     def test_pwdx_directories_are_shown_before_confirmation(self):
         def check_display(output):
             self.assertEqual(self.contents(self.pwdx_log), f"{OWN_PID}\n{OTHER_PID}\n")
-            for info in (f"{OWN_PID}: /work/alice/models", f"{OTHER_PID}: /work/bob/my project"):
-                self.assertIn(info, output)
-                self.assertLess(output.index(info), output.index("Enter 确认"))
+            for pid, directory in ((OWN_PID, "/work/alice/models"), (OTHER_PID, "/work/bob/my project")):
+                row = self.process_row(output, pid)
+                self.assertTrue(row.endswith(directory), output)
+                self.assertLess(output.index(row), output.index("Enter 确认"))
             self.assertNotIn(OTHER_CARD_PID, self.contents(self.pwdx_log))
 
         code, output = self.run_interactive(b"\x1b", before_key=check_display)
@@ -254,9 +296,8 @@ class NpuCleanerTests(unittest.TestCase):
         for error in ("Permission denied", "No such process"):
             with self.subTest(error=error):
                 def check_display(output):
-                    self.assertIn(f"{OWN_PID}: <工作目录不可获取>", output)
-                    self.assertIn(error, output)
-                    self.assertIn(f"{OTHER_PID}: /work/bob/my project", output)
+                    self.assertTrue(self.process_row(output, OWN_PID).endswith("不可获取"), output)
+                    self.assertTrue(self.process_row(output, OTHER_PID).endswith("/work/bob/my project"), output)
                     self.assertEqual(self.contents(self.pwdx_log), f"{OWN_PID}\n{OTHER_PID}\n")
 
                 code, output = self.run_interactive(
@@ -270,7 +311,7 @@ class NpuCleanerTests(unittest.TestCase):
     def test_missing_pwdx_is_explicit_and_confirmation_still_required(self):
         def check_display(output):
             for pid in (OWN_PID, OTHER_PID):
-                self.assertIn(f"{pid}: <工作目录不可获取：未安装 pwdx>", output)
+                self.assertTrue(self.process_row(output, pid).endswith("不可获取（未安装 pwdx）"), output)
             self.assertEqual(self.contents(self.pwdx_log), "")
 
         code, output = self.run_interactive(
@@ -284,7 +325,7 @@ class NpuCleanerTests(unittest.TestCase):
         result = self.run_script(args=("-f", "0"), overrides={"TEST_SMI_ROWS": row * 2 + f"| 1 | {OTHER_CARD_PID} |\n"})
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertEqual(self.contents(self.pwdx_log), f"{OWN_PID}\n")
-        self.assertIn(f"{OWN_PID}: /work/alice/models", result.stdout)
+        self.assertTrue(self.process_row(result.stdout, OWN_PID).endswith("/work/alice/models"), result.stdout)
         self.assertLess(result.stdout.index("/work/alice/models"), result.stdout.index("锁定进程"))
 
     def test_empty_target_card_does_not_query_pwdx(self):
@@ -294,9 +335,10 @@ class NpuCleanerTests(unittest.TestCase):
 
     def test_every_launcher_shows_pwdx_before_confirmation(self):
         def check_display(output):
-            for info in (f"{OWN_PID}: /work/alice/models", f"{OTHER_PID}: /work/bob/my project"):
-                self.assertIn(info, output)
-                self.assertLess(output.index(info), output.index("Enter 确认"))
+            for pid, directory in ((OWN_PID, "/work/alice/models"), (OTHER_PID, "/work/bob/my project")):
+                row = self.process_row(output, pid)
+                self.assertTrue(row.endswith(directory), output)
+                self.assertLess(output.index(row), output.index("Enter 确认"))
 
         for script in LAUNCHERS:
             with self.subTest(script=script.name):

@@ -57,21 +57,39 @@ if [[ -z "$unique_pids" ]]; then
 fi
 
 mapfile -t pids_to_kill <<< "$unique_pids"
-echo "⚠️ NPU ($TARGETS) 上已有进程: ${pids_to_kill[*]}"
-# ps 仅补充展示信息；其成功与否、UID 或 sudo 身份均不能豁免确认。
-pid_list=$(IFS=,; echo "${pids_to_kill[*]}")
-ps -p "$pid_list" -o pid,user,args || true
-
-# 在确认前显示每个 PID 的当前工作目录，由用户判断是否可以终止。
-echo "进程当前工作目录（pwdx）："
+echo "⚠️ NPU ($TARGETS) 上已有进程："
+# ps/pwdx 只补充展示信息；逐个 PID 查询，避免进程退出时把路径配到别的行。
+display_users=()
+display_commands=()
+display_dirs=()
+user_width=4
+command_width=7
 for pid in "${pids_to_kill[@]}"; do
-    if ! command -v pwdx >/dev/null 2>&1; then
-        printf '%s: <工作目录不可获取：未安装 pwdx>\n' "$pid"
-    elif cwd_info=$(pwdx "$pid" 2>&1); then
-        printf '%s\n' "$cwd_info"
-    else
-        printf '%s: <工作目录不可获取> (%s)\n' "$pid" "$cwd_info"
+    process_user="?"
+    process_command="?"
+    if process_info=$(ps -p "$pid" -o user:32= -o args= -ww 2>/dev/null); then
+        read -r process_user process_command <<< "$process_info"
+        process_user=${process_user:-?}
+        process_command=${process_command:-?}
     fi
+    if ! command -v pwdx >/dev/null 2>&1; then
+        work_dir="不可获取（未安装 pwdx）"
+    elif cwd_info=$(pwdx "$pid" 2>/dev/null); then
+        work_dir=${cwd_info#"$pid: "}
+    else
+        work_dir="不可获取"
+    fi
+    display_users+=("$process_user")
+    display_commands+=("$process_command")
+    display_dirs+=("$work_dir")
+    if [[ ${#process_user} -gt $user_width ]]; then user_width=${#process_user}; fi
+    if [[ ${#process_command} -gt $command_width ]]; then command_width=${#process_command}; fi
+done
+
+printf '%-10s %-*s %-*s %s\n' "PID" "$user_width" "USER" "$command_width" "COMMAND" "工作目录"
+for i in "${!pids_to_kill[@]}"; do
+    printf '%-10s %-*s %-*s %s\n' "${pids_to_kill[$i]}" "$user_width" "${display_users[$i]}" \
+        "$command_width" "${display_commands[$i]}" "${display_dirs[$i]}"
 done
 
 if "$force"; then

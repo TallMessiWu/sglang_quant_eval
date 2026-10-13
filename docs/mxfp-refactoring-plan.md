@@ -111,7 +111,7 @@ Scheme：格式相关参数、loader metadata、scale / packing 契约
 
 当前 W4A8 bias 契约为 BF16，向量扩为 `[1,N]`。HTML 中较早的 FP32 bias 描述不用于本任务；也不能把 W4A8 的 bias 规则推广到 MXFP8。
 
-2026-10-13 精度反馈：用户确认使用 mixed gate/up 分支并设置 BF16 SSM state；图片请求长输出乱码，纯文本拿破仑介绍也出现错误事实、重复与乱码，短请求 `1+1=2` 不能视为精度通过。新增 `llm/diagnostics/modelslim_w4a8_check.py`，用实际离线 post-load/apply 对比软件 FP4/UE8M0 解包结果，覆盖合成权重与 checkpoint 第 0 层 up/down 的部分输出行，以及 1/64 token、重复调用；参考使用同一量化输入，单独报告 activation quantization 误差。CPU 自检、实际 ModelSlim pack 函数往返、语法与 lint 通过；尚无 NPU 探针结果，根因未定位，下一步收集真实 Linear 误差后再区分模型加载、graph/state 与 checkpoint 量化质量。新环境的 resize 启动失败已准备独立修复，分支定位见 `branches.md`。
+2026-10-13 精度反馈：用户确认使用 mixed gate/up 分支并设置 BF16 SSM state；图片请求长输出乱码，纯文本拿破仑介绍也出现错误事实、重复与乱码，短请求 `1+1=2` 不能视为精度通过。新增 `llm/diagnostics/modelslim_w4a8_check.py`，用实际离线 post-load/apply 对比软件 FP4/UE8M0 解包结果，覆盖合成权重与 checkpoint 第 0 层 up/down 的部分输出行，以及 1/64 token、重复调用；参考使用同一量化输入，单独报告 activation quantization 误差。CPU 自检、实际 ModelSlim pack 函数往返、语法与 lint 通过；尚无 NPU 探针结果，根因未定位，下一步收集真实 Linear 误差后再区分模型加载、graph/state 与 checkpoint 量化质量。新环境的 resize 启动失败修复已发布到同一 mixed gate/up 分支，分支定位见 `branches.md`。
 
 ### G2.2：Diffusion 离线 MXFP8 执行复用——已建分支，待实施
 

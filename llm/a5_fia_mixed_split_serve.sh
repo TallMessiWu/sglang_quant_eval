@@ -20,7 +20,7 @@ usage() {
     cat <<'EOF'
 用法:
   a5_fia_mixed_split_serve.sh <off|on> [-f|--force] [NPU 卡号... | all]
-  涉及其他用户进程时 Enter 确认、Esc 取消；-f 跳过确认。
+  目标卡上有任何 PID 时 Enter 确认、Esc 取消；-f 跳过确认。
 
 示例:
   ./llm/a5_fia_mixed_split_serve.sh off 0

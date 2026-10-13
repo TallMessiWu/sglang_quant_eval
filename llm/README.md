@@ -1,6 +1,6 @@
 # LLM 启动、评测与排查
 
-一级目录只保留 26 个直接使用的入口：21 个服务启动脚本（`qwen*.sh`、`a5_fia_mixed_split_serve.sh`）、`curl.sh`、`npu-cleaner.sh`，以及 AIS Bench 的 `gpqa.sh`、`gsm8k.sh`、`mmmu.sh`。辅助脚本按用途放进子目录。
+一级目录只保留 28 个直接使用的入口：23 个服务启动脚本（`qwen*.sh`、`a5_fia_mixed_split_serve.sh`）、`curl.sh`、`npu-cleaner.sh`，以及 AIS Bench 的 `gpqa.sh`、`gsm8k.sh`、`mmmu.sh`。辅助脚本按用途放进子目录。
 
 | 目录 | 用途 | 保留原因 |
 | --- | --- | --- |
@@ -22,6 +22,26 @@ VLLM_PORT=6969 ./llm/gsm8k.sh --batch-size 16
 VLLM_PORT=6969 ./llm/gpqa.sh
 VLLM_PORT=6969 ./llm/mmmu.sh
 ```
+
+## Dense W4A8 在线 / 离线
+
+沿用 `qwen3.5_dense_*.sh` 的入口命名；实际模型由 `MODEL_PATH` 中的 config 决定。离线默认路径为服务器上的 `/mnt/share/weight/Qwen3.6-27B_mxfp-w4a8-0821`，并不把目录名当成量化格式检测依据。
+
+```bash
+# 离线：读取 quant_model_description.json 自动选择 ModelSlim，不传 --quantization。
+./llm/qwen3.5_dense_offline_w4a8.sh 0
+
+# 在线：将此占位路径替换为原始 BF16/FP16 权重目录，不可使用上面的预量化目录。
+MODEL_PATH=/实际的BF16或FP16权重目录 ./llm/qwen3.5_dense_online_w4a8.sh 0
+
+# 可切换端口、上下文、TP 和 eager 模式；多个位置参数表示 NPU 卡号。
+TP_SIZE=2 VLLM_PORT=6970 CONTEXT_LENGTH=8192 EXTRA_ARGS="--disable-cuda-graph" \
+    ./llm/qwen3.5_dense_offline_w4a8.sh 0 1
+```
+
+在线脚本显式使用 `--quantization mxfp_w4a8`，并拒绝带 `quant_model_description.json` 的 ModelSlim 目录；离线脚本要求该文件存在，避免把未量化权重误当成离线 W4A8。两者均启用 FIA，默认 TP=1、端口 6969、上下文 131072；`MODEL_PATH` 可覆盖。`EXTRA_ARGS` 与既有脚本一样按空白分词。
+
+传入卡号会先调用 `npu-cleaner.sh` 清理所选卡上的进程；不传卡号则不清理，并取消 `ASCEND_RT_VISIBLE_DEVICES` 限制。做在线/离线对照时须使用同一模型版本的原始和预量化 checkpoint，并确认服务器实际运行的是目标 SGLang 代码；启动脚本本身不证明 NPU 数值、warmup 或图片请求通过。
 
 AIS Bench 的公共逻辑在 `ais_bench/run_ais_bench.sh`。生成的配置仍写入 `llm/.ais_bench_configs/`；FIA benchmark 与 profiler 结果仍写入 `llm/fia_bench/`。这些本地产物已被 Git 忽略。
 

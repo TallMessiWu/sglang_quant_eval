@@ -22,8 +22,11 @@
 | G2.1：Dense W4A8 公共执行 | `junlin/w4a8-shared-execution` | `24e100f1e8` | `sglang/w4a8_shared_execution/` |
 | G2.2：Diffusion MXFP8 公共执行 | `junlin/diffusion-mxfp8-shared-execution` | `62ff466ac0` | `sglang/diffusion_mxfp8_shared_execution/` |
 | G2.3：Ascend MXFP 能力校验 | `junlin/ascend-mxfp-capabilities` | `62ff466ac0` | `sglang/ascend_mxfp_capabilities/` |
+| NPU Qwen-VL resize 兼容（独立分支） | `junlin/npu-qwen-vl-resize-compat` | `2ef4c276be` | `sglang/npu_qwen_vl_resize_compat/` |
 
 G2.1 的开发基线为 #43739 的 `ded4671577`；G2.2 / G2.3 的建分支基线均为 `62ff466ac0`。实现与验收进度见目标跟踪表，不由 HEAD 或目录存在与否推断。
+
+2026-10-13：从 mixed gate/up 的部署基线建立 `junlin/npu-qwen-vl-resize-compat`，回移上游 [#43309](https://github.com/sgl-project/sglang/pull/43309) 的 `c6e822c29b9bb3d392e65a7bcb271a5d2d63613d`。实时 GitHub 查询确认该 PR 于 2026-10-12 合入；回移后的 `qwen_vl_processor.py` Git blob 与上游提交相同（`c5c9ea5c24180459e8faf16623fac26d13242a85`）。修复 Transformers 5.19 图片/视频 resize 的参数与 size 契约；标准补丁为 `llm/patches/qwen_vl_processor_transformers_519.patch`。旧代码在真实 HF resize 函数体的隔离 CPU harness 中复现相同图片 TypeError，回移后图片、批次顺序、禁用 resize 和视频时间维度四项契约检查通过，插值后端/分组叶子被隔离，不计为 NPU warmup 或生成精度通过。修复以 [`2ef4c276be4b3fa6b7e4578a2d738ec00c0dd668`](https://github.com/TallMessiWu/sglang/commit/2ef4c276be4b3fa6b7e4578a2d738ec00c0dd668) 提交并普通推送至 origin，本地与远端 SHA 相同、ahead/behind `0 0`；没有创建 PR。用户要求优先修复精度问题，预处理补丁收敛的待办见 `mxfp-refactoring-plan.md` 第 6 节。
 
 **以下带日期的记录保留当时的状态与验证证据，不继续滚动更新其中的 PR 状态、旧编号或 HEAD。** 历史表中的旧 #32601 / #34387 通过上表映射到新 PR；“当前”“已推送”“保留”等措辞仅对记录当时有效。
 

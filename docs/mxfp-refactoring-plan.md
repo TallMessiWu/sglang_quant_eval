@@ -111,6 +111,8 @@ Scheme：格式相关参数、loader metadata、scale / packing 契约
 
 当前 W4A8 bias 契约为 BF16，向量扩为 `[1,N]`。HTML 中较早的 FP32 bias 描述不用于本任务；也不能把 W4A8 的 bias 规则推广到 MXFP8。
 
+2026-10-13 精度反馈：用户确认使用 mixed gate/up 分支并设置 BF16 SSM state；图片请求长输出乱码，纯文本拿破仑介绍也出现错误事实、重复与乱码，短请求 `1+1=2` 不能视为精度通过。新增 `llm/diagnostics/modelslim_w4a8_check.py`，用实际离线 post-load/apply 对比软件 FP4/UE8M0 解包结果，覆盖合成权重与 checkpoint 第 0 层 up/down 的部分输出行，以及 1/64 token、重复调用；参考使用同一量化输入，单独报告 activation quantization 误差。CPU 自检、实际 ModelSlim pack 函数往返、语法与 lint 通过；尚无 NPU 探针结果，根因未定位，下一步收集真实 Linear 误差后再区分模型加载、graph/state 与 checkpoint 量化质量。新环境的 resize 启动失败已准备独立修复，分支定位见 `branches.md`。
+
 ### G2.2：Diffusion 离线 MXFP8 执行复用——已建分支，待实施
 
 已登记 `junlin/diffusion-mxfp8-shared-execution`，worktree 为 `sglang/diffusion_mxfp8_shared_execution/`；当前定位见 [branches.md](branches.md#current-branch-map)。后续会话先核对该目录的用户改动，再继续实施。
@@ -287,6 +289,11 @@ G2 新分支按实际依赖取最小基线，不把整个 Gemma / MTP / FIA 栈�
 | 2026-10-12 | 全计划 | 建立本跟踪文件，归档原 HTML，明确 G2.2 / G2.3 的范围和验收 | 分别实施 G2.2、G2.3 |
 | 2026-10-12 | 合入队列与跟踪分工 | 纳入原 1–8 项及 kernel #824；改用 #43739（原 #32601）、#43740（原 #34387）；通过 `gh` 核对 7 个待合入个人 PR 和配套 PR；已合入 / 已关闭项退出待合入队列 | PR 状态统一维护第 5 节，分支定位维护 `branches.md` |
 | 2026-10-12 | G2.2 / G2.3 准备 | 本地已建两个独立 worktree，均无工作区改动或相对建分支基线的实现增量；本次未查到对应 PR | 实施后补提交、验证证据和交付信息 |
+
+**NPU Qwen-VL 预处理补丁待办（2026-10-13，用户要求暂缓）**
+
+- [ ] 精度问题定位后，收敛本仓 NPU 预处理补丁：评估复用 Transformers 的分组、resize、rescale/normalize 流程，仅保留 NPU 必要的 patch/layout 适配，降低复制整个 `_preprocess` 带来的接口漂移。图片和视频一起覆盖，并记录支持的 Transformers 接口范围。
+- [ ] 补真实 HF processor 的 CPU 集成回归和目标 NPU warmup/图片/视频验证；本次隔离 CPU 契约检查不能替代该验收。
 
 新增记录模板：`日期 / 任务 ID / 实现提交或证据链接 / PR / 改动 / 已验证范围与日志 / 未验证范围 / 下一步`。滚动分支定位引用 `branches.md`；验证证据中的 SHA 固定保留。不要用一个“完成”同时代替实现、硬件验收和上游合并。以上表格是有日期的人工维护记录，不是自动轮询面板；报告或操作前用 `gh` 刷新。
 

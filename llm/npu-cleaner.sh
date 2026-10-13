@@ -59,19 +59,14 @@ fi
 mapfile -t pids_to_kill <<< "$unique_pids"
 echo "⚠️ NPU ($TARGETS) 上已有进程："
 # ps/pwdx 只补充展示信息；逐个 PID 查询，避免进程退出时把路径配到别的行。
-display_users=()
 display_commands=()
 display_dirs=()
-user_width=4
 command_width=7
 for pid in "${pids_to_kill[@]}"; do
-    process_user="?"
-    process_command="?"
-    if process_info=$(ps -p "$pid" -o user:32= -o args= -ww 2>/dev/null); then
-        read -r process_user process_command <<< "$process_info"
-        process_user=${process_user:-?}
-        process_command=${process_command:-?}
+    if ! process_command=$(ps -p "$pid" -o args= -ww 2>/dev/null); then
+        process_command="?"
     fi
+    process_command=${process_command:-?}
     if ! command -v pwdx >/dev/null 2>&1; then
         work_dir="不可获取（未安装 pwdx）"
     elif cwd_info=$(pwdx "$pid" 2>/dev/null); then
@@ -79,16 +74,14 @@ for pid in "${pids_to_kill[@]}"; do
     else
         work_dir="不可获取"
     fi
-    display_users+=("$process_user")
     display_commands+=("$process_command")
     display_dirs+=("$work_dir")
-    if [[ ${#process_user} -gt $user_width ]]; then user_width=${#process_user}; fi
     if [[ ${#process_command} -gt $command_width ]]; then command_width=${#process_command}; fi
 done
 
-printf '%-10s %-*s %-*s %s\n' "PID" "$user_width" "USER" "$command_width" "COMMAND" "工作目录"
+printf '%-10s %-*s %s\n' "PID" "$command_width" "COMMAND" "工作目录"
 for i in "${!pids_to_kill[@]}"; do
-    printf '%-10s %-*s %-*s %s\n' "${pids_to_kill[$i]}" "$user_width" "${display_users[$i]}" \
+    printf '%-10s %-*s %s\n' "${pids_to_kill[$i]}" \
         "$command_width" "${display_commands[$i]}" "${display_dirs[$i]}"
 done
 

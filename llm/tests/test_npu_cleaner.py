@@ -69,11 +69,11 @@ class NpuCleanerTests(unittest.TestCase):
             '    if [[ "${TEST_PS_STATUS:-0}" != 0 ]]; then exit "$TEST_PS_STATUS"; fi\n'
             '    if [[ "$2" == "${TEST_PS_MISSING_PID:-}" ]]; then exit 1; fi\n'
             '    case "$2" in\n'
-            f'        {OWN_PID}) user=alice; cmd="${{TEST_PS_COMMAND:-python own}}" ;;\n'
-            f'        {OTHER_PID}) user=bob; cmd="python other" ;;\n'
-            f'        {OTHER_CARD_PID}) user=carol; cmd="python unselected" ;;\n'
+            f'        {OWN_PID}) cmd="${{TEST_PS_COMMAND:-python own}}" ;;\n'
+            f'        {OTHER_PID}) cmd="python other" ;;\n'
+            f'        {OTHER_CARD_PID}) cmd="python unselected" ;;\n'
             '        *) exit 1 ;;\n    esac\n'
-            '    printf " %-32s %s\\n" "$user" "$cmd"\n'
+            '    printf "%s\\n" "$cmd"\n'
             '    exit 0\nfi\n'
             'printf "ps uid\\n" >> "$TEST_IDENTITY_LOG"\n'
             'case "$2" in\n'
@@ -241,7 +241,7 @@ class NpuCleanerTests(unittest.TestCase):
     def test_enter_confirms_all_selected_processes(self):
         code, output = self.run_interactive(b"\n")
         self.assertEqual(code, 0, output)
-        self.assertRegex(self.process_row(output, OTHER_PID), rf"^{OTHER_PID}\s+bob\s+python other\s+/work/bob/my project$")
+        self.assertRegex(self.process_row(output, OTHER_PID), rf"^{OTHER_PID}\s+python other\s+/work/bob/my project$")
         self.assertEqual(self.contents(self.kill_log), f"-9 -- {OWN_PID} {OTHER_PID}\n")
 
     def test_escape_cancels_without_killing_any_process(self):
@@ -252,15 +252,16 @@ class NpuCleanerTests(unittest.TestCase):
     def test_process_table_has_working_directory_as_last_column(self):
         result = self.run_script(args=("-f", "0"))
         self.assertEqual(result.returncode, 0, result.stdout)
-        headers = [line for line in result.stdout.splitlines() if line.split() == ["PID", "USER", "COMMAND", "工作目录"]]
+        headers = [line for line in result.stdout.splitlines() if line.split() == ["PID", "COMMAND", "工作目录"]]
         self.assertEqual(len(headers), 1, result.stdout)
-        for pid, user, command, directory in (
-            (OWN_PID, "alice", "python own", "/work/alice/models"),
-            (OTHER_PID, "bob", "python other", "/work/bob/my project"),
+        for pid, command, directory in (
+            (OWN_PID, "python own", "/work/alice/models"),
+            (OTHER_PID, "python other", "/work/bob/my project"),
         ):
             rows = [line for line in result.stdout.splitlines() if line.split() and line.split()[0] == pid]
             self.assertEqual(len(rows), 1, result.stdout)
-            self.assertRegex(rows[0], rf"^{pid}\s+{user}\s+{command}\s+{directory}$")
+            self.assertRegex(rows[0], rf"^{pid}\s+{command}\s+{directory}$")
+        self.assertNotIn("USER", result.stdout)
         self.assertNotIn("进程当前工作目录", result.stdout)
         self.assertNotIn(f"{OWN_PID}: /work/alice/models", result.stdout)
 
@@ -276,8 +277,8 @@ class NpuCleanerTests(unittest.TestCase):
     def test_unavailable_process_metadata_does_not_shift_directory_rows(self):
         result = self.run_script(args=("-f", "0"), overrides={"TEST_PS_MISSING_PID": OWN_PID})
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertRegex(self.process_row(result.stdout, OWN_PID), rf"^{OWN_PID}\s+\?\s+\?\s+/work/alice/models$")
-        self.assertRegex(self.process_row(result.stdout, OTHER_PID), rf"^{OTHER_PID}\s+bob\s+python other\s+/work/bob/my project$")
+        self.assertRegex(self.process_row(result.stdout, OWN_PID), rf"^{OWN_PID}\s+\?\s+/work/alice/models$")
+        self.assertRegex(self.process_row(result.stdout, OTHER_PID), rf"^{OTHER_PID}\s+python other\s+/work/bob/my project$")
 
     def test_pwdx_directories_are_shown_before_confirmation(self):
         def check_display(output):

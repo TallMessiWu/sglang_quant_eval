@@ -75,7 +75,7 @@ Scheme：格式相关参数、loader metadata、scale / packing 契约
 | G1.1 | 修正 MXFP8 partial-scale 与布局边界 | 已有对应修复；Diffusion loader 仍需单独核对 | 余块与奇数 scale 的表示、分片后 shape 和目标 NPU 验证；占位修正不等于任意 K 可运行 | #32745；状态见下方 PR 表 |
 | G1.2 | 补在线 MoE W4A8 / W4A4 与实际精度分配 | 两条功能分支已有实现，保持各自能力增量 | 专家确实量化；层级精度、融合、dispatch、TP/EP 与在线 RTN 精度需有证据 | #43739（原 #32601）/ #32602；状态见 PR 表 |
 | **G2.1** | **Dense W4A8 在线/离线公共执行** | **实现已提交并推送** | 8 个 CPU/mock 测试；2026-10-14 在线、离线启动与请求功能均获用户真机正常反馈；在线视觉 27 个 fc2 保留既有 BF16 回退。两入口及重构前后 NPU 数值对照待补，尚未完成完整验收 | 实现 `24e100f1e8`，离线验收载体 `2ef4c276be`；发布/合入单独跟踪 |
-| **G2.2** | **Diffusion 离线 MXFP8 委托公共 kernel** | **实现已提交并推送** | 3 个 CPU/mock 测试、27 组调用契约对照通过；I2V 已获用户服务器 repack 成功日志，双 transformer 输出元数据核对通过；真实加载、warmup、图片请求和硬件数值/性能待补 | `6eb8e1dd1c`；独立分支，发布核验记录见 `branches.md` |
+| **G2.2** | **Diffusion 离线 MXFP8 委托公共 kernel** | **实现已推送，用户真机图生视频功能通过** | 2026-10-14 用户确认 I2V 输出成功、视频观感正常；已完成 repack 与输出元数据检查。本轮按用户要求跳过数值对照；独立 warmup、量化误差和性能未实测 | `6eb8e1dd1c`；独立分支，发布核验记录见 `branches.md` |
 | **G2.3** | **Ascend MXFP 局部能力描述与提前校验** | **局部试点已提交并推送** | 17 条能力描述实际接入校验/fallback/文档；14 个 CPU/mock 测试通过；原支持路径与 TP/EP/backend 的硬件 probe 待补 | `d6a46f90d9`；独立分支，发布核验记录见 `branches.md` |
 | G3 | 权重生命周期与公共在线入口 | 待设计 / 实施，与公共框架工作协调 | 参数、元数据、重载语义明确；入口迁移兼容既有 CLI | 尚未拆出交付 PR |
 | G4 | 跨代际差异按契约归属收敛 | Gemma 切片已有实现；整体未完成 | provider 可追溯；构建 target、API 与配套 wheel 验证；只在必要处引入运行时契约层 | kernel #638 + #32745；状态见 PR 表 |
@@ -128,7 +128,7 @@ Scheme：格式相关参数、loader metadata、scale / packing 契约
 2. 公共执行数值对照用 G2.1 实现 `24e100f1e8` 与其基线 `ded4671577`，在目标 NPU 上向在线/离线 `apply` 传入相同的 prepared weight/scale/input/bias；覆盖二维/多维、非连续输入、FP16/BF16、bias 有无，比较 shape/dtype、有限性与误差，并记录预先选定的阈值。同一 prepared tensor 的重构等价，不等于要求独立量化的在线/离线 checkpoint 输出相等。基线使用独立 worktree，不在现有功能 worktree 切分支。
 3. `llm/diagnostics/modelslim_w4a8_check.py` 可补离线 Linear 与软件解包参考的数值证据，但现有范围没有覆盖上述两入口与旧/新实现的完整硬件对照；不能仅凭该脚本通过勾选这一项。实际执行前还需准备对应数值对照 harness。
 
-### G2.2：Diffusion 离线 MXFP8 执行复用——实现已推送，待硬件验收
+### G2.2：Diffusion 离线 MXFP8 执行复用——用户真机图生视频功能通过
 
 实现提交 `6eb8e1dd1c91678284d1355cdb182a85ab4e9863`，独立基线 `62ff466ac0c2cdd5521acf7d4c673fa7630eb083`；分支 `junlin/diffusion-mxfp8-shared-execution`、worktree `sglang/diffusion_mxfp8_shared_execution/`。CPU/mock 及基线对照证据、发布记录见 [branches.md](branches.md#current-branch-map)。
 
@@ -150,7 +150,8 @@ Scheme：格式相关参数、loader metadata、scale / packing 契约
 - [x] 同时迁移必要的 post-load 和 apply，防止重复 transpose、重复准备或沿用错误 stride；固定/动态 bias 行为保持正确。
 - [x] 用已有公共实现消除重复 activation quant、matmul 和 shape 恢复；确需扩展接口时检查现有调用方。
 - [x] 完成针对性 CPU/mock 回归，覆盖二维/多维、dtype、bias、scale 边界和 loader 参数映射。
-- [ ] 真实 ModelSlim checkpoint 加载 → warmup → 图片请求；补目标硬件数值与性能证据。
+- [x] 真实 ModelSlim checkpoint 加载、图片请求和视频输出：2026-10-14 用户真机回报成功，视频观感正常。
+- [ ] 独立 warmup、硬件数值对照与性能证据；本轮按用户要求跳过，不作为继续 G2.3 的前置。
 
 **完整验收方案（当前按用户要求跳过对照）**：使用 Wan2.2 I2V-A14B ModelSlim MXFP8，通过 `validation/run_g2.sh wan-baseline` / `wan-g22` 传入 `--model-path`、`--image-path`、`--seed 42` 和固定分辨率/帧数/步数，验证图生视频。用独立 worktree 的基线 `62ff466ac0`、相同权重/图片/prompt/seed/软件栈做前后对照，比较代表性 Linear 输出误差、生成结果和稳定阶段耗时（一次完整形状 warmup 单列，至少重复三次）。两个 transformer 的实际加载和高/低噪声阶段执行需要日志证据；不能把只检查一套描述 JSON 的结果视为双模型验收。再用同架构原始 Diffusers 权重和 `--mode online` 做公共 kernel 兼容冒烟。不同在线/离线量化来源不要求逐元素相等。现有 `test/registered/unit/layers/quantization/test_diffusion_modelslim_mxfp8.py` 是 CPU/mock 契约回归，不能替代以上硬件项目。
 
@@ -217,6 +218,8 @@ ASCEND_RT_VISIBLE_DEVICES=0 bash diffusion/i2v_offline_mxfp8.sh
 视频、追加写入的 `run.log`、临时文件及可配置的 Hugging Face/PyTorch/Triton/SGLang Diffusion 缓存均位于执行命令的当前目录下 `./outputs_i2v_mxfp8/`。历史 `/tmp` 路径仅保留为已执行证据。之前准备的 `validation/` 工具不再作为本轮运行入口；跳过比较是用户选择，未将其记作 NPU 数值验证通过。
 
 **2026-10-14 15:47–15:49 用户服务器运行反馈**：双 transformer、text encoder、VAE、tokenizer、scheduler 已加载，文本编码和图片 VAE 编码完成，日志已进入 DenoisingStage，尚未回传去噪完成、解码或视频保存结果，也未附实际分支/HEAD，因此不认定 G2.2/G2.3 某提交已验收。当前选择 Torch SDPA；q_rot/k_rot 未加载符合 MXFP8 attention 默认关闭的路径，未证明 attention 量化执行。`fused linear+GELU ... quantized linear` 仅关闭面向非量化 Linear 的 GELU 融合优化，不改变量化 Linear 方法。日志提示 1280×704 非支持尺寸，已将 I2V 脚本修正为 1280×720；当前已启动的进程不受此修改影响。其余 SciPy、attentions/custom_ops 和内部格式告警尚未导致本次回传日志中的失败。
+
+**2026-10-14 后续完成回报**：用户明确确认“2.2 输出成功了，我看视频也是比较正常的”。据此将 G2.2 的 Wan2.2 I2V-A14B 离线 ModelSlim MXFP8 图生视频场景记为用户真机功能通过、人工观感正常。此前回传日志中的加载和编码阶段记录由该反馈补齐到输出成功；没有扩展为本机执行、逐元素数值等价、独立 warmup、性能或 MXFP8 attention 验收。此前日志分辨率为 1280×704，脚本后续已改为 1280×720；本次完成回报未另附参数和 HEAD，不能据此追加新尺寸的验收结论。下一步由用户手动选择 G2.3 分支 `junlin/ascend-mxfp-capabilities`，继续使用 `diffusion/i2v_offline_mxfp8.sh` 直接运行。
 
 可选的无需模型 NPU 数值入口（本轮跳过）：激活与服务相同的环境，在主仓根目录运行（第二参数可换成服务器任一已有 SGLang checkout；`PYTHON` 可指定服务 Python）：
 
@@ -404,6 +407,6 @@ G2 新分支按实际依赖取最小基线，不把整个 Gemma / MTP / FIA 栈�
 
 交给新会话时可以直接说：
 
-> 阅读 AGENTS.md 和 docs/mxfp-refactoring-plan.md。G2.1 已实现且在线/离线基本功能获用户真机通过反馈，补其公共执行 NPU 数值对照；G2.2 / G2.3 已分别提交实现，继续各自硬件验收，不重新实现。先核对实际分支、部署源码、基线及用户改动；需要修代码时只在对应 sglang/ 直属独立 worktree 进行，按现有清单更新证据。
+> 阅读 AGENTS.md 和 docs/mxfp-refactoring-plan.md。G2.1 已实现且在线/离线基本功能获用户真机通过反馈，补其公共执行 NPU 数值对照；G2.2 已获用户真机图生视频功能通过反馈，数值对照按用户要求跳过；G2.3 已提交实现，继续直接运行真实模型，不重新实现。先核对实际分支、部署源码、基线及用户改动；需要修代码时只在对应 sglang/ 直属独立 worktree 进行，按现有清单更新证据。
 
 工作范围、提交与发布按用户当次授权和仓库规则执行，已经明确授权的动作不重复询问。默认单 agent，保留不相关改动。

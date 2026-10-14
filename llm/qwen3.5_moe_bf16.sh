@@ -8,7 +8,7 @@ npu_prepare_launch "$@" || exit $?
 export ASCEND_USE_FIA=1
 
 sglang serve \
-    --model-path /mnt/share/weight/Qwen3.5-35B-A3B \
+    --model-path /mnt/share/weight/Qwen3.6-35B-A3B \
     --host 127.0.0.1 \
     --port ${VLLM_PORT:-6969} \
     --device npu \

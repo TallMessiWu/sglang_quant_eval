@@ -52,6 +52,8 @@ MoE 的离线 MXFP4 路径已由上游 #30318 / #30319 落地，#43739（原 #32
   - `modelslim.py`：离线 scheme 分发
   - `modelslim_mxfp8_scheme.py`、`modelslim_mxfp4_scheme.py`：离线实现
 
+G2.2 分支的 MXFP8 离线 Scheme 保留 checkpoint 参数/loader 和必要的 scale 适配，post-load/apply 委托 SRT `NPUMXFP8LinearMethod`。G2.3 的局部能力描述位于 `srt/hardware_backend/npu/quantization/mxfp_capabilities.py`，两分支独立；实现与验证进度见 [G2 跟踪](mxfp-refactoring-plan.md#refactoring-status)。
+
 ### LLM Dense / ModelSlim
 
 - `srt/hardware_backend/npu/quantization/linear_method_npu.py`：NPU Dense quantized linear 方法
@@ -89,6 +91,7 @@ MoE 的离线 MXFP4 路径已由上游 #30318 / #30319 落地，#43739（原 #32
 - `llm/qwen3.5_dense_*.sh`：Dense BF16 / W8A8 / W4A8；部分入口沿用文件名、默认加载 Qwen3.6-27B，具体路径见 [启动说明](../llm/README.md#dense-w4a8-在线--离线)
 - `llm/qwen3.5_moe_*.sh`：Qwen3.5 MoE BF16 / W8A8 / W4A8 / W4A4
 - `llm/qwen3_*`：Qwen3 对照脚本
-- `diffusion/`：Wan2.2 Diffusion 量化与 PR 记录
+- [`diffusion/i2v_offline_mxfp8.sh`](../diffusion/i2v_offline_mxfp8.sh)：Wan2.2 I2V-A14B 离线 MXFP8，直接调用当前环境的 `sglang generate`；使用已有 repacked 权重与 `gyro.jpg`，输出留在当前目录的 `outputs_i2v_mxfp8/`。分支与下一步见 [G2.3 接手入口](mxfp-refactoring-plan.md#g23-handoff)。
+- `diffusion/` 其余脚本：Wan2.2 TI2V/T2V 在线、离线量化入口与 PR 记录
 
 结论必须区分：静态检查、CPU 回归、单 kernel probe、模型加载/warmup、确定性请求、精度评测和性能评测。没有对应硬件日志时，不把静态检查写成 e2e 通过。

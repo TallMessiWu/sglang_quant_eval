@@ -28,6 +28,19 @@ python3 -c "import sglang.srt.models.qwen3_5"
 
 ---
 
+<a id="wan-modelslim-repack"></a>
+
+## Wan ModelSlim repack 与 I2V 日志
+
+- **多份量化描述不能排序取首项。** 本次 I2V high/low noise 目录同时含全 FLOAT 的 `quant_model_description_w8a8_fp8_only.json` 与实际使用的 `quant_model_description_w8a8_mxfp8.json`。修复后的 `wan_repack.py` 支持 `--quant-description-file`，应对每个 expert 显式选择后者；不要改 JSON 冒充权重转换。工具提交见 [分支记录](branches.md#g2-runtime-record)。
+- **rotation 张量名与 JSON 键要一起映射。** 原始 `self_attn.q_rot/k_rot` 应转为 `attn1.q_rot/k_rot`，不能误变成 `attn1.to_q_rot/to_k_rot`；JSON-only attention 元数据也需要改名。
+- **模板大小不能证明完整。** repack 前需检查同架构的 `model_index.json` 和两套 transformer config。原始模板 `/mnt/weight/Wan2.2-I2V-A14B-Diffusers` 曾缺第一套 transformer 的第 12/12 分片；离线 repack 会整体替换 transformer，因此未阻塞本次转换，但不能直接用于原始权重的在线运行。当前离线输出已生成，后续直接复用。
+- **Linear 量化与 attention 量化分开判断。** CLI 的 `quantization: null` 不否定组件从 `quant_model_description.json` 自动识别 ModelSlim。默认关闭 `SGLANG_DIFFUSION_ENABLE_MXFP8_ATTENTION` 时，Torch SDPA 路径不会注册/加载 `q_rot/k_rot`；这类 skipped-key 日志符合该配置，不代表 MXFP8 Linear 被关闭。
+- **`fused linear+GELU ... quantized linear` 不表示退回全精度。** 它只关闭面向非量化 Linear 的可选融合，原有量化 Linear 仍执行。`host pageable` 配合 CPU offload 表示权重暂存主存，也不能据此认定整个模型在 CPU 上运行。
+- **I2V 尺寸使用支持列表。** 本次列表为 1280×720、720×1280、832×480、480×832；脚本已从沿用的 TI2V 1280×704 改为 1280×720。一次正常输出或未中断运行的依赖告警不等于所有尺寸、性能和依赖组合都已验证。
+
+---
+
 ## 模块级 `import torch_npu` 会炸掉全平台 CI
 
 `quantization/__init__.py` 无条件 import `ModelSlimConfig`，链路上任何文件顶层 `import torch_npu` 都会让 CUDA/CPU/AMD/XPU CI 在 import 时 `ModuleNotFoundError`（PR #22352 踩过两次：`linear_method_npu.py`、`modelslim_mxfp8.py`）。

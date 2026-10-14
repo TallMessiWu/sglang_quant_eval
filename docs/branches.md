@@ -28,19 +28,15 @@
 
 G2.1 的开发基线为 #43739 的 `ded4671577`；G2.2 / G2.3 的建分支基线均为 `62ff466ac0`。实现与验收进度见目标跟踪表，不由 HEAD 或目录存在与否推断。
 
-2026-10-14 验收工具准备：再次实时核实 G2.2 / G2.3 origin 分支仍分别为 `6eb8e1dd1c` / `d6a46f90d9`，两个功能 worktree 均干净；在 `sglang/` 下新增上述 detached 基线 worktree，没有修改生产实现或叠加兼容提交。`validation/run_g2.sh` 获取固定分支后核对 SHA，复用同 SHA 的直属 worktree，缺失时只新建 detached 验收 checkout，不切换、重置已有分支。主仓预存的未跟踪 `validation/g2_npu.py` 经审查补齐；`.pi/` 和 kernel 原有差异保留。
+<a id="g2-runtime-record"></a>
 
-2026-10-14 Wan 格式检查后新增独立工具修复：从 `62ff466ac0` 建立直属 worktree `sglang/wan_repack_rotation_keys/`，提交 [`6e19df8e6f8b1647116cf1e8f3311fb7e07aba2d`](https://github.com/TallMessiWu/sglang/commit/6e19df8e6f8b1647116cf1e8f3311fb7e07aba2d) 并普通推送至 `origin/junlin/wan-repack-rotation-keys`，local/remote SHA 相同、ahead/behind `0 0`，未创建 PR。只修改 `wan_repack.py` 及其文件格式回归：保留 loader 识别的 `attn1.q_rot/k_rot` 名称、独立转换 JSON-only attention 元数据，并在模板缺 `model_index.json` 或 transformer config 时先报错。G2.2/G2.3 的分支与 SHA 保持不变；该工具生成的同一份 checkpoint 将用于两边对照，无需把工具提交混入运行时分支。
+### 2026-10-14 G2 运行交接与工具记录
 
-验证为真实 CPU safetensors 文件读写的 4 项隔离回归（含 TI2V 单 transformer、I2V 双 transformer、FP8/uint8/BF16 字节保留及模板缺失）：基线出现 rotation 键错误、JSON-only 元数据缺失和缺配置未拒绝，修复后通过。harness 直接加载真实 converter、logging、CI 注册模块，仅绕过 SGLang 包初始化；标准入口仍缺 `orjson`，未运行 NPU。证据 `/tmp/g2-repack-red.log`、`/tmp/g2-repack-green.log`，harness `/tmp/g2_repack_test_harness.py`。lint、format、语法及 diff 检查通过。服务器源权重检查与后续命令见目标表 G2.2 段落。
-
-2026-10-14 I2V 检查后继续在同一工具分支修复多描述文件选择：用户的 high/low noise 目录均同时含 `quant_model_description_w8a8_fp8_only.json`（607 个 FLOAT weight）和 `quant_model_description_w8a8_mxfp8.json`（400 个 MXFP8 + 207 个 FLOAT weight）。旧代码排序取首项，会把实际 FP8/uint8 权重配上全 FLOAT 描述。新增 `--quant-description-file`，在每个 expert 目录分别解析指定文件；默认多候选时拒绝，并在复制模板前检查全部 expert。提交 [`1916bc208baa931c3bd834d55f778c70d7d154d2`](https://github.com/TallMessiWu/sglang/commit/1916bc208baa931c3bd834d55f778c70d7d154d2) 已普通推送至原分支，local/remote SHA 相同、ahead/behind `0 0`，未创建 PR。
-
-本轮 7 项隔离 CPU 文件回归通过：保留原 4 项，新增多候选拒绝、真实 CLI 双 expert 分别选择和选择错误提前拒绝。修改前，多候选测试未按预期拒绝，新增接口测试也因接口尚不存在失败；修复后通过。证据 `/tmp/g2-repack-description-red.log`、`/tmp/g2-repack-description-green.log`。仅绕过包初始化，converter、argparse、文件读写使用真实代码；lint、format、语法和 diff 检查通过，不计 NPU 验收。`validation/run_g2.sh` 固定新 SHA，新建 checkout 名称带 SHA 后缀，避免与用户已有旧版本 detached worktree 冲突；同 SHA 仍优先复用。
-
-2026-10-14 15:23 用户服务器实际执行：主仓 `/mnt/share/hajimi/sglang_quant_eval` 下创建 detached worktree `sglang/g2_validation_repack_1916bc208b`，HEAD `1916bc208baa931c3bd834d55f778c70d7d154d2`，Python 为 `/usr/local/python3.11.10/bin/python3`。回传 `/tmp/g2-repack-FYhE4Mpr/run.log` 显示 repack 完成；输出权重及元数据核对证据统一见 G2.2 目标段落。该路径属于用户服务器，不能与本机 worktree 注册表混同，亦不代表 G2.2/G2.3 运行时已执行。
-
-2026-10-14 局部复核：G2.1、G2.2、G2.3 及 mixed gate/up 四个 worktree 的本地 HEAD 与实时 `git ls-remote origin` 相同，分别为 `24e100f1e8429bde02f3e81221c4392e9e69934b`、`6eb8e1dd1c91678284d1355cdb182a85ab4e9863`、`d6a46f90d97039e14476be47468c996f11caf603`、`2ef4c276be4b3fa6b7e4578a2d738ec00c0dd668`；工作区干净。mixed gate/up 是 G2.1 + 混精兼容 + resize 兼容，没有叠加 G2.2 / G2.3。此核对不刷新其他 PR 的 CI / review / 合入状态。
+- **交接复核**：本轮 `git worktree list --porcelain` 与 `git ls-remote origin` 确认 G2.1、G2.2、G2.3、mixed gate/up 和 repack 的 SHA 与上表一致；G2.2、G2.3、repack 工作区干净。origin/upstream 为 `TallMessiWu/sglang` / `sgl-project/sglang`。本轮未刷新其他 PR 的 CI/review/合入状态。
+- **运行分支保持独立**：G2.2 `6eb8e1dd1c` 与 G2.3 `d6a46f90d9` 均以 `62ff466ac0` 为基线，不包含彼此或 mixed gate/up + resize 兼容实现。已有独立 detached 基线目录仅供可选对照，本轮不再使用验收 wrapper；后续由用户手动选择服务器分支。具体命令、模型与验证状态统一见 [G2.3 接手入口](mxfp-refactoring-plan.md#g23-handoff)。
+- **repack 独立工具分支**：`6e19df8e6f` 修正 rotation/JSON 键映射和模板预检查；`1916bc208b` 增加 `--quant-description-file`，拒绝多候选时静默误选全 FLOAT 描述。7 项隔离 CPU 文件回归通过，使用真实 converter/argparse/文件读写，非 NPU 验收。工具提交无需合入运行分支。格式陷阱见 [Wan ModelSlim repack](known-pitfalls.md#wan-modelslim-repack)。
+- **服务器转换证据**：用户于 15:23 使用工具 `1916bc208baa931c3bd834d55f778c70d7d154d2`，在 `/mnt/share/hajimi/sglang_quant_eval/sglang/g2_validation_repack_1916bc208b` 完成 repack，日志为历史路径 `/tmp/g2-repack-FYhE4Mpr/run.log`，Python 为 `/usr/local/python3.11.10/bin/python3`。两套输出各保留 400 个 MXFP8 weight/scale、207 个 FLOAT weight、80 个 rotation，元数据检查通过；不等于全量张量字节或数值对照。服务器目录不属于本机 worktree 注册表。
+- **主仓入口提交**：`be39df1` 新增 `diffusion/i2v_offline_mxfp8.sh`，`a3e81f1` 将 I2V 高度改为 720，`5cd621f` 记录用户的 G2.2 输出成功与观感正常反馈。脚本调用当前环境的 `sglang generate`，视频、日志、临时文件与缓存写入执行目录下 `outputs_i2v_mxfp8/`。G2.3 尚待下一会话运行，进度以目标表为准。
 
 2026-10-13：在原 `junlin/modelslim-mixed-gate-up` 分支及其 `sglang/modelslim_mixed_gate_up/` worktree 中回移上游 [#43309](https://github.com/sgl-project/sglang/pull/43309) 的 `c6e822c29b9bb3d392e65a7bcb271a5d2d63613d`。实时 GitHub 查询确认该 PR 于 2026-10-12 合入；回移后的 `qwen_vl_processor.py` Git blob 与上游提交相同（`c5c9ea5c24180459e8faf16623fac26d13242a85`）。修复 Transformers 5.19 图片/视频 resize 的参数与 size 契约；标准补丁为 `llm/patches/qwen_vl_processor_transformers_519.patch`。旧代码在真实 HF resize 函数体的隔离 CPU harness 中复现相同图片 TypeError，回移后图片、批次顺序、禁用 resize 和视频时间维度四项契约检查通过，插值后端/分组叶子被隔离，不计为 NPU warmup 或生成精度通过。修复以 [`2ef4c276be4b3fa6b7e4578a2d738ec00c0dd668`](https://github.com/TallMessiWu/sglang/commit/2ef4c276be4b3fa6b7e4578a2d738ec00c0dd668) 提交并普通推送至 `origin/junlin/modelslim-mixed-gate-up`，本地与远端 SHA 相同、ahead/behind `0 0`；没有创建 PR。按用户要求，新建的 `junlin/npu-qwen-vl-resize-compat` 本地/远端分支及对应 worktree 已删除，后续修复继续在原分支推进。用户要求优先修复精度问题，预处理补丁收敛的待办见 `mxfp-refactoring-plan.md` 第 6 节。
 

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-    echo "Usage: $0 linear|boundary|capabilities|wan-baseline|wan-g22|wan-g23 SGLANG_CHECKOUT [probe arguments]" >&2
+    echo "Usage: $0 linear|boundary|capabilities|wan-baseline|wan-g22|wan-g23|repack SGLANG_CHECKOUT [arguments]" >&2
     exit 2
 fi
 mode=$1
@@ -14,11 +14,14 @@ python_bin=${PYTHON:-python3}
 baseline=62ff466ac0c2cdd5521acf7d4c673fa7630eb083
 g22=6eb8e1dd1c91678284d1355cdb182a85ab4e9863
 g23=d6a46f90d97039e14476be47468c996f11caf603
+repack_head=6e19df8e6f8b1647116cf1e8f3311fb7e07aba2d
 case "$mode" in
     linear|boundary|wan-baseline|wan-g22)
         head=$g22; branch=junlin/diffusion-mxfp8-shared-execution ;;
     capabilities|wan-g23)
         head=$g23; branch=junlin/ascend-mxfp-capabilities ;;
+    repack)
+        head=$repack_head; branch=junlin/wan-repack-rotation-keys ;;
     *) echo "Unknown mode: $mode" >&2; exit 2 ;;
 esac
 
@@ -59,6 +62,20 @@ PY
 }
 
 source=$(prepare "$head" "g2_validation_${mode//-/_}")
+if [[ "$mode" == repack ]]; then
+    if [[ -n "$(git -C "$source" status --porcelain --untracked-files=normal)" ]]; then
+        echo "Refusing to repack using a dirty checkout: $source" >&2
+        exit 1
+    fi
+    echo "Source: $source @ $head"
+    printf 'Repack command:'
+    printf ' %q' "$python_bin" "$source/python/sglang/multimodal_gen/tools/wan_repack.py" "$@"
+    printf '\n'
+    PYTHONPATH="$source/python${PYTHONPATH:+:$PYTHONPATH}" \
+        "$python_bin" -u "$source/python/sglang/multimodal_gen/tools/wan_repack.py" "$@"
+    echo "Repack completed; this is not an NPU validation result. Log: $evidence/run.log"
+    exit 0
+fi
 extra=()
 case "$mode" in
     linear)

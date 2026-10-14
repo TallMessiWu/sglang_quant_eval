@@ -75,7 +75,7 @@ Scheme：格式相关参数、loader metadata、scale / packing 契约
 | G1.1 | 修正 MXFP8 partial-scale 与布局边界 | 已有对应修复；Diffusion loader 仍需单独核对 | 余块与奇数 scale 的表示、分片后 shape 和目标 NPU 验证；占位修正不等于任意 K 可运行 | #32745；状态见下方 PR 表 |
 | G1.2 | 补在线 MoE W4A8 / W4A4 与实际精度分配 | 两条功能分支已有实现，保持各自能力增量 | 专家确实量化；层级精度、融合、dispatch、TP/EP 与在线 RTN 精度需有证据 | #43739（原 #32601）/ #32602；状态见 PR 表 |
 | **G2.1** | **Dense W4A8 在线/离线公共执行** | **实现已提交并推送** | 8 个 CPU/mock 测试；2026-10-14 在线、离线启动与请求功能均获用户真机正常反馈；在线视觉 27 个 fc2 保留既有 BF16 回退。两入口及重构前后 NPU 数值对照待补，尚未完成完整验收 | 实现 `24e100f1e8`，离线验收载体 `2ef4c276be`；发布/合入单独跟踪 |
-| **G2.2** | **Diffusion 离线 MXFP8 委托公共 kernel** | **实现已提交并推送** | 3 个 CPU/mock 测试、27 组旧/新调用契约对照通过；真实 checkpoint、warmup、图片请求、硬件数值/性能待补，尚未整体验收 | `6eb8e1dd1c`；独立分支，发布核验记录见 `branches.md` |
+| **G2.2** | **Diffusion 离线 MXFP8 委托公共 kernel** | **实现已提交并推送** | 3 个 CPU/mock 测试、27 组调用契约对照通过；用户已回传 TI2V MXFP8 权重格式检查，repack 工具兼容已修复；真实加载、warmup、图片请求、硬件数值/性能待补 | `6eb8e1dd1c`；独立分支，发布核验记录见 `branches.md` |
 | **G2.3** | **Ascend MXFP 局部能力描述与提前校验** | **局部试点已提交并推送** | 17 条能力描述实际接入校验/fallback/文档；14 个 CPU/mock 测试通过；原支持路径与 TP/EP/backend 的硬件 probe 待补 | `d6a46f90d9`；独立分支，发布核验记录见 `branches.md` |
 | G3 | 权重生命周期与公共在线入口 | 待设计 / 实施，与公共框架工作协调 | 参数、元数据、重载语义明确；入口迁移兼容既有 CLI | 尚未拆出交付 PR |
 | G4 | 跨代际差异按契约归属收敛 | Gemma 切片已有实现；整体未完成 | provider 可追溯；构建 target、API 与配套 wheel 验证；只在必要处引入运行时契约层 | kernel #638 + #32745；状态见 PR 表 |
@@ -166,6 +166,34 @@ python3 validation/inspect_wan.py \
 ```
 
 目标分支的 `python/sglang/multimodal_gen/tools/wan_repack.py` 已支持 TI2V-5B 单 transformer 和 I2V/T2V-A14B 双 transformer；输入为同架构的 Diffusers 原模型及 ModelSlim `quant_model_weight*.safetensors` / `quant_model_description*.json`，负责复制组件、改参数名、恢复 transformer config，不负责量化。`w8a8c8` 名称不能证明 Linear 是 `W8A8_MXFP8`；确认浮点 FP8 weight、uint8 UE8M0 scale 及 rotation 契约后，才能决定是否复用。未开始下载或 repack。官方原模型可查 [TI2V-5B](https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B-Diffusers/tree/main)、[I2V-A14B](https://huggingface.co/Wan-AI/Wan2.2-I2V-A14B-Diffusers/tree/main)、[T2V-A14B](https://huggingface.co/Wan-AI/Wan2.2-T2V-A14B-Diffusers/tree/main)，优先利用已有 TI2V 目录。
+
+**2026-10-14 用户回传只读检查结果**：`/mnt/weight/Wan2.2-TI2V-5B-w8a8c8-self-attn-bf16-rot` 为原始 Wan 命名的 ModelSlim checkpoint，30 层、dim=3072、ffn_dim=14336、24 heads、in/out_dim=48。量化 JSON 中 `.weight` 有 300 个 `W8A8_MXFP8` 和 157 个 `FLOAT`；safetensors header 有 F8_E4M3=300、U8=300、F32=300、BF16=285，含 60 个 BF16 `[128,128]` Q/K rotation 张量。示例 weight `[3072,3072]` 对 scale `[3072,96]`，FFN `[3072,14336]` 对 scale `[3072,448]`，符合 32 元素 scale block；量化 weight 缺失列表为空。量化描述 SHA256 为 `a3ae64a2be1907a4cc28ea49d7fac1df393f8f68202a9bda405401552ae93791`。这是元数据匹配证据，未读取/验证所有张量数值，未证明 NPU 可运行。
+
+原始 `/mnt/weight/Wan2.2-TI2V-5B` 的 3 个 transformer 分片共 825 个 F32 张量，非 Diffusers 格式。`/mnt/share/weight/Wan2.2-TI2V-5B-Diffusers` 只有外层 `Wan-AI` 目录；用户进一步执行 `find -L ... -maxdepth 7` 查找 `model_index.json`、`config.json` 和 `*.incomplete` 返回空，当前不能作为 repack 模板。不能由此推断服务器其他目录也无可复用组件。
+
+同时静态复现现有 repack 的兼容缺陷：`self_attn.q_rot/k_rot` 被前缀替换成 `attn1.to_q_rot/to_k_rot`，而 Wan 的 offline rotation opt-in 查询量化 JSON 中的 `attn1.q_rot/k_rot`；JSON-only `quant_type` 未同步改名。独立工具修复 `6e19df8e6f` 已发布，另加模板必需配置缺失时的提前拒绝；4 项隔离 CPU 文件回归及边界见 [branches.md](branches.md#current-branch-map)。该修复不启用 MXFP8 attention、不改变量化 scheme 或张量值，不能作为硬件通过证据。
+
+服务器下一步（主仓根目录、激活服务 Python 环境）：从官方仓库只补齐 repack 所需组件，保留 transformer config，不下载将被替换的约 20 GB transformer 权重；模板自身不能用于在线 MXFP8 冒烟。下载命令使用官方 [HF CLI 的 include/local-dir 参数](https://huggingface.co/docs/huggingface_hub/en/guides/cli#download-multiple-files)。尚未收到下载或真实 repack 成功回报。
+
+```bash
+hf download Wan-AI/Wan2.2-TI2V-5B-Diffusers \
+  --include 'model_index.json' 'transformer/config.json' \
+            'scheduler/*' 'text_encoder/*' 'tokenizer/*' 'vae/*' 'examples/*' \
+  --local-dir /mnt/share/weight/Wan2.2-TI2V-5B-Diffusers-Repack-Template
+
+# 第二参数换成服务器已有的 SGLang git checkout；无需切换部署分支。
+bash validation/run_g2.sh repack /实际/SGLang/checkout \
+  --model-type Wan2.2-TI2V-5B \
+  --original-model-path /mnt/share/weight/Wan2.2-TI2V-5B-Diffusers-Repack-Template \
+  --quant-path /mnt/weight/Wan2.2-TI2V-5B-w8a8c8-self-attn-bf16-rot \
+  --output-path /mnt/share/weight/Wan2.2-TI2V-5B-Diffusers-MXFP8-G2
+
+python3 validation/inspect_wan.py \
+  /mnt/share/weight/Wan2.2-TI2V-5B-Diffusers-MXFP8-G2 \
+  > /tmp/g2_wan_repacked_inventory.json
+```
+
+`repack` 模式固定工具提交、拒绝脏 checkout、复用/创建 `sglang/` 直属 worktree，保存完整命令及 `/tmp/g2-repack-…/run.log`；输出目录必须不存在。模板缺配置会在复制大文件前终止。转换后应核对 300 个 MXFP8 weight/scale、60 个 rotation 与量化描述中的 `blocks.*.attn1.q_rot/k_rot=FLOAT`，再做 checkpoint load/warmup。下载的官方 `examples/i2v_input.JPG` 可作为固定图片候选，需确认服务器文件存在；baseline/G2.2/G2.3 使用同一份 repacked checkpoint 和输入。
 
 无需模型的 NPU 数值入口：激活与服务相同的环境，在主仓根目录运行（第二参数可换成服务器任一已有 SGLang checkout；`PYTHON` 可指定服务 Python）：
 

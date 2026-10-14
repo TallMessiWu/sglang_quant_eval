@@ -23,11 +23,16 @@
 | G2.2：Diffusion MXFP8 公共执行 | `junlin/diffusion-mxfp8-shared-execution` | `6eb8e1dd1c` | `sglang/diffusion_mxfp8_shared_execution/` |
 | G2.3：Ascend MXFP 能力校验 | `junlin/ascend-mxfp-capabilities` | `d6a46f90d9` | `sglang/ascend_mxfp_capabilities/` |
 | G2.2 / G2.3 数值与模型对照基线 | detached HEAD（只读对照） | `62ff466ac0` | `sglang/g2_validation_baseline/` |
+| Wan repack rotation / 量化元数据兼容 | `junlin/wan-repack-rotation-keys` | `6e19df8e6f` | `sglang/wan_repack_rotation_keys/` |
 | ModelSlim Dense gate/up 混合精度与预处理兼容 | `junlin/modelslim-mixed-gate-up` | `2ef4c276be` | `sglang/modelslim_mixed_gate_up/` |
 
 G2.1 的开发基线为 #43739 的 `ded4671577`；G2.2 / G2.3 的建分支基线均为 `62ff466ac0`。实现与验收进度见目标跟踪表，不由 HEAD 或目录存在与否推断。
 
 2026-10-14 验收工具准备：再次实时核实 G2.2 / G2.3 origin 分支仍分别为 `6eb8e1dd1c` / `d6a46f90d9`，两个功能 worktree 均干净；在 `sglang/` 下新增上述 detached 基线 worktree，没有修改生产实现或叠加兼容提交。`validation/run_g2.sh` 获取固定分支后核对 SHA，复用同 SHA 的直属 worktree，缺失时只新建 detached 验收 checkout，不切换、重置已有分支。主仓预存的未跟踪 `validation/g2_npu.py` 经审查补齐；`.pi/` 和 kernel 原有差异保留。
+
+2026-10-14 Wan 格式检查后新增独立工具修复：从 `62ff466ac0` 建立直属 worktree `sglang/wan_repack_rotation_keys/`，提交 [`6e19df8e6f8b1647116cf1e8f3311fb7e07aba2d`](https://github.com/TallMessiWu/sglang/commit/6e19df8e6f8b1647116cf1e8f3311fb7e07aba2d) 并普通推送至 `origin/junlin/wan-repack-rotation-keys`，local/remote SHA 相同、ahead/behind `0 0`，未创建 PR。只修改 `wan_repack.py` 及其文件格式回归：保留 loader 识别的 `attn1.q_rot/k_rot` 名称、独立转换 JSON-only attention 元数据，并在模板缺 `model_index.json` 或 transformer config 时先报错。G2.2/G2.3 的分支与 SHA 保持不变；该工具生成的同一份 checkpoint 将用于两边对照，无需把工具提交混入运行时分支。
+
+验证为真实 CPU safetensors 文件读写的 4 项隔离回归（含 TI2V 单 transformer、I2V 双 transformer、FP8/uint8/BF16 字节保留及模板缺失）：基线出现 rotation 键错误、JSON-only 元数据缺失和缺配置未拒绝，修复后通过。harness 直接加载真实 converter、logging、CI 注册模块，仅绕过 SGLang 包初始化；标准入口仍缺 `orjson`，未运行 NPU。证据 `/tmp/g2-repack-red.log`、`/tmp/g2-repack-green.log`，harness `/tmp/g2_repack_test_harness.py`。lint、format、语法及 diff 检查通过。服务器源权重检查与后续命令见目标表 G2.2 段落。
 
 2026-10-14 局部复核：G2.1、G2.2、G2.3 及 mixed gate/up 四个 worktree 的本地 HEAD 与实时 `git ls-remote origin` 相同，分别为 `24e100f1e8429bde02f3e81221c4392e9e69934b`、`6eb8e1dd1c91678284d1355cdb182a85ab4e9863`、`d6a46f90d97039e14476be47468c996f11caf603`、`2ef4c276be4b3fa6b7e4578a2d738ec00c0dd668`；工作区干净。mixed gate/up 是 G2.1 + 混精兼容 + resize 兼容，没有叠加 G2.2 / G2.3。此核对不刷新其他 PR 的 CI / review / 合入状态。
 

@@ -24,3 +24,4 @@ __pycache__/
 
 # G2 run artifacts are written beneath the caller's current directory.
 g2-*/
+outputs_i2v_mxfp8/

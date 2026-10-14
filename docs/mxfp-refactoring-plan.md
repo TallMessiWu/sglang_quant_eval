@@ -208,18 +208,13 @@ python3 validation/inspect_wan.py \
 
 同次日志有 SciPy 对 NumPy 2.4.6 超出其声明范围 `[1.22.4, 2.3.0)` 的告警，未中断转换；不据此修改服务环境或认定硬件故障。后续用户明确要求跳过数值对照，直接运行模型，有问题再定位；不再把 `linear` / `capabilities` 作为启动前置。模型数值、性能和 G2.3 全部能力仍无实测结论。
 
-**2026-10-14 当前运行入口**：用户要求所有输出落在执行命令的当前目录。`run_g2.sh` 已将日志、媒体、TMPDIR 及 Hugging Face/PyTorch/Triton/SGLang Diffusion 缓存放在 `./g2-<mode>-…/` 下；历史 `/tmp` 路径仅保留为已执行证据，不再用于新命令。`--smoke` 仅加载模型并生成一次，不另跑 warmup、重复计时或基线对照。主仓保留 `main`，脚本自动选择 G2.2 的 `junlin/diffusion-mxfp8-shared-execution` 固定源码，无需切换已有 checkout：
+**2026-10-14 当前运行入口**：按用户最新要求，沿用 `diffusion/` 的普通生成脚本，在 `diffusion/i2v_offline_mxfp8.sh` 中直接调用当前环境的 `sglang generate`。固定使用已 repack 的 I2V 权重和脚本旁的 `gyro.jpg`，704×1280、81 帧、40 步；不使用验收 wrapper 或 smoke 模式，不自动 fetch、切换分支、创建 worktree 或修改 PYTHONPATH。用户手动选择 SGLang 分支：G2.2 为 `junlin/diffusion-mxfp8-shared-execution`，G2.3 为 `junlin/ascend-mxfp-capabilities`。两分支独立，使用同一个启动脚本。主仓根目录执行：
 
 ```bash
-ASCEND_RT_VISIBLE_DEVICES=0 bash validation/run_g2.sh wan-g22 sglang \
-  --smoke \
-  --model-path /mnt/share/weight/Wan2.2-I2V-A14B-Diffusers-MXFP8-G2 \
-  --image-path "$PWD/diffusion/gyro.jpg" \
-  --prompt "The subject moves naturally, gentle motion, static camera." \
-  --height 704 --width 1280 --num-frames 81 --num-inference-steps 40
+ASCEND_RT_VISIBLE_DEVICES=0 bash diffusion/i2v_offline_mxfp8.sh
 ```
 
-G2.3 单独运行时只把 `wan-g22` 换为 `wan-g23`（`junlin/ascend-mxfp-capabilities`）；两个分支独立，没有将本次启动表述为两者的集成或完整验收。
+视频、追加写入的 `run.log`、临时文件及可配置的 Hugging Face/PyTorch/Triton/SGLang Diffusion 缓存均位于执行命令的当前目录下 `./outputs_i2v_mxfp8/`。历史 `/tmp` 路径仅保留为已执行证据。之前准备的 `validation/` 工具不再作为本轮运行入口；跳过比较是用户选择，未将其记作 NPU 数值验证通过。
 
 可选的无需模型 NPU 数值入口（本轮跳过）：激活与服务相同的环境，在主仓根目录运行（第二参数可换成服务器任一已有 SGLang checkout；`PYTHON` 可指定服务 Python）：
 

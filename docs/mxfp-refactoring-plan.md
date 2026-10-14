@@ -75,7 +75,7 @@ Scheme：格式相关参数、loader metadata、scale / packing 契约
 | G1.1 | 修正 MXFP8 partial-scale 与布局边界 | 已有对应修复；Diffusion loader 仍需单独核对 | 余块与奇数 scale 的表示、分片后 shape 和目标 NPU 验证；占位修正不等于任意 K 可运行 | #32745；状态见下方 PR 表 |
 | G1.2 | 补在线 MoE W4A8 / W4A4 与实际精度分配 | 两条功能分支已有实现，保持各自能力增量 | 专家确实量化；层级精度、融合、dispatch、TP/EP 与在线 RTN 精度需有证据 | #43739（原 #32601）/ #32602；状态见 PR 表 |
 | **G2.1** | **Dense W4A8 在线/离线公共执行** | **实现已提交并推送** | 8 个 CPU/mock 测试；2026-10-14 在线、离线启动与请求功能均获用户真机正常反馈；在线视觉 27 个 fc2 保留既有 BF16 回退。两入口及重构前后 NPU 数值对照待补，尚未完成完整验收 | 实现 `24e100f1e8`，离线验收载体 `2ef4c276be`；发布/合入单独跟踪 |
-| **G2.2** | **Diffusion 离线 MXFP8 委托公共 kernel** | **实现已提交并推送** | 3 个 CPU/mock 测试、27 组调用契约对照通过；I2V 两套 MXFP8 元数据已核对，repack 多 JSON 选择问题已修复；转换、真实加载、warmup、图片请求和硬件数值/性能待补 | `6eb8e1dd1c`；独立分支，发布核验记录见 `branches.md` |
+| **G2.2** | **Diffusion 离线 MXFP8 委托公共 kernel** | **实现已提交并推送** | 3 个 CPU/mock 测试、27 组调用契约对照通过；I2V 已获用户服务器 repack 成功日志，双 transformer 输出元数据核对通过；真实加载、warmup、图片请求和硬件数值/性能待补 | `6eb8e1dd1c`；独立分支，发布核验记录见 `branches.md` |
 | **G2.3** | **Ascend MXFP 局部能力描述与提前校验** | **局部试点已提交并推送** | 17 条能力描述实际接入校验/fallback/文档；14 个 CPU/mock 测试通过；原支持路径与 TP/EP/backend 的硬件 probe 待补 | `d6a46f90d9`；独立分支，发布核验记录见 `branches.md` |
 | G3 | 权重生命周期与公共在线入口 | 待设计 / 实施，与公共框架工作协调 | 参数、元数据、重载语义明确；入口迁移兼容既有 CLI | 尚未拆出交付 PR |
 | G4 | 跨代际差异按契约归属收敛 | Gemma 切片已有实现；整体未完成 | provider 可追溯；构建 target、API 与配套 wheel 验证；只在必要处引入运行时契约层 | kernel #638 + #32745；状态见 PR 表 |
@@ -186,7 +186,7 @@ python3 validation/inspect_wan.py \
 
 `high_noise_model` / `low_noise_model` 各有一个 14,973,550,688 字节的 `quant_model_weight_w8a8_mxfp8.safetensors`，每套 F8_E4M3=400、U8=400、F32=400、BF16=375，含 80 个 BF16 `[128,128]` Q/K rotation。各套的 MXFP8 JSON 均为 400 个 `W8A8_MXFP8` weight + 207 个 FLOAT weight，量化 weight 缺失列表为空；示例 `[5120,5120]` weight / `[5120,160]` scale、FFN `[5120,13824]` / `[5120,432]` 与模板维度及 block32 一致。描述 SHA256 均为 `1e790aff767b3d7fe63e737066d698a1704bbc2dd6be61372ae7a61bebb88634`。这是配置/header 证据，不代表完整张量数值或硬件通过。
 
-两个源目录另有 `quant_model_description_w8a8_fp8_only.json`，SHA256 `6331d56d68d10100c5876f0cf66966c257c1ec7641ca60f8ba0f526d4b168824`，其 607 个 weight 均标为 FLOAT。旧 repack 排序取第一份 JSON 会误选它。固定工具已升级为 `1916bc208b`，显式使用下方 MXFP8 描述文件；不修改源描述或权重内容。该工具仍将 `high_noise_model → transformer`、`low_noise_model → transformer_2`，G2.2/G2.3 运行时分支无需叠加工具提交。下一步转换命令如下；尚未收到真实 I2V repack 或 NPU 结果：
+两个源目录另有 `quant_model_description_w8a8_fp8_only.json`，SHA256 `6331d56d68d10100c5876f0cf66966c257c1ec7641ca60f8ba0f526d4b168824`，其 607 个 weight 均标为 FLOAT。旧 repack 排序取第一份 JSON 会误选它。固定工具已升级为 `1916bc208b`，显式使用下方 MXFP8 描述文件；不修改源描述或权重内容。该工具仍将 `high_noise_model → transformer`、`low_noise_model → transformer_2`，G2.2/G2.3 运行时分支无需叠加工具提交。以下转换命令已获用户服务器成功回报，输出目录已存在，后续验收直接复用：
 
 ```bash
 # 第二参数换成服务器已有的 SGLang git checkout；无需切换部署分支。
@@ -203,6 +203,10 @@ python3 validation/inspect_wan.py \
 ```
 
 `repack` 模式固定工具提交、拒绝脏 checkout、复用/创建 `sglang/` 直属 worktree，保存完整命令及 `/tmp/g2-repack-…/run.log`；输出目录必须不存在。模板缺配置、描述文件缺失或多候选未选择会在复制大文件前终止。转换后每套 transformer 应保留 400 个 MXFP8 weight + 207 个 FLOAT weight、400 个 FP8 权重及 uint8 scale、80 个 rotation，并核对量化描述中的 `blocks.*.attn1.q_rot/k_rot=FLOAT`，再做 checkpoint load/warmup。baseline/G2.2/G2.3 使用同一份 repacked checkpoint 和输入图片；实际图片路径仍待确认。
+
+**2026-10-14 15:23 用户服务器 repack 成功**：日志 `/tmp/g2-repack-FYhE4Mpr/run.log`，实际 Python `/usr/local/python3.11.10/bin/python3`，工具源码为 `/mnt/share/hajimi/sglang_quant_eval/sglang/g2_validation_repack_1916bc208b`、HEAD `1916bc208baa931c3bd834d55f778c70d7d154d2`。已生成 `/mnt/share/weight/Wan2.2-I2V-A14B-Diffusers-MXFP8-G2`，回传检查结果 `/tmp/g2_i2v_repacked_inventory.json`。两套 transformer 各有 400 个 `W8A8_MXFP8` weight + 207 个 FLOAT weight，header 的 F8_E4M3=400、U8=400、F32=400、BF16=375 与输入一致，80 个 rotation 保留；示例 rotation 与 JSON 已改为 `attn1.q_rot/k_rot`，`model_quant_type=W8A8_MXFP8`，量化 weight 缺失列表为空。两份输出描述 SHA256 均为 `c3d6cfcc0bb54e01a6a54a896b53adf108cba07528626583eef920be9656e6ba`，每套 safetensors 为 14,973,551,240 字节。模型/transformer/text_encoder/VAE config 及已检查的非 transformer header 与转换前一致。结论仅为服务器转换完成、输出元数据匹配，未做全量张量字节对照或 NPU load/warmup/生成。
+
+同次日志有 SciPy 对 NumPy 2.4.6 超出其声明范围 `[1.22.4, 2.3.0)` 的告警，未中断转换；不据此修改服务环境或认定硬件故障。下一步在同一服务 Python 环境、空闲 NPU 上分别运行 `linear` 和 `capabilities`，先取得 G2.2 的 108 组实际算子对照及 G2.3 的真实 post-load/apply 日志，再用上述 checkpoint 进行完整模型对照。模型数值、性能和 G2.3 全部能力的状态仍未验收。
 
 无需模型的 NPU 数值入口：激活与服务相同的环境，在主仓根目录运行（第二参数可换成服务器任一已有 SGLang checkout；`PYTHON` 可指定服务 Python）：
 

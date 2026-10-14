@@ -57,12 +57,13 @@
 - 先确认目标 worktree、分支、diff 和用户已有改动；保留不相关的脏文件。
 - 优先做最小、可证伪验证。Python 语法、AST、shape probe 和 CPU 单测只能证明静态契约，不能表述为 A5/A2/A3 端到端通过。
 - NPU kernel/layout 变更需要对应硬件 probe；模型加载、warmup、文本/图片请求、精度和性能结论需要真实 e2e 日志。
+- 用户真机反馈可记录为对应场景的功能通过，并标明证据来源；不能扩写为本机已执行、完整数值等价、性能或未报告配置的验收。旧故障与后续复测结论按日期区分。
 - 大规模 merge/rebase 后先重新跑 baseline，再叠加新改动，避免把上游移植回归误归因于当前修改。
 - PR head、CI、review、remote、依赖和 worktree 都是时效信息；报告或修改前实时查询 GitHub，并与本地 `HEAD` 对照。
 
 ## 提交与发布
 
-- 用户要求提交时使用 `gitmoji-commit` skill 生成 Gitmoji 英文提交信息。
+- 需要服务器拉取的代码和启动脚本改动，完成验证后默认使用 `gitmoji-commit` skill 提交并普通推送，不等用户重复提醒；明确要求暂不提交的内容除外。文档遵循当次授权，用户要求提交文档时一并发布。
 - 提交完直接 push，不要停下来问；未经确认不得 `--force` / `--force-with-lease` 改写已发布历史。push 后核对本地与远端 SHA（ahead/behind `0 0`）并报出。
 - 每个 PR 只担一个职责；可分离的移植另开 PR，且要用户点名后才建。细节见 [docs/agents/upstream-conventions.md](docs/agents/upstream-conventions.md)。
 - SGLang 改动在对应 `sglang/<worktree>/` 中提交并推到 `origin`；主仓无需更新 SGLang 指针。

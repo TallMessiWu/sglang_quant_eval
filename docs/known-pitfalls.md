@@ -1,7 +1,7 @@
 # 已知陷阱详解
 
-> 每个陷阱的完整根因分析、调试过程、修复方法。
-> CLAUDE.md 中只保留标题 + 一句话结论 + 指向本文档对应锚点的链接。
+> 已确认的故障机制、适用条件，以及尚未定位问题的诊断边界。
+> 流程规则见 AGENTS.md；分支证据和当前验收分别见 branches.md 与 mxfp-refactoring-plan.md。
 
 ## 量化不生效/乱码输出
 
@@ -172,6 +172,30 @@ vLLM-Ascend 把 Qwen3.5 的 fused `experts` 映射成 `experts.0.gate_proj` / `u
 - 位宽口径：W4A8 = `act=mxfp8` + `weight=mxfp4`；W4A4 = 两者都 `mxfp4`。混合 scheme 要显式保留 attention 的 MXFP8 例外，别叫它「全层 W4A8」。
 
 ---
+
+<a id="modelslim-mixed-gate-up"></a>
+
+## Dense ModelSlim 的 gate/up 混精不能强行融合
+
+真实 Qwen3.6-27B checkpoint 可以是 `gate_proj=FLOAT`、`up_proj/down_proj=W4A8_MXFP`。原 fused `gate_up_proj` 的一致性 guard 会报 `Detected some but not all shards ... are quantized`；这不等于 checkpoint 缺 key，也不是公共 W4A8 apply 的数值回归。
+
+当前 Qwen3.5 Dense 兼容路径仅在完整、异构的 ModelSlim gate/up 描述下显式拆成两套 `ColumnParallelLinear`。两个 loader 保留独立 weight/scale canonical keys，各自处理 FLOAT 或 packed FP4；同精度仍融合，缺失描述仍受原 guard 保护。不能改量化 JSON 假装权重转换、删除一致性检查或二次打包 FP4，也不能把 Dense 的适配直接推广到 fused MoE experts。分支与验证证据见 [branches.md](branches.md)，当前验收见 [G2.1](mxfp-refactoring-plan.md#refactoring-status)。
+
+<a id="w4a8-alignment-fallback"></a>
+
+## 在线 W4A8 的 K=4304 视觉层回退提示
+
+`Mxfp4W4A8Config.get_quant_method()` 在 `input_size % 32 != 0` 时返回 `UnquantizedLinearMethod`。因此 `model.visual.blocks.0–26.mlp.linear_fc2` 的 K=4304（134×32+16）会逐层打印回退提示，保留非量化精度；当前用户 BF16 部署中即为 BF16。这不表示整个模型退回 BF16，也不能将请求正常记成这些层的 W4A8 验收通过。
+
+保护来自本 fork 的 `7aa87ddfab`（2026-07-24），当时记录的 FP4 matmul 错误为 `the k dim must to be aligned to 32, which is 4304`。该策略有配置回归，G2.1 公共执行重构保留了它。历史报错不证明当前所有 torch_npu/CANN 版本都有同样限制；是否解除保护需针对部署版本做 NPU probe，并同时验证输入/权重 padding、scale 配对与 NZ 表示。不能仅删除 guard，也不能直接套用 MXFP8 的 partial-scale 适配。全视觉 W4A8 是额外能力扩展，不是 G2.1 去重的新验收门槛。
+
+## graph 正常复测与 dtype、事件依赖的证据边界
+
+Qwen3.6-27B 部署曾出现 `chunk_state dtype must match initial_state`，显式设置 `SGLANG_MAMBA_SSM_DTYPE=bfloat16` 后可启动。该部署基线未覆盖时 SSM 回退 float32、conv 默认 BF16；诊断进程打印的默认 dtype 不等于服务中实际 pool dtype。通过 dtype 检查也不等于数值或完整推理通过。
+
+随后曾有禁 graph、重启后长文本恢复正常的对照；用户又确认去掉禁用参数并停止、重启服务后正常。当前记录为“用户真机功能复测通过，历史退化根因未证实”，不能把环境推测写成已定位根因，也不固化禁 graph 为修复。`207005 / EL0006 / bind sq cq failed` 属于另一份资源分配错误日志，不能直接与生成乱码归为同一根因。
+
+`replay_with_input_update()` 的 update/replay 并发顺序由 #40814 有意引入，另有 #40446 的 rebind fence；底层图更新是否通过事件保证依赖，必须核对**实际部署的** torch_npu 实现。不能凭过时注释、Python 两行顺序或一个假定底层无同步的 mock 就交换顺序，也不能拿 torch_npu master 代替部署版本作为结论。
 
 ## A8W4 `npu_quant_matmul` 的 bias 必须是 BF16 二维 `[1,N]`
 

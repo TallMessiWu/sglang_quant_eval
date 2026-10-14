@@ -30,16 +30,16 @@ Offline 启动脚本通常不显式传 `--quantization modelslim`；以 checkpoi
 | Dense W4A8 MXFP | 已合并 [#23650](https://github.com/sgl-project/sglang/pull/23650) | 是 | 是 |
 | Dense W4A4 MXFP4 | 已合并 [#23795](https://github.com/sgl-project/sglang/pull/23795)；packed loader 修复 [#32013](https://github.com/sgl-project/sglang/pull/32013) 已合并 | 双级 MXFP4 | 单级 packed MXFP4 |
 | MoE W8A8 MXFP8 | 已合并 [#30768](https://github.com/sgl-project/sglang/pull/30768) | 是 | 是 |
-| Qwen3.5 ModelSlim / 视觉塔 W8A8 适配 | Open Draft [#32266](https://github.com/sgl-project/sglang/pull/32266) | 复用已合并能力 | GDN mapping、视觉塔和 partial scale 适配 |
-| MoE W4A8 MXFP | 离线已合并 [#30318](https://github.com/sgl-project/sglang/pull/30318)；在线入口 Open Draft [#32601](https://github.com/sgl-project/sglang/pull/32601) | `--quantization mxfp_w4a8` 的 experts 分支，待 A5 验证闭环 | 是（`ModelSlimW4A8MXFP4MoE`） |
-| MoE W4A4 MXFP4 | 离线已合并 [#30319](https://github.com/sgl-project/sglang/pull/30319)；在线入口 Open Draft [#32602](https://github.com/sgl-project/sglang/pull/32602) | `--quantization mxfp4` 的 experts 分支，待 A5 验证闭环 | 是（`ModelSlimW4A4MXFP4MoE`） |
+| Qwen3.5 ModelSlim / 视觉塔 W8A8 适配 | 历史 [#32266](https://github.com/sgl-project/sglang/pull/32266)；组合参考 [#32745](https://github.com/sgl-project/sglang/pull/32745) / [#36426](https://github.com/sgl-project/sglang/pull/36426) | 复用已合并能力 | GDN mapping、视觉塔和 partial scale 适配 |
+| MoE W4A8 MXFP | 离线已合并 [#30318](https://github.com/sgl-project/sglang/pull/30318)；在线入口 [#43739](https://github.com/sgl-project/sglang/pull/43739)（原 [#32601](https://github.com/sgl-project/sglang/pull/32601)） | `--quantization mxfp_w4a8` 的 experts 分支，待 A5 验证闭环 | 是（`ModelSlimW4A8MXFP4MoE`） |
+| MoE W4A4 MXFP4 | 离线已合并 [#30319](https://github.com/sgl-project/sglang/pull/30319)；在线入口 [#32602](https://github.com/sgl-project/sglang/pull/32602) | `--quantization mxfp4` 的 experts 分支，待 A5 验证闭环 | 是（`ModelSlimW4A4MXFP4MoE`） |
 | Qwen3.5 Gemma RMSNorm on 950 | SGLang [#32745](https://github.com/sgl-project/sglang/pull/32745) + kernel [#638](https://github.com/sgl-project/sgl-kernel-npu/pull/638) | 构建期 wheel provider | 同一稳定 API |
 
 “已实现”不等于当前分支已完成硬件验收；以 PR 正文的最新 Validation/TODO 和真实 A5/A2/A3 日志为准。
 
-**在线 W4A8 的精度目前是空白，别把补丁或旧数字当现状**：本仓没有任何在线 W4A8 的端到端精度记录。目前唯一的实测是 2026-07-28 在 TP=4 上的 GSM8K —— BF16 `93.33` / 离线 W4A8 `93.71` / **在线 `mxfp_w4a8` `65.58`**；同月那个「让非 expert 的 `LinearBase` 回退 BF16」的实验随后被判为相对 main 的回退而撤销（见 [branches.md](branches.md) 的 #32601 一节），**所以精度问题并没有因此闭环**。要做的是用 `ignored_layers` 排除非专家层重测，而不是改 dispatch。
+**功能复测与精度评测分开记录**：Dense 在线/离线请求的用户真机反馈见 [G2.1 验收清单](mxfp-refactoring-plan.md#refactoring-status)，不等于 MoE 或整模型精度评测通过。历史记录有 2026-07-28 的 MoE TP=4 GSM8K：BF16 `93.33` / 离线 W4A8 `93.71` / 在线 `mxfp_w4a8` `65.58`；旧数字不能继承为当前 head 的结果。同月「让非 expert 的全部 `LinearBase` 回退 BF16」的实验已撤销，后续精度隔离应使用 `ignored_layers`，而非修改 dispatch。当前 PR 状态只维护在 [PR 跟踪表](mxfp-refactoring-plan.md#pr-merge-status)。
 
-MoE 的离线 MXFP4 路径已由上游 #30318 / #30319 落地，#32601 与 #32602 只剩在线量化入口；相关去重与注册表陷阱见 [known-pitfalls.md](known-pitfalls.md)。
+MoE 的离线 MXFP4 路径已由上游 #30318 / #30319 落地，#43739（原 #32601）与 #32602 跟踪在线量化入口；相关去重与注册表陷阱见 [known-pitfalls.md](known-pitfalls.md)。
 
 ## SGLang 关键路径
 
@@ -48,7 +48,7 @@ MoE 的离线 MXFP4 路径已由上游 #30318 / #30319 落地，#32601 与 #3260
 ### Diffusion
 
 - `multimodal_gen/runtime/layers/quantization/`
-  - `mxfp8_npu.py`、`mxfp4_npu.py`：在线量化
+  - `mxfp8.py`：在线 MXFP8 配置，选择 SRT 公共 `NPUMXFP8LinearMethod`；`mxfp4_npu.py`：在线 MXFP4
   - `modelslim.py`：离线 scheme 分发
   - `modelslim_mxfp8_scheme.py`、`modelslim_mxfp4_scheme.py`：离线实现
 
@@ -78,14 +78,15 @@ MoE 的离线 MXFP4 路径已由上游 #30318 / #30319 落地，#32601 与 #3260
 
 - ModelSlim W4A8/W4A4 权重为 packed FP4：`uint8 [out, in/2]`。创建参数时必须匹配物理 shape/dtype，post-load 不得二次打包。
 - MXFP 是纯 scale 格式；ModelSlim 公共 MoE 路径若读取 offset，应注册空 `weight_offset`，不能伪造零点。
-- 在线 W4A8 的 FP4 matmul 要求 `K % 32 == 0`；不对齐 Linear（例如视觉 FC2 的 `K=4304`）回退 BF16。
+- 当前在线 W4A8 配置按 `K % 32 == 0` 选择量化路径；不对齐 Linear（例如视觉 FC2 的 `K=4304`）保留非量化精度。该保护来自本 fork 的历史算子报错，不据此断言所有当前 torch_npu/CANN 版本都不支持 partial block，详见 [对齐保护说明](known-pitfalls.md#w4a8-alignment-fallback)。
+- Dense ModelSlim 的 gate/up 异构精度需对应 loader/结构适配，不能为了融合而修改描述 JSON 或删除一致性 guard。它与 MoE experts 的分片契约分别处理，详见 [混精加载说明](known-pitfalls.md#modelslim-mixed-gate-up)。
 - 离线 MXFP8 要保留最后一个 partial 32 元素 block：placeholder 用 `ceil(K/32)`，奇数 scale 数在 pair reshape 前补齐。
 - MoE MXFP 的 dtype、group-list 语义、transpose/NZ 顺序和 dispatcher 限制见 [known-pitfalls.md](known-pitfalls.md)。
 - A5 上运行本仓 LLM 脚本时保留 `ASCEND_USE_FIA=1`；它处理的是 attention backend 兼容性，不是量化精度开关。
 
 ## 启动与验证入口
 
-- `llm/qwen3.5_dense_*.sh`：Qwen3.5 Dense BF16 / W8A8
+- `llm/qwen3.5_dense_*.sh`：Dense BF16 / W8A8 / W4A8；部分入口沿用文件名、默认加载 Qwen3.6-27B，具体路径见 [启动说明](../llm/README.md#dense-w4a8-在线--离线)
 - `llm/qwen3.5_moe_*.sh`：Qwen3.5 MoE BF16 / W8A8 / W4A8 / W4A4
 - `llm/qwen3_*`：Qwen3 对照脚本
 - `diffusion/`：Wan2.2 Diffusion 量化与 PR 记录

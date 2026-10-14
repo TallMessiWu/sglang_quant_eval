@@ -9,10 +9,10 @@
 
 ## 为何 single-context
 
-虽然仓库下有 `sglang/` worktree 容器（本地 2 个活跃分支 checkout：`junlin_qwen3_moe_w8a8`、`junlin_qwen3_dense_w4a4`；其余功能已合并上游），但这些拆分的是**实现分支**而非**领域**。整体仍然是同一套领域语言：
+虽然仓库下有 `sglang/` worktree 容器，但这些拆分的是**实现分支**而非**领域**。实际分支与 HEAD 见 [branches.md](../branches.md)，本文不复制活跃分支数量或合入状态。整体仍然是同一套领域语言：
 
 - MXFP8 / MXFP4 量化（在线 / 离线 / ModelSlim）
-- Ascend NPU（A2/A3，CANN ≥ 8.0.RC3）
+- Ascend NPU（910 系列 / 950；具体 CANN、torch_npu、wheel 与硬件验证按部署记录）
 - Diffusion (Wan2.2) 与 LLM (Qwen3/3.5 Dense + MoE) 两条主线
 - 在线量化 vs 离线 ModelSlim 加载
 
@@ -34,4 +34,4 @@
 
 如果某条信息不确定该放哪：流程类放 AGENTS.md，知识类放 CONTEXT.md，**带不可逆决策的**放 ADR。
 
-> 注：本仓当前尚未创建 `CONTEXT.md` 和 `docs/adr/`，将由后续相关 skill（例如首次跑 `improve-codebase-architecture`）或手动创建按需补齐。
+根目录 `CONTEXT.md` 已存在；ADR 按实际架构决策需要维护，不为状态同步新建交接或重复进度文档。

@@ -6,9 +6,9 @@
 
 <a id="current-branch-map"></a>
 
-## 当前计划涉及的分支定位（2026-10-12）
+## 当前计划涉及的分支定位（2026-10-14）
 
-本轮通过 `git worktree list --porcelain`、本地 HEAD 和 `gh` 核对。七个待合入个人 PR 的本地 HEAD 均与 GitHub head 一致。此表只记录定位，操作前仍以实时命令为准；其他测试、历史分支见下文记录和实际 worktree 注册表。
+2026-10-14 通过 `git worktree list --porcelain`、本地 HEAD 和 `gh pr view` 核对。七个待合入个人 PR 的本地 HEAD 均与 GitHub head 一致。此表只记录定位，操作前仍以实时命令为准；其他测试、历史分支见下文记录和实际 worktree 注册表。
 
 | PR / 任务 | 分支 | HEAD | worktree（相对主仓） |
 | --- | --- | --- | --- |
@@ -20,15 +20,104 @@
 | [SGLang #32602](https://github.com/sgl-project/sglang/pull/32602) | `junlin_qwen3.5_moe_w4a4` | `425b0a9abb` | `sglang/qwen3.5_moe_w4a4/` |
 | [SGLang #43740](https://github.com/sgl-project/sglang/pull/43740)（原 [#34387](https://github.com/sgl-project/sglang/pull/34387)） | `junlin_a5_fia_mixed_split` | `01bb8dc685` | `sglang/a5_fia_mixed_split/` |
 | G2.1：Dense W4A8 公共执行 | `junlin/w4a8-shared-execution` | `24e100f1e8` | `sglang/w4a8_shared_execution/` |
-| G2.2：Diffusion MXFP8 公共执行 | `junlin/diffusion-mxfp8-shared-execution` | `62ff466ac0` | `sglang/diffusion_mxfp8_shared_execution/` |
-| G2.3：Ascend MXFP 能力校验 | `junlin/ascend-mxfp-capabilities` | `62ff466ac0` | `sglang/ascend_mxfp_capabilities/` |
+| G2.2：Diffusion MXFP8 公共执行 | `junlin/diffusion-mxfp8-shared-execution` | `6eb8e1dd1c` | `sglang/diffusion_mxfp8_shared_execution/` |
+| G2.3：Ascend MXFP 能力校验 | `junlin/ascend-mxfp-capabilities` | `d6a46f90d9` | `sglang/ascend_mxfp_capabilities/` |
 | ModelSlim Dense gate/up 混合精度与预处理兼容 | `junlin/modelslim-mixed-gate-up` | `2ef4c276be` | `sglang/modelslim_mixed_gate_up/` |
 
 G2.1 的开发基线为 #43739 的 `ded4671577`；G2.2 / G2.3 的建分支基线均为 `62ff466ac0`。实现与验收进度见目标跟踪表，不由 HEAD 或目录存在与否推断。
 
+2026-10-14 局部复核：G2.1、G2.2、G2.3 及 mixed gate/up 四个 worktree 的本地 HEAD 与实时 `git ls-remote origin` 相同，分别为 `24e100f1e8429bde02f3e81221c4392e9e69934b`、`6eb8e1dd1c91678284d1355cdb182a85ab4e9863`、`d6a46f90d97039e14476be47468c996f11caf603`、`2ef4c276be4b3fa6b7e4578a2d738ec00c0dd668`；工作区干净。mixed gate/up 是 G2.1 + 混精兼容 + resize 兼容，没有叠加 G2.2 / G2.3。此核对不刷新其他 PR 的 CI / review / 合入状态。
+
 2026-10-13：在原 `junlin/modelslim-mixed-gate-up` 分支及其 `sglang/modelslim_mixed_gate_up/` worktree 中回移上游 [#43309](https://github.com/sgl-project/sglang/pull/43309) 的 `c6e822c29b9bb3d392e65a7bcb271a5d2d63613d`。实时 GitHub 查询确认该 PR 于 2026-10-12 合入；回移后的 `qwen_vl_processor.py` Git blob 与上游提交相同（`c5c9ea5c24180459e8faf16623fac26d13242a85`）。修复 Transformers 5.19 图片/视频 resize 的参数与 size 契约；标准补丁为 `llm/patches/qwen_vl_processor_transformers_519.patch`。旧代码在真实 HF resize 函数体的隔离 CPU harness 中复现相同图片 TypeError，回移后图片、批次顺序、禁用 resize 和视频时间维度四项契约检查通过，插值后端/分组叶子被隔离，不计为 NPU warmup 或生成精度通过。修复以 [`2ef4c276be4b3fa6b7e4578a2d738ec00c0dd668`](https://github.com/TallMessiWu/sglang/commit/2ef4c276be4b3fa6b7e4578a2d738ec00c0dd668) 提交并普通推送至 `origin/junlin/modelslim-mixed-gate-up`，本地与远端 SHA 相同、ahead/behind `0 0`；没有创建 PR。按用户要求，新建的 `junlin/npu-qwen-vl-resize-compat` 本地/远端分支及对应 worktree 已删除，后续修复继续在原分支推进。用户要求优先修复精度问题，预处理补丁收敛的待办见 `mxfp-refactoring-plan.md` 第 6 节。
 
 **以下带日期的记录保留当时的状态与验证证据，不继续滚动更新其中的 PR 状态、旧编号或 HEAD。** 历史表中的旧 #32601 / #34387 通过上表映射到新 PR；“当前”“已推送”“保留”等措辞仅对记录当时有效。
+
+## ModelSlim Dense gate/up 混合精度启动诊断与修复
+
+服务器实际运行 `junlin/w4a8-shared-execution@24e100f1e8429bde02f3e81221c4392e9e69934b`，使用 `/mnt/share/weight/Qwen3.6-27B_mxfp-w4a8-0821`，architecture 为 `Qwen3_5ForConditionalGeneration`。用户回传的真实 `quant_model_description.json` 显示：`model.language_model.layers.0.mlp.gate_proj.weight=FLOAT`、`up_proj.weight=W4A8_MXFP`、`down_proj.weight=W4A8_MXFP`；MTP layer 0 的三片均为 FLOAT。原始 `is_layer_skipped` 的纯 CPU 最小探针复现同一个 fused-shard ValueError，真实 key/精度已排除此前“缺失 key 或前缀映射”的假设；错误发生在构造层时，不是公共 W4A8 apply/NPU 算子回归。
+
+用户选择保留真实混合精度，不改描述 JSON 冒充权重转换。从该部署 SHA 创建独立直属 worktree `sglang/modelslim_mixed_gate_up/` / `junlin/modelslim-mixed-gate-up`，不修改 G2.1/G2.2/G2.3 或原 PR 分支。修复仅让 Qwen3.5 Dense MLP 对完整、异构的 ModelSlim gate/up 项使用两套现有 ColumnParallelLinear；各自 FLOAT / packed FP4 weight、UE8M0 scale、TP weight loader 和 post-load 独立，输出仍进入原 SiLU-and-mul/down projection。两类 Dense Qwen3.5 decoder 显式允许该结构，其他模型和同精度 gate/up 继续用合并层；原 fused precision 检查保留，缺失项不作为拆分证据。Qwen3.5 Causal/Conditional loader 对已有的独立 gate/up parameter 保留 canonical name，不误改为 fused name 或传 fused shard_id；NVFP4 fusion 跳过非合并结构。
+
+修复已提交并普通推送：[`185fad010a94a61ab8897d72a067bac574addda7`](https://github.com/TallMessiWu/sglang/commit/185fad010a94a61ab8897d72a067bac574addda7)，英文提交信息 `:bug: fix(npu): Support mixed gate/up precision`，4 files、318 insertions、8 deletions。本地 HEAD 与 origin 分支 SHA 相同，tracking ahead/behind `0 0`，worktree 干净；没有创建 PR，没有改写已发布历史。发布日志为 `.pi/tasks/01a12eff-f049-75d4-9d0f-360c93f9a30c-4113/bd325c5ed.output`。该提交发布时尚未完成硬件验收；后续功能复测见下方 2026-10-14 记录。发布前远端只读核实：G2.1 origin head 仍为 `24e100f1e8429bde02f3e81221c4392e9e69934b`，新修复 remote branch 当时不存在；#43739 head 仍为 `ded467157750ccfd20dd2256110fad9ff104dc08`，官方 main 为 `7bd41aec126f955b8afc0ee1d03d718e4c2c562f`，未自动 rebase/merge，验证固定在部署基线。
+
+本机验证：**7 个隔离 CPU/mock 回归通过**，覆盖完整异构与缺项、正反方向 FLOAT/W4A8、保留原 guard、同精度仍融合、SiLU×up 顺序、两种 Qwen3.5 loader 的独立与融合 weight/scale 路由，以及逻辑 TP=2 两 rank 的 Column/Row packed weight/UE8M0 scale 分片和 parallel_group。相同新测试在未修补 `24e100f1e8` 基线上因新接口/opt-in 不存在按预期失败；不把这些接口红灯单独冒充原 ValueError 的复现，原 ValueError 的最小探针证据见前述诊断。harness 加载真实 Linear/Config/Scheme/parameter/environment 模块及精确 MLP/loader 函数；只隔离 serving/hardware/collective leaves 和 activation，逻辑 TP 不算多卡通信验收。首次新增融合 loader 用例失败是 harness 未提供 `SGLANG_NPU_W4A4_NEW_PACKING`，改为加载完整生产环境模块后通过，未改生产 Linear。原 `is_layer_skipped` AST、W4A8 公共执行、scheme 和 Linear 文件不变。
+
+语法/暂存区 compile、CI 标记 `base-a-test-cpu`、仓库固定版本 ruff CI 规则与 format、isort、codespell、diff 检查通过。生产文件全量默认 lint 的 26/35/48 条历史诊断未新增（测试导入最终按仓库 isort 分组，以实际 pre-commit 规则为准，不宣称全量默认 lint 清零）。普通 registered 入口仍在 package import 阶段缺 `psutil`，不计为通过。证据：`.pi/tasks/01a12eff-f049-75d4-9d0f-360c93f9a30c-4113/` 中 `b30648263.output`（7 个绿灯与基线红灯）、`bcf1704b5.output`（6 个含 TP 绿灯和普通入口缺依赖）、`be9f407ff.output`（最终静态检查）；harness 为 `.pi/debug/modelslim_mixed_gate_up_cpu.py`。本机仍无 torch_npu/NPU，以上检查不能代替真实 checkpoint load/post-load/warmup/文本图片、数值、性能或多卡 TP e2e 验证。
+
+2026-10-13 服务器后续反馈：先出现 `chunk_state dtype must match initial_state`，建议显式 `SGLANG_MAMBA_SSM_DTYPE=bfloat16`（该部署基线的 SSM 默认回退为 float32，配置/环境变量可覆盖）。随后 14:29:52 的日志已进入 scheduler generation → decode NPU graph → `NPUCudaGraphBackend.replay_with_input_update()` → `graph.replay()`，报 `207005` / `EL0006` / `bind sq cq failed, retCode=0x7020023` / `Build SQ/CQ failed`。当前直接证据为 graph replay 时驱动 SQ/CQ 资源分配失败，不据通用 memory 文案断言 HBM OOM 或磁盘不足，也不将前置 image/torch.save warnings、后续 py-spy/CUDA coredump 清理信息作为根因。该次日志未附源码 SHA、CANN/driver/torch_npu 或卡资源信息，不能绑定为 `185fad010a` 的硬件通过。建议保留权重/SSM dtype/请求不变，先仅禁 decode graph 做 eager 对照；若 eager 通过，再去掉禁用项，仅捕获 decode bs=1 复测。已核实本基线参数为 `--cuda-graph-backend-decode disabled` / `--cuda-graph-bs-decode 1`；旧 `--disable-cuda-graph` 是双阶段禁用的兼容参数，不与新选择器混用。本机无法复现此 NPU 资源故障，当时等待服务器同请求 A/B 和 `npu-smi info`，未修改 SGLang graph 代码或执行进程清理。
+
+2026-10-13 最新用户复测更正：服务器报告运行 `junlin/modelslim-mixed-gate-up@2ef4c276be4b3fa6b7e4578a2d738ec00c0dd668`，保留 `SGLANG_MAMBA_SSM_DTYPE=bfloat16`。先用 `EXTRA_ARGS=--disable-cuda-graph` 启动，`./curl.sh` 输出正常；随后 `unset EXTRA_ARGS`，用户明确确认已停止旧服务并重新执行 `./qwen3.5_dense_offline_w4a8.sh 0`，再次请求也无乱码。本地核实该启动脚本仅从 EXTRA_ARGS 添加禁用参数，未另行硬编码禁 graph。因此此前退化目前未复现，graph 缺陷及环境故障均未证实；不继续凭旧假设调整 update/replay。尚无当前服务 resolved graph 配置/实际 replay 日志、原拿破仑长文本重复及 batch/padding 的完整验收证据。
+
+2026-10-14 用户确认已测试、当前正常，并要求记录验收。结合上段明确的部署 SHA、BF16 SSM、去掉禁 graph 参数及停止重启操作，将该 checkpoint 的离线功能验证记为**通过（用户真机复测）**；G2.1 具体勾选及剩余在线/数值项目统一见 [目标清单](mxfp-refactoring-plan.md#refactoring-status)。环境问题是用户对此前异常的推测，具体根因未证实；没有新增生产 graph 修复，不再要求为当前已正常的服务机械交换 update/replay。未收到的数值、性能与 batch/TP/EP 明细不补写为通过。当时只同步证据、未提交文档；后续用户已授权本轮文档核对后统一提交推送，保留 SGLang、kernel 和其他已有改动。
+
+2026-10-14 在线功能补验：用户运行 `llm/qwen3.5_dense_online_w4a8.sh`，贴出 10:23:04 的启动日志并确认最终请求结果正常。视觉 blocks 0–26 的 `mlp.linear_fc2` 为 K=4304，命中 `Mxfp4W4A8Config.get_quant_method()` 的非 32 对齐回退；本地核实该保护来自本 fork 的 `7aa87ddfab7b2e62c63a7c40d04c1c0fb6bd512f`，作者 Junlin Wu，提交日期 2026-07-24，已有对应配置回归，G2.1 保留该策略。日志及功能反馈不能推及全模型全部 W4A8，也不能仅凭旧提交断言当前 torch_npu/CANN 仍不支持原形状。本次在线反馈未重新附服务源码 SHA、完整请求矩阵或数值结果；此前部署报告为 `2ef4c276be`。验收状态统一更新目标清单为“在线/离线基本功能通过，NPU 数值对照待补”，本轮文档发布按用户最新授权执行。
+
+## 2026-10-12：G2.2 / G2.3 与 Dense W4A8 启动脚本发布
+
+用户本轮明确授权提交和推送。三个提交均使用 Gitmoji 英文信息、普通 push；逐项 `git ls-remote` 与本地 HEAD 一致，tracking ahead/behind 均为 `0 0`。没有强推、rebase、修改原 PR 分支、创建 PR 或更新 kernel gitlink。
+
+| 仓库 / 交付 | 实现提交 | remote branch | 提交范围 |
+| --- | --- | --- | --- |
+| SGLang G2.2 | `6eb8e1dd1c91678284d1355cdb182a85ab4e9863` | `origin/junlin/diffusion-mxfp8-shared-execution` | 2 个文件；离线 MXFP8 adapter 与 CPU/mock tests |
+| SGLang G2.3 | `d6a46f90d97039e14476be47468c996f11caf603` | `origin/junlin/ascend-mxfp-capabilities` | 12 个文件；局部能力、实际校验接入、支持文档和 CPU/mock tests |
+| 主仓 Dense W4A8 启动脚本 | `e5ea39a5aa5f1a3bd50766d430c0793f8e40e5b6` | `origin/main` | `llm/qwen3.5_dense_{offline,online}_w4a8.sh` 与 `llm/README.md` |
+
+启动脚本离线默认使用 `/mnt/share/weight/Qwen3.6-27B_mxfp-w4a8-0821`，由 `quant_model_description.json` 自动识别 ModelSlim；在线要求明确设置原始 BF16/FP16 的 `MODEL_PATH`，使用 `mxfp_w4a8`，拒绝 ModelSlim 目录。Shell 语法与 12 个 mock 用例通过，未执行真实 NPU 清理或模型启动。
+
+提交前重新跑 A 3 tests、B 14 tests、27 组完整旧源代码/新入口契约对照、两分支 compile/AST/ruff/isort/codespell/CI 注册及脚本 mock；全部通过。完整 serving 入口缺 `psutil` 的限制未消除，也未补 NPU/e2e 数值、图片、TP/EP、精度或性能结果。计划第 2/3/6 节已同步实现状态与清单，仅勾选 CPU/静态已满足部分，硬件验收仍未完成。
+
+发布前实时核实 #32745 / #43739 / #32602 head 未变；官方 main 为 `e775fa7253c107aece9b725a30f57beda96b32c2`。A/B 保持 `62ff466ac0` 的最小独立基线，未自动移植新 main；旧基线的验证不能算新 main 验收。既有 10 个 SGLang worktree 仍干净且 HEAD 未变，两条新 worktree 提交后干净。主仓文档与 `.pi/`、kernel 既有 gitlink 差异按原约束保留，不混入脚本提交。
+
+证据（主仓相对路径）：
+
+- 提交前契约/脚本复查：`.pi/tasks/01a12eff-f049-75d4-9d0f-360c93f9a30c-4113/b57ab2b41.output`
+- 暂存内容 lint/static：`.pi/tasks/01a12eff-f049-75d4-9d0f-360c93f9a30c-4113/b1604fcd5.output`
+- G2.2 普通 push 与 SHA / ahead-behind 核对：`.pi/tasks/01a12eff-f049-75d4-9d0f-360c93f9a30c-4113/bf00e995e.output`
+- G2.3 普通 push 与核对：`.pi/tasks/01a12eff-f049-75d4-9d0f-360c93f9a30c-4113/b407aa0ce.output`
+- 主仓脚本普通 push 与核对：`.pi/tasks/01a12eff-f049-75d4-9d0f-360c93f9a30c-4113/b173cb580.output`
+
+## 2026-10-12：Diffusion MXFP8 公共执行与 Ascend MXFP 能力试点（仅本地，未提交）
+
+建分支前通过 `git worktree list --porcelain`、本地状态和 `gh` 核实：#32745 head 为 `cf48b477dbbe0cc47aaceff89708ba84da7dfdca`，#43739 为 `ded467157750ccfd20dd2256110fad9ff104dc08`，#32602 为 `425b0a9abb4f49bab3159a8571c72485db2eb983`。从当时实时官方 main `62ff466ac0c2cdd5521acf7d4c673fa7630eb083` 创建两条独立分支，没有叠入这些功能 PR 的栈：
+
+| 项目 | 分支 | worktree | 基线 / HEAD | 发布状态 |
+| --- | --- | --- | --- | --- |
+| A：Diffusion 离线 MXFP8 | `junlin/diffusion-mxfp8-shared-execution` | `sglang/diffusion_mxfp8_shared_execution/` | `62ff466ac0c2cdd5521acf7d4c673fa7630eb083` | 仅本地未提交改动；未推送、未建 PR |
+| B：Ascend MXFP 局部能力 | `junlin/ascend-mxfp-capabilities` | `sglang/ascend_mxfp_capabilities/` | `62ff466ac0c2cdd5521acf7d4c673fa7630eb083` | 仅本地未提交改动；未推送、未建 PR |
+
+既有 Dense W4A8 抽取分支 `junlin/w4a8-shared-execution` 仍为 `24e100f1e8429bde02f3e81221c4392e9e69934b`，worktree 干净。本轮没有再次抽取其执行函数，也没有更新 #43739 或其他原 PR 分支。
+
+交付前再次用 `gh` / `git ls-remote` 核实：#32745、#43739、#32602 均仍为 Open，head 与上述 SHA 一致；A/B 的 origin 分支尚不存在，既有 Dense W4A8 远端仍为 `24e100f1e8`。origin/upstream 分别为 `TallMessiWu/sglang` / `sgl-project/sglang`。执行期间官方 main 已前进至 `28621739fc6e8084b59f0b02178413f993e35afb`；两项验证固定在启动时基线 `62ff466ac0`，未静默 rebase/merge，也不将旧基线结论声称为新 main 的验证。GitHub compare 的 5 个后续提交、33 个文件中，没有触及本轮涉及的 SRT NPU quantization、SRT/Diffusion quantization 或 `sglang/kernels` 路径；该漂移核查只读，不替代新 main 的完整测试。
+
+### A：适配器负责 checkpoint，执行委托公共 Method
+
+- 仅改 `python/sglang/multimodal_gen/runtime/layers/quantization/modelslim_mxfp8_scheme.py`，新增 `test/registered/unit/layers/quantization/test_diffusion_modelslim_mxfp8.py`；该 worktree 的 SRT 公共 `linear_method_npu.py` 与基线逐字节相同。
+- 最新 main 的 Diffusion 在线 MXFP8 已选择 SRT `NPUMXFP8LinearMethod`；离线现在也委托该 Method，删除重复 activation quant / matmul / dtype / shape 代码。没有新建公共量化框架，也没有让执行层判断 Diffusion checkpoint 来源。
+- 原始 checkpoint 参数创建和 loader 保留：`weight` 为 `float8_e4m3fn [N,K]`，scale 参数仍名为 `weight_scale`、dtype 为 `uint8`，并保留真实 parameter 类及 weight_loader；不是在加载前改为 `weight_scale_inv`。scale 按 `ceil(K/32)` 分配，保留 partial block。
+- 离线 post-load 只补必要适配：奇数 scale 数用 0 字节 pad 成偶数，再由既有 SRT Method 配对并 transpose 成 `[ceil(K/64),N,2]`，weight 为 strided `[K,N]`；不权重量化、cast/pack 或新增 NZ 转换。公共 Method 将 scale 参数折入 `weight_scale_inv`，这是加载完成后的执行布局。
+- 保留 FP16/BF16 输入与输出 dtype、其他输入 dtype 转 BF16、`reshape` 展平/恢复前导维度、FP32 bias、UE8M0 dtype 标记、`group_sizes=[1,1,32]`。适配器清空公共 Method 的 bias cache，保持原离线每次调用转 FP32 的语义，包括 post-load 后更新 bias 的调用者。
+- **CPU/mock：3 tests passed**。post-load 覆盖 K=32/64/96/4304，含 135 个真实 scale block 配成 136 字节的边界；27 组相同 prepared weight/scale/input 的入口契约覆盖 2D/3D/4D、FP16/BF16/FP32 和 bias 有无/类型；另验非连续输入、bias 更新及 post-load 无 NPU quant/pack 调用。
+- 另加载基线完整旧适配器源代码作前后对照：27 组 K=64 的 raw checkpoint 经各自真实 post-load 后，activation quant / matmul 参数、weight 与 scale 字节/stride、bias dtype/更新、输出 dtype/shape 均相同。通过的是 mock 算子调用契约，不是量化 matmul 的硬件数值等价或精度验证。
+
+### B：局部描述实际驱动检查、既有 fallback、文档和矩阵
+
+- 核心位于 `python/sglang/srt/hardware_backend/npu/quantization/mxfp_capabilities.py`。复用真实 `KernelSpec` / `CapabilityRequirement` / `FormatSignature`，只作为局部数据描述；不向全局 registry 注册，不按模型名分叉，不新增 SoC 查询或构建期 provider 选择。此 main 基线没有 `device_op.py`，本轮没有补造跨代际 device operator 框架。
+- 17 条本 checkout 的路径描述区分 runtime、Dense/MoE、W8A8/W4A8/W4A4、online/ModelSlim、单级/双级 scale、checkpoint dtype、执行 dtype/layout、NPU/算子/backend 要求、已存在 fallback/代码阻塞及硬件验证状态。没有把其他 PR 分支的在线 W4 MoE 实现冒充为 main 已支持。
+- **实际接入**：SRT / Diffusion ModelSlim selector 给选定 Scheme 附加能力；Method 在分配前校验 partition-local K，在 layout/算子前校验原始 checkpoint dtype/shape/scale；在线 Dense post-load 校验 NPU/算子/dtype；在线与离线 MoE runner 建立前校验 backend、SiLU/clamp 和所选 fused 路径的算子依赖。
+- 现有 online W4A8/W4A4 MoE full-precision fallback 的返回方法不变，warning 原因改由局部描述提供；W4A8 有 clamp 时保留已有 unfused 路径，不强迫该路径具备 fused gmm1 算子。拒绝已知不兼容的 `ascend_fuseep` INT8/float-scale 契约。DeepEP normal 的 BF16 **通信**不标为 BF16 **计算**回退。
+- **明确限制**：本独立 main 基线的离线 loader 仍是 floor 分配与无 padding 配对，局部 K 要求 64 对齐；不把该 loader 限制说成 MXFP8 算法不支持 partial block。B 没有夹带 A 的修复；今后合入 A/其他 partial-block 适配时需同步放宽对应能力行和测试，不能不检查就宣称两分支直接叠加后的能力矩阵成立。
+- Dense online W4A4 使用双级 L0 FLOAT32 / block=512、L1 UE8M0 / block=32；MoE offline W4A4 和 packed 单级格式单列。Diffusion `W4A4_MXFP4_DUALSCALE` 的构造器实际引用未定义 `is_dual_scale_key`：直接构造测试复现 AttributeError，selector 现在提前给出明确代码阻塞错误。未修该构造器、未重打包权重，也没有把此代码问题归因为缺少硬件验证。
+- 文档 `docs/docs/hardware-platforms/ascend-npus/optimization/mxfp-capabilities.mdx` 的表由同一数据生成，并从现有 Ascend quantization 文档链接；CPU 测试核对表和所有 kernel target。修正文档中 raw scale dtype、双级 L0 dtype 与 W4A8 dispatch 的陈旧描述。
+- **CPU/mock：14 tests passed**，24 组 runtime/kind/scheme/source 组合及 dtype/shape/scale、FP4 enum/UE8M0、算子缺失、selector / Dense / MoE allocation 和 runner 的提前拒绝、既有 fallback、文档一致性。使用 uv 本地缓存的真实 msgspec 0.22.0 与真实 KernelSpec/Config/Method/Scheme/parameter 模块；隔离 serving 初始化和 NPU / full-precision leaf 依赖，没有安装或改动系统依赖。
+- 静态核对：15 个执行/接口方法 AST 不变；`moe_methods.py`、Ascend runner 的 fused/clamp selector 与 NPU utils 的 NZ/ND fallback 文件逐字节不变；无新增运行时 SoC 分支、全局注册或静默精度回退。
+
+### 验证和保护边界
+
+两分支 ruff lint/format、isort、codespell、Python compile/AST、registered test 检查、无 bare pytest / package 内注册检查、空白/冲突扫描及 `git diff --check` 均通过；B 测试类名修正后又单独复查 lint/format/isort/codespell/diff。所有记录均为 CPU/mock 或静态检查，不是完整 serving 集成或 NPU e2e。另以原生 registered 入口（仅加入缓存中的真实 msgspec/orjson）复查，A/B 都在 serving 初始化阶段因缺 `psutil` 而阻塞；此 import smoke 不计为测试通过，也没有为此安装系统依赖。
+
+复核原有 10 个 SGLang worktree 的 HEAD/干净状态未变；四个子模块 index gitlink / checkout HEAD 均未改动，kernel 仍为 index `500ea7bb0e19017ba9feb399acb0cc27bcdb46e4`、checkout `4a4f838e8fadfb5d11c4cba722ff0af72d16f8aa`。主仓 `.pi/`、已有 kernel gitlink 差异和其他用户状态保留；只向本文追加本轮记录。不提交、推送或建 PR。
+
+待真实 NPU：记录 SoC、torch/torch_npu/CANN、kernel wheel provider、attention backend、TP/EP 与 dispatch 模式；先做权重/scale/layout 和 bias probe，再分别跑 online/offline load→warmup→graph/eager→文本/图片请求及精度/性能。算子注册只证明接口存在，不能证明某代硬件或某 TP/EP 组合可执行；此轮没有任何新的硬件、模型质量或性能通过结论。
 
 ## 2026-10-12：W4A8 Linear 公共执行重构（独立分支，已推送）
 

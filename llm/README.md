@@ -29,7 +29,7 @@ VLLM_PORT=6969 ./llm/mmmu.sh
 `qwen*.sh` 和 `a5_fia_mixed_split_serve.sh` 共用清理规则：
 
 - 指定卡号时清理所选卡；不指定卡号时不清理，并 unset `ASCEND_RT_VISIBLE_DEVICES`。
-- `npu-smi info` 只要查到所选卡上有任何 PID，就显示一张 `PID / COMMAND / 工作目录` 三列表格，工作目录通过 `pwdx` 获取，供你判断，随后 **Enter 确认，Esc 取消整个启动**；确认前不会终止任何进程。
+- `npu-smi info` 只要查到所选卡上有任何 PID，就显示 `PID / START_TIME / COMMAND / 工作目录`，启动时间通过 `ps` 获取，工作目录通过 `pwdx` 获取，供你判断，随后 **Enter 确认，Esc 取消整个启动**；确认前不会终止任何进程。
 - “工作目录”是进程**当前工作目录**，不一定是最初启动目录。权限不足或进程已退出时该列显示“不可获取”；未安装 `pwdx` 时显示“不可获取（未安装 pwdx）”，仍必须确认；`-f/--force` 下也会展示表格。
 - 不判断进程是否“自己的”：同 UID、不同 UID、`sudo` 或无法通过 `ps` 查询归属，都不能跳过确认。只有所选卡上没有 PID 时才直接继续。
 - `-f` / `--force` 是有 PID 时唯一跳过确认的方式，但不会提升系统权限；清理失败仍中止启动。
@@ -53,13 +53,22 @@ python3 -m unittest discover -s llm/tests -p 'test_npu_cleaner.py' -v
 
 ## Dense W4A8 在线 / 离线
 
-沿用 `qwen3.5_dense_*.sh` 的入口命名；实际模型由 `MODEL_PATH` 中的 config 决定。离线默认路径为服务器上的 `/mnt/share/weight/Qwen3.6-27B_mxfp-w4a8-0821`，并不把目录名当成量化格式检测依据。
+沿用 `qwen3.5_*.sh` 的入口命名；实际模型以加载目录的 config 为准，Dense 与 MoE 不共用同一个模型目录。以下是本轮已更新入口的默认值，不代表其他脚本已全部迁移：
+
+| 入口 | 默认模型目录 | 覆盖方式 |
+| --- | --- | --- |
+| `qwen3.5_dense_online_w4a8.sh` | `/mnt/share/weight/Qwen3.6-27B` | `MODEL_PATH` 环境变量 |
+| `qwen3.5_dense_online_w8a8.sh` | `/mnt/share/weight/Qwen3.6-27B` | 当前脚本固定路径 |
+| `qwen3.5_dense_offline_w4a8.sh` | `/mnt/share/weight/Qwen3.6-27B_mxfp-w4a8-0821` | `MODEL_PATH` 环境变量 |
+| `qwen3.5_moe_bf16.sh` | `/mnt/share/weight/Qwen3.6-35B-A3B` | 当前脚本固定路径 |
+
+在线入口需要原始 BF16/FP16 权重，离线量化格式由 `quant_model_description.json` 判断。已有 `MODEL_PATH` 会覆盖 W4A8 默认值；切换在线/离线模式时要同时检查这个变量。
 
 ```bash
 # 离线：读取 quant_model_description.json 自动选择 ModelSlim，不传 --quantization。
 ./llm/qwen3.5_dense_offline_w4a8.sh 0
 
-# 在线：将此占位路径替换为原始 BF16/FP16 权重目录，不可使用上面的预量化目录。
+# 在线：不设置 MODEL_PATH 时默认使用上表的原始 27B 权重，也可显式覆盖。
 MODEL_PATH=/实际的BF16或FP16权重目录 ./llm/qwen3.5_dense_online_w4a8.sh 0
 
 # 可切换端口、上下文、TP 和 eager 模式；多个位置参数表示 NPU 卡号。
@@ -68,6 +77,8 @@ TP_SIZE=2 VLLM_PORT=6970 CONTEXT_LENGTH=8192 EXTRA_ARGS="--disable-cuda-graph" \
 ```
 
 在线脚本显式使用 `--quantization mxfp_w4a8`，并拒绝带 `quant_model_description.json` 的 ModelSlim 目录；离线脚本要求该文件存在，避免把未量化权重误当成离线 W4A8。两者均启用 FIA，默认 TP=1、端口 6969、上下文 131072；`MODEL_PATH` 可覆盖。`EXTRA_ARGS` 与既有脚本一样按空白分词。
+
+当前 Qwen3.6-27B 部署验证使用 `SGLANG_MAMBA_SSM_DTYPE=bfloat16`，这是该部署条件，不将它设为所有模型的通用默认。恢复默认 graph 配置需去掉 `EXTRA_ARGS` 中的禁用参数并重启服务；单独在终端 `unset` 不会改变运行中服务。在线视觉 fc2 的 K=4304 回退提示及混精加载边界见 [已知陷阱](../docs/known-pitfalls.md#w4a8-alignment-fallback)，功能与数值验收见 [G2.1 清单](../docs/mxfp-refactoring-plan.md#refactoring-status)。
 
 传入卡号会先调用 `npu-cleaner.sh` 清理所选卡上的进程；不传卡号则不清理，并取消 `ASCEND_RT_VISIBLE_DEVICES` 限制。做在线/离线对照时须使用同一模型版本的原始和预量化 checkpoint，并确认服务器实际运行的是目标 SGLang 代码；启动脚本本身不证明 NPU 数值、warmup 或图片请求通过。
 
@@ -84,6 +95,7 @@ AIS Bench 的公共逻辑在 `ais_bench/run_ais_bench.sh`。生成的配置仍�
 | `diagnostics/gdn_prefill_layout_check.py` | 用 `dk != dv` 区分 prefill 的 K-major/V-major 布局 |
 | `diagnostics/gdn_prefill_batch_stress.py` | 多序列、变长、chunk_state 和真实头数的并发压力 |
 | `diagnostics/cache_loc_update_oob_check.py` | cache_loc 的 roomy/tight 容量对照与越界复现 |
+| `diagnostics/modelslim_w4a8_check.py` | 离线 W4A8 Linear 与 FP4/UE8M0 软件参考对照；不覆盖整模型或完整 graph，也不替代两入口的重构等价对照 |
 
 ```bash
 python3 llm/diagnostics/mtp_env_doctor.py

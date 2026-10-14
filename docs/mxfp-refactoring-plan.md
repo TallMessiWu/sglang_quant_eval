@@ -1,6 +1,6 @@
 # Ascend MXFP 重构目标与执行计划
 
-更新日期：2026-10-12（Asia/Shanghai）。本文是后续会话的任务与验收入口，无需依赖聊天历史。
+更新日期：2026-10-14（Asia/Shanghai）。本文是后续会话的任务与验收入口，无需依赖聊天历史。
 
 范围：SGLang Ascend 的 SRT Dense / MoE × W8A8 / W4A8 / W4A4 × 在线 / 离线 ModelSlim，以及 Diffusion MXFP8 的执行复用。CUDA / ROCm 和其他量化格式不在本计划的实现范围内。
 
@@ -70,22 +70,22 @@ Scheme：格式相关参数、loader metadata、scale / packing 契约
 
 “目标 2”在本文中明确指 **G2：公共执行复用与能力元数据**。第一项是 Dense/Linear W4A8 去重，即使它从 MoE W4A8 分支开发，也不是重写 MoE experts 的执行。
 
-| 编号 | 目标 / 任务 | 实现进度（2026-10-12） | 验证与剩余验收 | 交付载体 / 合入跟踪 |
+| 编号 | 目标 / 任务 | 实现进度（2026-10-14） | 验证与剩余验收 | 交付载体 / 合入跟踪 |
 | --- | --- | --- | --- | --- |
 | G1.1 | 修正 MXFP8 partial-scale 与布局边界 | 已有对应修复；Diffusion loader 仍需单独核对 | 余块与奇数 scale 的表示、分片后 shape 和目标 NPU 验证；占位修正不等于任意 K 可运行 | #32745；状态见下方 PR 表 |
 | G1.2 | 补在线 MoE W4A8 / W4A4 与实际精度分配 | 两条功能分支已有实现，保持各自能力增量 | 专家确实量化；层级精度、融合、dispatch、TP/EP 与在线 RTN 精度需有证据 | #43739（原 #32601）/ #32602；状态见 PR 表 |
-| **G2.1** | **Dense W4A8 在线/离线公共执行** | **实现已提交并推送** | 已有 8 个 CPU/mock 测试记录；NPU 数值、真实加载与请求验证待补，尚未整体验收 | `24e100f1e8`；本次查询无 PR，未合入上游 |
-| **G2.2** | **Diffusion 离线 MXFP8 委托公共 kernel** | **已建分支；尚无实现增量** | post-load 与执行一起迁移；loader、scale、bias 回归及真实 checkpoint / 图片路径验证 | `junlin/diffusion-mxfp8-shared-execution`；本次查询无 PR |
-| **G2.3** | **Ascend MXFP 局部能力描述与提前校验** | **已建分支；尚无实现增量** | 同一信息源驱动校验、明确 fallback、文档及测试矩阵；不能只新增静态表 | `junlin/ascend-mxfp-capabilities`；本次查询无 PR |
+| **G2.1** | **Dense W4A8 在线/离线公共执行** | **实现已提交并推送** | 8 个 CPU/mock 测试；2026-10-14 在线、离线启动与请求功能均获用户真机正常反馈；在线视觉 27 个 fc2 保留既有 BF16 回退。两入口及重构前后 NPU 数值对照待补，尚未完成完整验收 | 实现 `24e100f1e8`，离线验收载体 `2ef4c276be`；发布/合入单独跟踪 |
+| **G2.2** | **Diffusion 离线 MXFP8 委托公共 kernel** | **实现已提交并推送** | 3 个 CPU/mock 测试、27 组旧/新调用契约对照通过；真实 checkpoint、warmup、图片请求、硬件数值/性能待补，尚未整体验收 | `6eb8e1dd1c`；独立分支，发布核验记录见 `branches.md` |
+| **G2.3** | **Ascend MXFP 局部能力描述与提前校验** | **局部试点已提交并推送** | 17 条能力描述实际接入校验/fallback/文档；14 个 CPU/mock 测试通过；原支持路径与 TP/EP/backend 的硬件 probe 待补 | `d6a46f90d9`；独立分支，发布核验记录见 `branches.md` |
 | G3 | 权重生命周期与公共在线入口 | 待设计 / 实施，与公共框架工作协调 | 参数、元数据、重载语义明确；入口迁移兼容既有 CLI | 尚未拆出交付 PR |
 | G4 | 跨代际差异按契约归属收敛 | Gemma 切片已有实现；整体未完成 | provider 可追溯；构建 target、API 与配套 wheel 验证；只在必要处引入运行时契约层 | kernel #638 + #32745；状态见 PR 表 |
-| G5 | 模型、算子、并行与 CI 的硬件验收 | 持续工作 | 本轮没有新增硬件结果；每项支持声明关联代码、软件栈、硬件、配置和日志 | 随各任务记录证据，CI 通过不替代实际硬件覆盖 |
+| G5 | 模型、算子、并行与 CI 的硬件验收 | 持续工作 | 新增 G2.1 在线、离线功能的用户真机通过反馈；数值、性能、并行及完整软件栈/日志覆盖分别记录，不能由该反馈推及所有组合 | 随各任务记录证据，CI 通过不替代实际硬件覆盖 |
 
-此表区分“实现完成”“验收完成”和“上游合入”。功能 PR 的合入状态只更新第 5 节；某 PR 合入不自动把关联目标标为全部完成。G2.2 / G2.3 本次查到的 worktree 均干净、停留在建分支基线，不能据目录存在判断任务已经实现。
+此表区分“实现完成”“验收完成”和“上游合入”。功能 PR 的合入状态只更新第 5 节；某 PR 合入不自动把关联目标标为全部完成。G2.2 / G2.3 已有独立实现提交，但 CPU/mock、提交和推送都不能替代目标 NPU 与真实 checkpoint 的验收。
 
 ## 3. G2 的具体实施与验收
 
-### G2.1：Dense W4A8 公共执行——实现完成
+### G2.1：Dense W4A8 公共执行——在线、离线功能通过，NPU 数值对照待补
 
 代码位置（相对于 SGLang worktree）：
 
@@ -106,42 +106,59 @@ Scheme：格式相关参数、loader metadata、scale / packing 契约
 - [x] 保留在线量化、离线加载和各自 post-load；MoE / W4A4 不在该改动中。
 - [x] 覆盖二维/多维、非连续输入、dtype、动态 bias 与离线不重复 quant/pack。
 - [ ] 目标 NPU 下比较相同 prepared tensors 的两入口与重构前基线。
-- [ ] 在线/离线真实加载、warmup 和代表性文本/图片路径验证。
+- [x] 离线真实模型加载、warmup 和请求功能：2026-10-14 用户确认 `junlin/modelslim-mixed-gate-up@2ef4c276be` 复测正常；checkpoint 为 `/mnt/share/weight/Qwen3.6-27B_mxfp-w4a8-0821`，保留 BF16 SSM，去掉禁 graph 参数并停止、重启服务。证据类型为用户真机反馈，非本机执行或完整精度/性能报告。
+- [x] 在线原始权重启动与请求功能：2026-10-14 用户运行 `llm/qwen3.5_dense_online_w4a8.sh`，确认最终请求结果正常；启动日志显示视觉 blocks 0–26 的 `mlp.linear_fc2` 因 K=4304 保留既有 BF16 回退。按用户真机回报记功能通过；未提供的逐项文本/图片/重复请求矩阵和数值结果不扩写为已覆盖。
 - [ ] 按后续发布安排单独审阅和合入；当前原 #43739 分支未包含这笔新增提交。
+
+早期离线启动记录：服务器运行 `24e100f1e8`，Qwen3.6-27B ModelSlim checkpoint 的 layer 0 为 FLOAT gate / W4A8 up/down，原合并 Linear 的同精度检查在构造时拒绝加载。用户选择保留该混合精度；独立兼容性修复已提交推送至 `junlin/modelslim-mixed-gate-up@185fad010a`，7 个隔离 CPU/mock 回归和静态检查通过（含逻辑 TP 分片与两种 loader），详细定位、发布核验与验证边界见 [branches.md](branches.md)。这不是公共 prepared-tensor apply 的已证实回归。2026-10-13 后续服务器日志已进入 decode NPU graph replay，但报 SQ/CQ 驱动资源分配失败（207005 / EL0006），当时待同请求 eager/graph 对照；该日志未附部署 SHA，不能据此认定修复提交的真实 load/warmup、请求或数值验收完成。此处保留历史证据，最新验收以上方清单及下方 2026-10-14 记录为准。
 
 当前 W4A8 bias 契约为 BF16，向量扩为 `[1,N]`。HTML 中较早的 FP32 bias 描述不用于本任务；也不能把 W4A8 的 bias 规则推广到 MXFP8。
 
-2026-10-13 精度反馈：用户确认使用 mixed gate/up 分支并设置 BF16 SSM state；图片请求长输出乱码，纯文本拿破仑介绍也出现错误事实、重复与乱码，短请求 `1+1=2` 不能视为精度通过。新增 `llm/diagnostics/modelslim_w4a8_check.py`，用实际离线 post-load/apply 对比软件 FP4/UE8M0 解包结果，覆盖合成权重与 checkpoint 第 0 层 up/down 的部分输出行，以及 1/64 token、重复调用；参考使用同一量化输入，单独报告 activation quantization 误差。CPU 自检、实际 ModelSlim pack 函数往返、语法与 lint 通过；尚无 NPU 探针结果，根因未定位，下一步收集真实 Linear 误差后再区分模型加载、graph/state 与 checkpoint 量化质量。新环境的 resize 启动失败修复已发布到同一 mixed gate/up 分支，分支定位见 `branches.md`。
+2026-10-13 精度反馈：用户确认使用 mixed gate/up 分支并设置 BF16 SSM state；图片请求长输出乱码，纯文本拿破仑介绍也出现错误事实、重复与乱码，短请求 `1+1=2` 不能视为精度通过。新增 `llm/diagnostics/modelslim_w4a8_check.py`，用实际离线 post-load/apply 对比软件 FP4/UE8M0 解包结果，覆盖合成权重与 checkpoint 第 0 层 up/down 的部分输出行，以及 1/64 token、重复调用；参考使用同一量化输入，单独报告 activation quantization 误差。CPU 自检、实际 ModelSlim pack 函数往返、语法与 lint 通过；当时尚无 NPU 探针结果，原计划收集真实 Linear 误差以区分模型加载、graph/state 与 checkpoint 量化质量；后续复测恢复正常，最新结论见下方记录。新环境的 resize 启动失败修复已发布到同一 mixed gate/up 分支，分支定位见 `branches.md`。
 
-### G2.2：Diffusion 离线 MXFP8 执行复用——已建分支，待实施
+2026-10-13 最新复测：用户在 `2ef4c276be` 保留 BF16 SSM，先禁 graph 请求正常，再 `unset EXTRA_ARGS`、停止并重启服务后，`./curl.sh` 仍无乱码。现归类为“退化暂未复现，graph 缺陷未证实”；不据旧假设继续修改 graph 顺序。该启动脚本不再传禁 graph 参数，但当前 resolved graph 配置/实际 replay、原长文本重复及 batch/padding 仍无完整证据，不能据此勾选全部精度/性能验收。详细反馈见 `branches.md`。
 
-已登记 `junlin/diffusion-mxfp8-shared-execution`，worktree 为 `sglang/diffusion_mxfp8_shared_execution/`；当前定位见 [branches.md](branches.md#current-branch-map)。后续会话先核对该目录的用户改动，再继续实施。
+2026-10-14 用户最终复测反馈：“我测试过了，现在应该没啥问题了，之前估计就是环境问题。现在 ok 了”。结合已确认的分支、BF16 SSM、移除禁 graph 参数和重启操作，将该部署的**离线功能验收记为通过（用户真机回报）**，不再把历史乱码作为已确认、待修复的 graph 缺陷。环境问题仍是用户推测，未定位具体根因；本轮没有生产 graph 修改或新的修复提交，也不将该反馈扩写成全部 batch/padding、TP/EP、数值和性能覆盖。
+
+2026-10-14 在线补验：用户随后确认 Dense 在线 W4A8 启动和请求正常，在线/离线的基本功能链路均已有真机回报。27 个视觉 fc2 的 BF16 回退源于原有 `7aa87ddfab` 对齐保护，G2.1 明确保留该策略；让这些层全部执行 W4A8 属于额外能力扩展，不作为公共执行去重的新增完成条件。G2.1 原清单中的相同 prepared tensors 两入口及重构前后 NPU 数值对照仍未执行，不能因请求正常而标为完整数值验收通过。
+
+**剩余验证方法**：
+
+1. 在线基本功能已有用户通过反馈，保留该结果；完整请求覆盖记录包括原拿破仑长文本（temperature=0、enable_thinking=false、max_tokens=500）、`llm/curl.sh` 图片请求及重复请求，尚未提供的具体项目不推定已测。原始 BF16/FP16 权重走在线脚本，离线 packed checkpoint 走离线脚本；多卡/并发支持按实际声明的配置单独验收。
+2. 公共执行数值对照用 G2.1 实现 `24e100f1e8` 与其基线 `ded4671577`，在目标 NPU 上向在线/离线 `apply` 传入相同的 prepared weight/scale/input/bias；覆盖二维/多维、非连续输入、FP16/BF16、bias 有无，比较 shape/dtype、有限性与误差，并记录预先选定的阈值。同一 prepared tensor 的重构等价，不等于要求独立量化的在线/离线 checkpoint 输出相等。基线使用独立 worktree，不在现有功能 worktree 切分支。
+3. `llm/diagnostics/modelslim_w4a8_check.py` 可补离线 Linear 与软件解包参考的数值证据，但现有范围没有覆盖上述两入口与旧/新实现的完整硬件对照；不能仅凭该脚本通过勾选这一项。实际执行前还需准备对应数值对照 harness。
+
+### G2.2：Diffusion 离线 MXFP8 执行复用——实现已推送，待硬件验收
+
+实现提交 `6eb8e1dd1c91678284d1355cdb182a85ab4e9863`，独立基线 `62ff466ac0c2cdd5521acf7d4c673fa7630eb083`；分支 `junlin/diffusion-mxfp8-shared-execution`、worktree `sglang/diffusion_mxfp8_shared_execution/`。CPU/mock 及基线对照证据、发布记录见 [branches.md](branches.md#current-branch-map)。
 
 重点入口：
 
 - `python/sglang/multimodal_gen/runtime/layers/quantization/mxfp8.py`：在线路径已选择 SRT `NPUMXFP8LinearMethod`。
-- `python/sglang/multimodal_gen/runtime/layers/quantization/modelslim_mxfp8_scheme.py`：离线路径仍保留自己的 post-load、activation quant、matmul 和 shape 恢复。
+- `python/sglang/multimodal_gen/runtime/layers/quantization/modelslim_mxfp8_scheme.py`：保留 checkpoint 创建与 odd-scale padding 适配，post-load / apply 委托 SRT `NPUMXFP8LinearMethod`，不再重复 activation quant、matmul 和 shape 恢复。
 - `python/sglang/srt/hardware_backend/npu/quantization/linear_method_npu.py`：核对共享 MXFP8 kernel 的准备与执行契约。
 
-本次源码核对基于 #32745 的 `cf48b477db`；实施时重新检查最新目标基线，已被主线完成的部分不重复修改。
+早期源码审阅参考过 #32745 的 `cf48b477db`；最终实现基于本节记录的独立基线 `62ff466ac0`，不能把两者当成同一测试载体。
 
 **实施边界**：Scheme 保留 checkpoint 参数创建、物理 shape/dtype、loader metadata；能统一的后处理与计算委托现有公共 kernel。不同之处放在必要的格式适配位置，不复制新的 quant / matmul，也不让共享执行猜测 checkpoint 来源。
 
 执行顺序与验收：
 
-- [ ] 对照在线、离线、SRT 三条链路，列出输入/输出 dtype、逻辑 shape、物理 layout、stride、bias 与 scale 差异。
-- [ ] 明确 checkpoint 的 `weight_scale` 与 SRT `weight_scale_inv` 的映射时机；保留加载键和元数据，不能仅按名字推断数学含义。
-- [ ] 核对 G1.1：余块 scale 用逻辑 block 数，奇数 block 数按实际 kernel 契约配对/补齐；不凭补齐推断 kernel 接受任意 K。
-- [ ] 同时迁移必要的 post-load 和 apply，防止重复 transpose、重复准备或沿用错误 stride；固定/动态 bias 行为保持正确。
-- [ ] 用已有公共实现消除重复 activation quant、matmul 和 shape 恢复；确需扩展接口时检查现有调用方。
-- [ ] 完成针对性 CPU/mock 回归，覆盖二维/多维、dtype、bias、scale 边界和 loader 参数映射。
+- [x] 对照在线、离线、SRT 三条链路，列出输入/输出 dtype、逻辑 shape、物理 layout、stride、bias 与 scale 差异。
+- [x] 明确 checkpoint 的 `weight_scale` 与 SRT `weight_scale_inv` 的映射时机；保留加载键和元数据，不能仅按名字推断数学含义。
+- [x] 核对 G1.1：余块 scale 用逻辑 block 数，奇数 block 数按实际 kernel 契约配对/补齐；不凭补齐推断 kernel 接受任意 K。
+- [x] 同时迁移必要的 post-load 和 apply，防止重复 transpose、重复准备或沿用错误 stride；固定/动态 bias 行为保持正确。
+- [x] 用已有公共实现消除重复 activation quant、matmul 和 shape 恢复；确需扩展接口时检查现有调用方。
+- [x] 完成针对性 CPU/mock 回归，覆盖二维/多维、dtype、bias、scale 边界和 loader 参数映射。
 - [ ] 真实 ModelSlim checkpoint 加载 → warmup → 图片请求；补目标硬件数值与性能证据。
+
+**验证方法**：在本节独立分支使用真实 Wan2.2 TI2V ModelSlim MXFP8 checkpoint，通过 `diffusion/run_wan22_ti2v_mxfp8_offline.py` 传入 `--model-path`、`--image-path`、`--seed 42` 和固定分辨率/帧数/步数，验证图生视频；`diffusion/ti2v_offline_mxfp8.sh` 的 `sglang generate ... --warmup` 可用于显式 warmup，需使用服务器实际模型路径。用独立 worktree 的基线 `62ff466ac0`、相同权重/图片/prompt/seed/软件栈做前后对照，比较代表性 Linear 输出误差、生成结果和稳定阶段耗时（warmup 单列，至少重复三次）。再用在线 MXFP8 脚本做公共 kernel 兼容冒烟。不同在线/离线量化来源不要求逐元素相等。现有 `test/registered/unit/layers/quantization/test_diffusion_modelslim_mxfp8.py` 是 CPU/mock 契约回归，不能替代以上硬件项目。
 
 依赖是 **共享 kernel 和 loader 的契约正确**，不是机械要求整个 #32745 或 G2.1 必须先合并。按最小必要提交组织独立 diff。
 
-### G2.3：Ascend MXFP 局部能力表——已建分支，待实施
+### G2.3：Ascend MXFP 局部能力表——试点已推送，待硬件验收
 
-已登记 `junlin/ascend-mxfp-capabilities`，worktree 为 `sglang/ascend_mxfp_capabilities/`；当前定位见 [branches.md](branches.md#current-branch-map)。尚未登记实现或验收证据。
+实现提交 `d6a46f90d97039e14476be47468c996f11caf603`，独立基线 `62ff466ac0c2cdd5521acf7d4c673fa7630eb083`；分支 `junlin/ascend-mxfp-capabilities`、worktree `sglang/ascend_mxfp_capabilities/`。17 条局部描述实际用于 Config/Method/MoE runner、既有 fallback warning、支持文档及参数化矩阵；14 个 CPU/mock 测试与发布记录见 [branches.md](branches.md#current-branch-map)。验证状态与实现状态独立，尚无本提交的 NPU / TP/EP 验收。
 
 先检查 `python/sglang/kernels/spec.py` 中 `KernelSpec` / `FormatSignature` 与现有量化校验。平台 capability 和 dtype 描述已有基础，但不能视为 checkpoint、来源、层类型、scale、TP/EP 的完整运行时验证。
 
@@ -159,13 +176,17 @@ Scheme：格式相关参数、loader metadata、scale / packing 契约
 
 任务清单：
 
-- [ ] 找出现有信息源与校验入口；避免再造重复的全局 registry，也不把所有模型策略塞进 KernelSpec。
-- [ ] 用最小机器可读定义表达真实条件，可引用底层 kernel 能力；未知验证状态单独保存。
-- [ ] 接入真实路径：配置齐备时检查可静态判断的组合；模型/分片信息齐备时检查 shape；必须依赖权重的数据留在明确的 post-load 校验点。
-- [ ] 错误消息指出请求组合、不满足的条件和已有可用方案，避免到 matmul/reshape 时才暴露含糊错误。
-- [ ] 表达已有 fallback，输出实际选择的精度/后端；不新增静默降精度、静默 BF16 回退或离线 packed 权重的无效回退。
-- [ ] 支持文档与参数化测试由同一信息源生成或校验，覆盖允许、拒绝、fallback 和待硬件验证的区别。
+- [x] 找出现有信息源与校验入口；避免再造重复的全局 registry，也不把所有模型策略塞进 KernelSpec。
+- [x] 用最小机器可读定义表达真实条件，可引用底层 kernel 能力；未知验证状态单独保存。
+- [x] 接入真实路径：配置齐备时检查可静态判断的组合；模型/分片信息齐备时检查 shape；必须依赖权重的数据留在明确的 post-load 校验点。
+- [x] 错误消息指出请求组合、不满足的条件和已有可用方案，避免到 matmul/reshape 时才暴露含糊错误。
+- [x] 表达已有 fallback，输出实际选择的精度/后端；不新增静默降精度、静默 BF16 回退或离线 packed 权重的无效回退。
+- [x] 支持文档与参数化测试由同一信息源生成或校验，覆盖允许、拒绝、fallback 和待硬件验证的区别。
 - [ ] 核对原有支持路径不被误拒绝；按宣称支持的 TP/EP 与后端补硬件 probe。
+
+**验证方法**：在本节独立分支先运行 `test/registered/unit/layers/quantization/test_npu_mxfp_capabilities.py` 的 14 项契约测试，检查允许、拒绝、既有 fallback 与文档一致性；这些仍是 CPU/mock 测试。硬件部分用同一软件栈，对照基线 `62ff466ac0`，以已有可运行 checkpoint 检查 Dense、MoE、Diffusion 的已实现路径能够加载、warmup、执行请求；Dense 从 TP=1 扩至实际要支持的 TP，MoE 另测实际使用的 TP/EP 与通信后端。预期拒绝项应在对应配置/加载校验点给出条件明确的错误，例如不符合当前 loader 的局部 K、MXFP MoE 配置 `ascend_fuseep`；仅在隔离测试进程构造非法输入，不修改真实 checkpoint。分别记录每个已测组合，不能把某一路通过扩展为全部 17 条硬件通过；在线 W4A8/W4A4 MoE 在本分支基线仍有既有全精度 fallback，不算 G1.2 的量化功能验收。
+
+G2.2 / G2.3 均未叠加 mixed gate/up 和 resize 修复，也不包含彼此的实现。当前 Qwen3.6 混合 checkpoint 的成功不能直接作为它们的通过证据；独立分支验证优先使用其基线已支持的 checkpoint。若要沿用该混合 checkpoint 验收 G2.3，先单独准备明确叠加兼容提交的集成 worktree，并核对能力元数据与新基线 loader 契约，不能直接替换服务源码后把旧兼容问题归为校验回归。
 
 验收不是“新增了一张表”，而是存在可追踪的校验调用方、文档使用方和测试使用方。G2.2 与 G2.3 可分别实施，能力表也不必等待全部格式实现完毕。
 
@@ -203,7 +224,7 @@ Gemma RMSNorm 是已有切片。继续逐个核对 MXFP 的代际判断，不强
 
 ### 5.1 PR 合入跟踪表
 
-**2026-10-12 通过 GitHub CLI 核实。** 保留用户原计划的 1–8 序号，后补的 kernel #824 列为第 9 项；序号便于对应原计划，实际前置按第 5.2 节执行。当前待合入的是 7 个个人 PR：全部 Open、`base=main`、`MERGEABLE`，均仍需 review；其中 3 个保持 Draft。`MERGEABLE` 只表示没有 Git 合并冲突，不表示 CI、硬件验收或合入条件已全部满足。
+**2026-10-14 通过 GitHub CLI 核实。** 保留用户原计划的 1–8 序号，后补的 kernel #824 列为第 9 项；序号便于对应原计划，实际前置按第 5.2 节执行。当前待合入的是 7 个个人 PR：全部 Open、`base=main`、`MERGEABLE`，均仍需 review；其中 3 个保持 Draft。`MERGEABLE` 只表示没有 Git 合并冲突，不表示 CI、硬件验收或合入条件已全部满足。
 
 | 原序号 | PR | 交付目标 / 对应重构目标 | 合入情况 | 当前 head 检查聚合 | 前置与下一步 |
 | --- | --- | --- | --- | --- | --- |
@@ -219,7 +240,7 @@ Gemma RMSNorm 是已有切片。继续逐个核对 MXFP 的代际判断，不强
 
 两条旧 PR #32601 / #34387 仍为 Closed；上表用新编号跟踪后续交付，旧号只作追溯。重新建 PR 沿用了原分支，因此无需为换号再创建分支。
 
-七个待合入 PR 的本地 HEAD 与 GitHub head 在本轮核对一致，SHA 统一记录在 [branches.md 当前定位表](branches.md#current-branch-map)。五个 SGLang PR 的 FAILURE 包含 gate / finish 检查失败；本轮只记录检查聚合，未逐项重新归因，不能直接判定为代码回归，也不能概括成“只缺 review”。缺少最新 head 的 NPU 证据时，仍须按对应验收项补验，不自动转 Ready 或执行上游合并。
+七个待合入 PR 的本地 HEAD 与 GitHub head 在本轮核对一致，SHA 统一记录在 [branches.md 当前定位表](branches.md#current-branch-map)。五个 SGLang PR 当前各返回 16 FAILURE、82 SKIPPED、23 SUCCESS；kernel #638 为 54 SUCCESS / 1 SKIPPED，#824 为 27 SUCCESS / 1 SKIPPED。本轮只记录检查聚合，未逐项重新归因，不能直接判定为代码回归，也不能概括成“只缺 review”。缺少最新 head 的 NPU 证据时，仍须按对应验收项补验，不自动转 Ready 或执行上游合并。
 
 ### 配套、验证与替代 PR
 
@@ -227,9 +248,10 @@ Gemma RMSNorm 是已有切片。继续逐个核对 MXFP 的代际判断，不强
 
 | PR | 本轮状态 | 对原计划的作用 / 后续核对 |
 | --- | --- | --- |
-| [SGLang #36426](https://github.com/sgl-project/sglang/pull/36426) | Open，非 Draft；mergeable=UNKNOWN；检查 FAILURE | 视觉塔 ModelSlim config 的组合验证依赖；#32745 的 scale 边界需要相应加载链路才能触发。已有同文件改动，不再称为文件完全独立；不混入正式功能 PR 栈 |
-| [kernel #742](https://github.com/sgl-project/sgl-kernel-npu/pull/742) | Open，Draft；mergeable=UNKNOWN；未返回检查聚合 | 历史 MTP 构建组合使用此分支并包含 #651；联调前重验当前 head 的包含关系和 state 迁移修复，不能仅凭旧构建记录判断 |
-| [kernel #651](https://github.com/sgl-project/sgl-kernel-npu/pull/651) | Open，非 Draft；mergeable=UNKNOWN；检查 FAILURE | 核对 `move_intermediate_cache` 的 `h_block_size 2→1` 及相关 state 迁移契约；这是历史 950 MTP 的运行前提之一，不是已合入 #808 的待合入前置 |
+| [SGLang #36426](https://github.com/sgl-project/sglang/pull/36426) | Open，非 Draft；mergeable=MERGEABLE；检查 FAILURE | 视觉塔 ModelSlim config 的组合验证依赖；#32745 的 scale 边界需要相应加载链路才能触发。已有同文件改动，不再称为文件完全独立；不混入正式功能 PR 栈 |
+| [kernel #742](https://github.com/sgl-project/sgl-kernel-npu/pull/742) | Open，Draft；mergeable=CONFLICTING；未返回检查聚合 | 历史 MTP 构建组合使用此分支并包含 #651；先处理基线冲突，再重验当前 head 的包含关系和 state 迁移修复，不能仅凭旧构建记录判断 |
+| [kernel #651](https://github.com/sgl-project/sgl-kernel-npu/pull/651) | Open，非 Draft；mergeable=CONFLICTING；检查 FAILURE | 先处理基线冲突，再核对 `move_intermediate_cache` 的 `h_block_size 2→1` 及相关 state 迁移契约；这是历史 950 MTP 的运行前提之一，不是已合入 #808 的待合入前置 |
+| [SGLang #32266](https://github.com/sgl-project/sglang/pull/32266) | **Closed，未合并** | 保留为 Qwen3.5 ModelSlim 适配的历史来源；当前组合按 #32745 / #36426 及具体分支核对，不再作为 Open Draft 跟踪 |
 | [kernel #747](https://github.com/sgl-project/sgl-kernel-npu/pull/747) | **Merged，2026-09-17** | 统一 SSM state layout；配套 wheel 必须包含其效果，与 SGLang #39589 配对验证 |
 | [SGLang #39589](https://github.com/sgl-project/sglang/pull/39589) | **Merged，2026-09-18** | SGLang 侧对应 layout；检查 prefill / decode / verify 的表示一致性 |
 | [SGLang #39438](https://github.com/sgl-project/sglang/pull/39438) | **Merged，2026-09-17** | 已提供 Wan2.2 MXFP8 Attention，是 #32041 关闭的替代实现背景；不代表 Diffusion 离线 Linear 的 G2.2 已完成 |
@@ -276,7 +298,7 @@ G4 跨代际切片：独立推进；G3 与公共框架协调
 上述每个改动 ──────────────────────────→ G5 证据与发布状态更新
 ```
 
-G2 新分支按实际依赖取最小基线，不把整个 Gemma / MTP / FIA 栈作为架构重构的默认前置。跨仓依赖通过 API / wheel 验证。G2.1 已从 #43739 开发，但新增实现提交尚未回流该功能 PR；G2.2 / G2.3 已分别建分支，不能据此认为已有实现。具体分支定位见 [branches.md](branches.md#current-branch-map)。
+G2 新分支按实际依赖取最小基线，不把整个 Gemma / MTP / FIA 栈作为架构重构的默认前置。跨仓依赖通过 API / wheel 验证。G2.1 已从 #43739 开发，但新增实现提交尚未回流该功能 PR；G2.2 / G2.3 已分别提交局部实现；B 基线的离线 K=64 对齐校验不含 A 的 partial-scale 适配，未来组合时需同步能力定义和测试。具体分支定位见 [branches.md](branches.md#current-branch-map)。
 
 ## 6. 跟踪与后续会话使用规则
 
@@ -289,16 +311,19 @@ G2 新分支按实际依赖取最小基线，不把整个 Gemma / MTP / FIA 栈�
 | 2026-10-12 | 全计划 | 建立本跟踪文件，归档原 HTML，明确 G2.2 / G2.3 的范围和验收 | 分别实施 G2.2、G2.3 |
 | 2026-10-12 | 合入队列与跟踪分工 | 纳入原 1–8 项及 kernel #824；改用 #43739（原 #32601）、#43740（原 #34387）；通过 `gh` 核对 7 个待合入个人 PR 和配套 PR；已合入 / 已关闭项退出待合入队列 | PR 状态统一维护第 5 节，分支定位维护 `branches.md` |
 | 2026-10-12 | G2.2 / G2.3 准备 | 本地已建两个独立 worktree，均无工作区改动或相对建分支基线的实现增量；本次未查到对应 PR | 实施后补提交、验证证据和交付信息 |
+| 2026-10-12 | G2.2 / G2.3 实现与发布 | `6eb8e1dd1c` / `d6a46f90d9` 独立提交并普通 push，本地/远端一致，ahead/behind `0 0`；3 / 14 个 CPU/mock tests、27 组旧/新契约对照及 lint/static 通过；提交前重跑证据位于 `.pi/tasks/01a12eff-f049-75d4-9d0f-360c93f9a30c-4113/b57ab2b41.output`；完整 remote 核验见 `branches.md` | 完整 registered 入口缺 psutil；补目标 NPU 数值、真实 checkpoint/warmup/请求、TP/EP/backend 及性能，未经授权不建 PR |
+| 2026-10-14 | G2.1 离线功能验收 | 用户确认 `2ef4c276be` / Qwen3.6-27B ModelSlim W4A8 在 BF16 SSM、去掉禁 graph 参数并重启后复测正常；按用户真机回报记通过，历史乱码根因未证实，无生产 graph 修复 | 补在线真实模型请求及公共执行 NPU 数值对照；G2.2 / G2.3 仍需各自独立分支硬件验证 |
+| 2026-10-14 | G2.1 在线功能补验 | 用户确认 Dense 在线 W4A8 启动及最终请求正常；日志明确视觉 27 个 fc2 因 K=4304 沿用 BF16 回退。在线/离线基本功能均记通过，未附的请求矩阵不推定覆盖 | 补原清单中的两入口及重构前后 NPU 数值对照；全视觉 W4A8 不作为 G2.1 新增门槛 |
 
-**NPU Qwen-VL 预处理补丁待办（2026-10-13，用户要求暂缓）**
+**NPU Qwen-VL 预处理补丁待办（2026-10-13 用户要求暂缓；后续生成恢复正常，尚未恢复此项工作）**
 
-- [ ] 精度问题定位后，收敛本仓 NPU 预处理补丁：评估复用 Transformers 的分组、resize、rescale/normalize 流程，仅保留 NPU 必要的 patch/layout 适配，降低复制整个 `_preprocess` 带来的接口漂移。图片和视频一起覆盖，并记录支持的 Transformers 接口范围。
+- [ ] 恢复该项工作时，收敛本仓 NPU 预处理补丁：评估复用 Transformers 的分组、resize、rescale/normalize 流程，仅保留 NPU 必要的 patch/layout 适配，降低复制整个 `_preprocess` 带来的接口漂移。图片和视频一起覆盖，并记录支持的 Transformers 接口范围。
 - [ ] 补真实 HF processor 的 CPU 集成回归和目标 NPU warmup/图片/视频验证；本次隔离 CPU 契约检查不能替代该验收。
 
 新增记录模板：`日期 / 任务 ID / 实现提交或证据链接 / PR / 改动 / 已验证范围与日志 / 未验证范围 / 下一步`。滚动分支定位引用 `branches.md`；验证证据中的 SHA 固定保留。不要用一个“完成”同时代替实现、硬件验收和上游合并。以上表格是有日期的人工维护记录，不是自动轮询面板；报告或操作前用 `gh` 刷新。
 
 交给新会话时可以直接说：
 
-> 阅读 AGENTS.md 和 docs/mxfp-refactoring-plan.md，执行 G2.2（Diffusion 离线 MXFP8 公共执行复用）与 G2.3（Ascend MXFP 局部能力描述、提前校验、文档和测试）。先核实 G2.1 的已有成果、最新基线和用户改动，分别在 sglang/ 直属独立 worktree 实施，按文中的验收清单验证并更新进度。
+> 阅读 AGENTS.md 和 docs/mxfp-refactoring-plan.md。G2.1 已实现且在线/离线基本功能获用户真机通过反馈，补其公共执行 NPU 数值对照；G2.2 / G2.3 已分别提交实现，继续各自硬件验收，不重新实现。先核对实际分支、部署源码、基线及用户改动；需要修代码时只在对应 sglang/ 直属独立 worktree 进行，按现有清单更新证据。
 
 工作范围、提交与发布按用户当次授权和仓库规则执行，已经明确授权的动作不重复询问。默认单 agent，保留不相关改动。

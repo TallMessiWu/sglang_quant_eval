@@ -75,7 +75,7 @@ Scheme：格式相关参数、loader metadata、scale / packing 契约
 | G1.1 | 修正 MXFP8 partial-scale 与布局边界 | 已有对应修复；Diffusion loader 仍需单独核对 | 余块与奇数 scale 的表示、分片后 shape 和目标 NPU 验证；占位修正不等于任意 K 可运行 | #32745；状态见下方 PR 表 |
 | G1.2 | 补在线 MoE W4A8 / W4A4 与实际精度分配 | 两条功能分支已有实现，保持各自能力增量 | 专家确实量化；层级精度、融合、dispatch、TP/EP 与在线 RTN 精度需有证据 | #43739（原 #32601）/ #32602；状态见 PR 表 |
 | **G2.1** | **Dense W4A8 在线/离线公共执行** | **实现已提交并推送** | 8 个 CPU/mock 测试；2026-10-14 在线、离线启动与请求功能均获用户真机正常反馈；在线视觉 27 个 fc2 保留既有 BF16 回退。两入口及重构前后 NPU 数值对照待补，尚未完成完整验收 | 实现 `24e100f1e8`，离线验收载体 `2ef4c276be`；发布/合入单独跟踪 |
-| **G2.2** | **Diffusion 离线 MXFP8 委托公共 kernel** | **实现已提交并推送** | 3 个 CPU/mock 测试、27 组调用契约对照通过；repack 工具兼容已修复，当前改用已有 I2V-A14B 候选，双 transformer 格式检查待回传；真实加载、warmup、图片请求、硬件数值/性能待补 | `6eb8e1dd1c`；独立分支，发布核验记录见 `branches.md` |
+| **G2.2** | **Diffusion 离线 MXFP8 委托公共 kernel** | **实现已提交并推送** | 3 个 CPU/mock 测试、27 组调用契约对照通过；I2V 两套 MXFP8 元数据已核对，repack 多 JSON 选择问题已修复；转换、真实加载、warmup、图片请求和硬件数值/性能待补 | `6eb8e1dd1c`；独立分支，发布核验记录见 `branches.md` |
 | **G2.3** | **Ascend MXFP 局部能力描述与提前校验** | **局部试点已提交并推送** | 17 条能力描述实际接入校验/fallback/文档；14 个 CPU/mock 测试通过；原支持路径与 TP/EP/backend 的硬件 probe 待补 | `d6a46f90d9`；独立分支，发布核验记录见 `branches.md` |
 | G3 | 权重生命周期与公共在线入口 | 待设计 / 实施，与公共框架工作协调 | 参数、元数据、重载语义明确；入口迁移兼容既有 CLI | 尚未拆出交付 PR |
 | G4 | 跨代际差异按契约归属收敛 | Gemma 切片已有实现；整体未完成 | provider 可追溯；构建 target、API 与配套 wheel 验证；只在必要处引入运行时契约层 | kernel #638 + #32745；状态见 PR 表 |
@@ -182,15 +182,19 @@ python3 validation/inspect_wan.py \
   > /tmp/g2_i2v_inventory.json
 ```
 
-需逐套核对 `high_noise_model` / `low_noise_model` 的量化 JSON、weight/scale dtype 与 shape、rotation，以及模板 `model_index.json`、`transformer/config.json`、`transformer_2/config.json`。现有固定 repack 工具支持 `high_noise_model → transformer`、`low_noise_model → transformer_2`，无需改 G2.2/G2.3 运行时分支。检查确认兼容后再执行以下转换；尚未收到 I2V 检查、转换或 NPU 结果：
+**同日 I2V 检查回报**：模板包含 `WanImageToVideoPipeline` 的 `model_index.json`、boundary_ratio=0.9，以及两套相同结构的 transformer config（40 层、40 heads × 128、ffn_dim=13824、in_channels=36、out_channels=16）。text_encoder 的 3 个 BF16 分片和 VAE 的 1 个 F32 文件 header 可读；scheduler/tokenizer 目录存在，但本脚本不检查它们的每个文件。原始 `transformer` 只有 1–11/12 分片，缺 `diffusion_pytorch_model-00012-of-00012.safetensors`，`transformer_2` 有 12/12。缺少原始 transformer 分片不阻塞离线 repack（该目录整体替换），但原始在线对照需先补齐并核对 index；不再把 117G 占用视为原模型完整。
+
+`high_noise_model` / `low_noise_model` 各有一个 14,973,550,688 字节的 `quant_model_weight_w8a8_mxfp8.safetensors`，每套 F8_E4M3=400、U8=400、F32=400、BF16=375，含 80 个 BF16 `[128,128]` Q/K rotation。各套的 MXFP8 JSON 均为 400 个 `W8A8_MXFP8` weight + 207 个 FLOAT weight，量化 weight 缺失列表为空；示例 `[5120,5120]` weight / `[5120,160]` scale、FFN `[5120,13824]` / `[5120,432]` 与模板维度及 block32 一致。描述 SHA256 均为 `1e790aff767b3d7fe63e737066d698a1704bbc2dd6be61372ae7a61bebb88634`。这是配置/header 证据，不代表完整张量数值或硬件通过。
+
+两个源目录另有 `quant_model_description_w8a8_fp8_only.json`，SHA256 `6331d56d68d10100c5876f0cf66966c257c1ec7641ca60f8ba0f526d4b168824`，其 607 个 weight 均标为 FLOAT。旧 repack 排序取第一份 JSON 会误选它。固定工具已升级为 `1916bc208b`，显式使用下方 MXFP8 描述文件；不修改源描述或权重内容。该工具仍将 `high_noise_model → transformer`、`low_noise_model → transformer_2`，G2.2/G2.3 运行时分支无需叠加工具提交。下一步转换命令如下；尚未收到真实 I2V repack 或 NPU 结果：
 
 ```bash
-
 # 第二参数换成服务器已有的 SGLang git checkout；无需切换部署分支。
 bash validation/run_g2.sh repack /实际/SGLang/checkout \
   --model-type Wan2.2-I2V-A14B \
   --original-model-path /mnt/weight/Wan2.2-I2V-A14B-Diffusers \
   --quant-path /mnt/weight/Wan2.2-I2V-A14B-w8a8c8-self-attn-bf16-rot \
+  --quant-description-file quant_model_description_w8a8_mxfp8.json \
   --output-path /mnt/share/weight/Wan2.2-I2V-A14B-Diffusers-MXFP8-G2
 
 python3 validation/inspect_wan.py \
@@ -198,7 +202,7 @@ python3 validation/inspect_wan.py \
   > /tmp/g2_i2v_repacked_inventory.json
 ```
 
-`repack` 模式固定工具提交、拒绝脏 checkout、复用/创建 `sglang/` 直属 worktree，保存完整命令及 `/tmp/g2-repack-…/run.log`；输出目录必须不存在。模板缺配置会在复制大文件前终止。转换后两套 transformer 分别与各自输入核对 MXFP8 weight/scale、rotation 数量和量化描述中的 `blocks.*.attn1.q_rot/k_rot=FLOAT`，再做 checkpoint load/warmup。baseline/G2.2/G2.3 使用同一份 repacked checkpoint 和输入图片；实际图片路径仍待确认。
+`repack` 模式固定工具提交、拒绝脏 checkout、复用/创建 `sglang/` 直属 worktree，保存完整命令及 `/tmp/g2-repack-…/run.log`；输出目录必须不存在。模板缺配置、描述文件缺失或多候选未选择会在复制大文件前终止。转换后每套 transformer 应保留 400 个 MXFP8 weight + 207 个 FLOAT weight、400 个 FP8 权重及 uint8 scale、80 个 rotation，并核对量化描述中的 `blocks.*.attn1.q_rot/k_rot=FLOAT`，再做 checkpoint load/warmup。baseline/G2.2/G2.3 使用同一份 repacked checkpoint 和输入图片；实际图片路径仍待确认。
 
 无需模型的 NPU 数值入口：激活与服务相同的环境，在主仓根目录运行（第二参数可换成服务器任一已有 SGLang checkout；`PYTHON` 可指定服务 Python）：
 

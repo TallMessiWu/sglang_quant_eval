@@ -23,7 +23,7 @@
 | G2.2：Diffusion MXFP8 公共执行 | `junlin/diffusion-mxfp8-shared-execution` | `6eb8e1dd1c` | `sglang/diffusion_mxfp8_shared_execution/` |
 | G2.3：Ascend MXFP 能力校验 | `junlin/ascend-mxfp-capabilities` | `d6a46f90d9` | `sglang/ascend_mxfp_capabilities/` |
 | G2.2 / G2.3 数值与模型对照基线 | detached HEAD（只读对照） | `62ff466ac0` | `sglang/g2_validation_baseline/` |
-| Wan repack rotation / 量化元数据兼容 | `junlin/wan-repack-rotation-keys` | `6e19df8e6f` | `sglang/wan_repack_rotation_keys/` |
+| Wan repack rotation / 量化元数据兼容 | `junlin/wan-repack-rotation-keys` | `1916bc208b` | `sglang/wan_repack_rotation_keys/` |
 | ModelSlim Dense gate/up 混合精度与预处理兼容 | `junlin/modelslim-mixed-gate-up` | `2ef4c276be` | `sglang/modelslim_mixed_gate_up/` |
 
 G2.1 的开发基线为 #43739 的 `ded4671577`；G2.2 / G2.3 的建分支基线均为 `62ff466ac0`。实现与验收进度见目标跟踪表，不由 HEAD 或目录存在与否推断。
@@ -33,6 +33,10 @@ G2.1 的开发基线为 #43739 的 `ded4671577`；G2.2 / G2.3 的建分支基线
 2026-10-14 Wan 格式检查后新增独立工具修复：从 `62ff466ac0` 建立直属 worktree `sglang/wan_repack_rotation_keys/`，提交 [`6e19df8e6f8b1647116cf1e8f3311fb7e07aba2d`](https://github.com/TallMessiWu/sglang/commit/6e19df8e6f8b1647116cf1e8f3311fb7e07aba2d) 并普通推送至 `origin/junlin/wan-repack-rotation-keys`，local/remote SHA 相同、ahead/behind `0 0`，未创建 PR。只修改 `wan_repack.py` 及其文件格式回归：保留 loader 识别的 `attn1.q_rot/k_rot` 名称、独立转换 JSON-only attention 元数据，并在模板缺 `model_index.json` 或 transformer config 时先报错。G2.2/G2.3 的分支与 SHA 保持不变；该工具生成的同一份 checkpoint 将用于两边对照，无需把工具提交混入运行时分支。
 
 验证为真实 CPU safetensors 文件读写的 4 项隔离回归（含 TI2V 单 transformer、I2V 双 transformer、FP8/uint8/BF16 字节保留及模板缺失）：基线出现 rotation 键错误、JSON-only 元数据缺失和缺配置未拒绝，修复后通过。harness 直接加载真实 converter、logging、CI 注册模块，仅绕过 SGLang 包初始化；标准入口仍缺 `orjson`，未运行 NPU。证据 `/tmp/g2-repack-red.log`、`/tmp/g2-repack-green.log`，harness `/tmp/g2_repack_test_harness.py`。lint、format、语法及 diff 检查通过。服务器源权重检查与后续命令见目标表 G2.2 段落。
+
+2026-10-14 I2V 检查后继续在同一工具分支修复多描述文件选择：用户的 high/low noise 目录均同时含 `quant_model_description_w8a8_fp8_only.json`（607 个 FLOAT weight）和 `quant_model_description_w8a8_mxfp8.json`（400 个 MXFP8 + 207 个 FLOAT weight）。旧代码排序取首项，会把实际 FP8/uint8 权重配上全 FLOAT 描述。新增 `--quant-description-file`，在每个 expert 目录分别解析指定文件；默认多候选时拒绝，并在复制模板前检查全部 expert。提交 [`1916bc208baa931c3bd834d55f778c70d7d154d2`](https://github.com/TallMessiWu/sglang/commit/1916bc208baa931c3bd834d55f778c70d7d154d2) 已普通推送至原分支，local/remote SHA 相同、ahead/behind `0 0`，未创建 PR。
+
+本轮 7 项隔离 CPU 文件回归通过：保留原 4 项，新增多候选拒绝、真实 CLI 双 expert 分别选择和选择错误提前拒绝。修改前，多候选测试未按预期拒绝，新增接口测试也因接口尚不存在失败；修复后通过。证据 `/tmp/g2-repack-description-red.log`、`/tmp/g2-repack-description-green.log`。仅绕过包初始化，converter、argparse、文件读写使用真实代码；lint、format、语法和 diff 检查通过，不计 NPU 验收。`validation/run_g2.sh` 固定新 SHA，新建 checkout 名称带 SHA 后缀，避免与用户已有旧版本 detached worktree 冲突；同 SHA 仍优先复用。
 
 2026-10-14 局部复核：G2.1、G2.2、G2.3 及 mixed gate/up 四个 worktree 的本地 HEAD 与实时 `git ls-remote origin` 相同，分别为 `24e100f1e8429bde02f3e81221c4392e9e69934b`、`6eb8e1dd1c91678284d1355cdb182a85ab4e9863`、`d6a46f90d97039e14476be47468c996f11caf603`、`2ef4c276be4b3fa6b7e4578a2d738ec00c0dd668`；工作区干净。mixed gate/up 是 G2.1 + 混精兼容 + resize 兼容，没有叠加 G2.2 / G2.3。此核对不刷新其他 PR 的 CI / review / 合入状态。
 

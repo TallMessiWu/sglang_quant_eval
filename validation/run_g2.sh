@@ -14,7 +14,7 @@ python_bin=${PYTHON:-python3}
 baseline=62ff466ac0c2cdd5521acf7d4c673fa7630eb083
 g22=6eb8e1dd1c91678284d1355cdb182a85ab4e9863
 g23=d6a46f90d97039e14476be47468c996f11caf603
-repack_head=6e19df8e6f8b1647116cf1e8f3311fb7e07aba2d
+repack_head=1916bc208baa931c3bd834d55f778c70d7d154d2
 case "$mode" in
     linear|boundary|wan-baseline|wan-g22)
         head=$g22; branch=junlin/diffusion-mxfp8-shared-execution ;;
@@ -61,7 +61,7 @@ else:
 PY
 }
 
-source=$(prepare "$head" "g2_validation_${mode//-/_}")
+source=$(prepare "$head" "g2_validation_${mode//-/_}_${head:0:10}")
 if [[ "$mode" == repack ]]; then
     if [[ -n "$(git -C "$source" status --porcelain --untracked-files=normal)" ]]; then
         echo "Refusing to repack using a dirty checkout: $source" >&2

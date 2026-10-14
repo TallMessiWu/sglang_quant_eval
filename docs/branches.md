@@ -22,9 +22,12 @@
 | G2.1：Dense W4A8 公共执行 | `junlin/w4a8-shared-execution` | `24e100f1e8` | `sglang/w4a8_shared_execution/` |
 | G2.2：Diffusion MXFP8 公共执行 | `junlin/diffusion-mxfp8-shared-execution` | `6eb8e1dd1c` | `sglang/diffusion_mxfp8_shared_execution/` |
 | G2.3：Ascend MXFP 能力校验 | `junlin/ascend-mxfp-capabilities` | `d6a46f90d9` | `sglang/ascend_mxfp_capabilities/` |
+| G2.2 / G2.3 数值与模型对照基线 | detached HEAD（只读对照） | `62ff466ac0` | `sglang/g2_validation_baseline/` |
 | ModelSlim Dense gate/up 混合精度与预处理兼容 | `junlin/modelslim-mixed-gate-up` | `2ef4c276be` | `sglang/modelslim_mixed_gate_up/` |
 
 G2.1 的开发基线为 #43739 的 `ded4671577`；G2.2 / G2.3 的建分支基线均为 `62ff466ac0`。实现与验收进度见目标跟踪表，不由 HEAD 或目录存在与否推断。
+
+2026-10-14 验收工具准备：再次实时核实 G2.2 / G2.3 origin 分支仍分别为 `6eb8e1dd1c` / `d6a46f90d9`，两个功能 worktree 均干净；在 `sglang/` 下新增上述 detached 基线 worktree，没有修改生产实现或叠加兼容提交。`validation/run_g2.sh` 获取固定分支后核对 SHA，复用同 SHA 的直属 worktree，缺失时只新建 detached 验收 checkout，不切换、重置已有分支。主仓预存的未跟踪 `validation/g2_npu.py` 经审查补齐；`.pi/` 和 kernel 原有差异保留。
 
 2026-10-14 局部复核：G2.1、G2.2、G2.3 及 mixed gate/up 四个 worktree 的本地 HEAD 与实时 `git ls-remote origin` 相同，分别为 `24e100f1e8429bde02f3e81221c4392e9e69934b`、`6eb8e1dd1c91678284d1355cdb182a85ab4e9863`、`d6a46f90d97039e14476be47468c996f11caf603`、`2ef4c276be4b3fa6b7e4578a2d738ec00c0dd668`；工作区干净。mixed gate/up 是 G2.1 + 混精兼容 + resize 兼容，没有叠加 G2.2 / G2.3。此核对不刷新其他 PR 的 CI / review / 合入状态。
 

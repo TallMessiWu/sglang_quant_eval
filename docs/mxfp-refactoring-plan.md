@@ -154,6 +154,33 @@ Scheme：格式相关参数、loader metadata、scale / packing 契约
 
 **验证方法**：在本节独立分支使用真实 Wan2.2 TI2V ModelSlim MXFP8 checkpoint，通过 `diffusion/run_wan22_ti2v_mxfp8_offline.py` 传入 `--model-path`、`--image-path`、`--seed 42` 和固定分辨率/帧数/步数，验证图生视频；`diffusion/ti2v_offline_mxfp8.sh` 的 `sglang generate ... --warmup` 可用于显式 warmup，需使用服务器实际模型路径。用独立 worktree 的基线 `62ff466ac0`、相同权重/图片/prompt/seed/软件栈做前后对照，比较代表性 Linear 输出误差、生成结果和稳定阶段耗时（warmup 单列，至少重复三次）。再用在线 MXFP8 脚本做公共 kernel 兼容冒烟。不同在线/离线量化来源不要求逐元素相等。现有 `test/registered/unit/layers/quantization/test_diffusion_modelslim_mxfp8.py` 是 CPU/mock 契约回归，不能替代以上硬件项目。
 
+**2026-10-14 验收入口准备，未取得 NPU 结果**：`validation/inspect_wan.py` 只用标准库读取 config、量化 JSON、safetensors header（不读取张量数据、不占 NPU、不转换权重），汇总物理 dtype/shape、量化格式、rotation/smooth 等附加键和缺失键。用户提供的 TI2V 候选如下，目录名称不作为格式确认；按用户要求，先检查再 repack，新增权重优先写入 `/mnt/share/weight/`：
+
+```bash
+# 主仓根目录；回传生成的 JSON。
+python3 validation/inspect_wan.py \
+  /mnt/weight/Wan2.2-TI2V-5B \
+  /mnt/share/weight/Wan2.2-TI2V-5B-Diffusers \
+  /mnt/weight/Wan2.2-TI2V-5B-w8a8c8-self-attn-bf16-rot \
+  > /tmp/g2_wan_inventory.json
+```
+
+目标分支的 `python/sglang/multimodal_gen/tools/wan_repack.py` 已支持 TI2V-5B 单 transformer 和 I2V/T2V-A14B 双 transformer；输入为同架构的 Diffusers 原模型及 ModelSlim `quant_model_weight*.safetensors` / `quant_model_description*.json`，负责复制组件、改参数名、恢复 transformer config，不负责量化。`w8a8c8` 名称不能证明 Linear 是 `W8A8_MXFP8`；确认浮点 FP8 weight、uint8 UE8M0 scale 及 rotation 契约后，才能决定是否复用。未开始下载或 repack。官方原模型可查 [TI2V-5B](https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B-Diffusers/tree/main)、[I2V-A14B](https://huggingface.co/Wan-AI/Wan2.2-I2V-A14B-Diffusers/tree/main)、[T2V-A14B](https://huggingface.co/Wan-AI/Wan2.2-T2V-A14B-Diffusers/tree/main)，优先利用已有 TI2V 目录。
+
+无需模型的 NPU 数值入口：激活与服务相同的环境，在主仓根目录运行（第二参数可换成服务器任一已有 SGLang checkout；`PYTHON` 可指定服务 Python）：
+
+```bash
+ASCEND_RT_VISIBLE_DEVICES=0 bash validation/run_g2.sh linear /实际/SGLang/checkout
+# 边界单独进程执行；不将失败混入旧/新等价结论。
+ASCEND_RT_VISIBLE_DEVICES=0 bash validation/run_g2.sh boundary /实际/SGLang/checkout --k 4304
+```
+
+`linear` 固定 seed=42，K=64/128/512、N=128，覆盖 2D/3D/4D/非连续输入 × FP16/BF16/FP32 × 无 bias/FP32 bias/更新后的 FP16 layer bias，共 108 组；两边复制同一份合成 checkpoint bytes、检查 prepared bytes/stride，再运行实际 post-load/apply，旧/新阈值预设 `rtol=atol=0`。旧 Scheme 从独立基线直接加载，依赖来自目标分支（基线到 G2.2 仅 Scheme 和测试有变动），这不是两次独立完整模型启动。`boundary` 对解量化 FP32 参考使用预设 `rtol=atol=0.02`，仅为算子边界检查。失败保留输入、当前阶段、输出误差和 traceback；不得事后放宽阈值冒充通过。
+
+`run_g2.sh` 自动保存完整 `run.log` 和 `result/result.json` 至打印的 `/tmp/g2-…` 目录，记录源码/import 路径、SHA、Python/torch/torch_npu/kernel wheel、可读的 CANN/driver 信息及设备；缺失信息会显式保留，仍需补齐实际部署版本。没有 NPU 时非零退出，`full_g2_acceptance` 始终为 false。模型路径检查完后用同入口的 `wan-baseline` / `wan-g22` 模式分别执行 `--model-path … --image-path … --save-samples`；固定相同参数，单独记录加载、一次完整形状 warmup 请求和至少三次稳定生成，保留第一份稳定输出的解码数组（可能较大），供数值及媒体对照。`--mode online` 另测原始权重；模型入口不会因文件存在就标为完整验收。
+
+本机已通过验收工具的 CPU 回归、Python lint/语法及 Shell 语法；实际执行 wrapper 确认复用功能 worktree、创建独立基线后在缺 `torch_npu` 时返回 1 并保存失败报告。证据 `/tmp/g2-linear-1eVDkKbR/`。两个分支的标准 registered 契约测试本轮均在导入时缺 `orjson`，尚未进入测试（早期记录为缺 `psutil`，以本轮实测为准）；历史 3/14 项隔离结果未重新宣称为本轮标准入口通过。
+
 依赖是 **共享 kernel 和 loader 的契约正确**，不是机械要求整个 #32745 或 G2.1 必须先合并。按最小必要提交组织独立 diff。
 
 ### G2.3：Ascend MXFP 局部能力表——试点已推送，待硬件验收
@@ -185,6 +212,8 @@ Scheme：格式相关参数、loader metadata、scale / packing 契约
 - [ ] 核对原有支持路径不被误拒绝；按宣称支持的 TP/EP 与后端补硬件 probe。
 
 **验证方法**：在本节独立分支先运行 `test/registered/unit/layers/quantization/test_npu_mxfp_capabilities.py` 的 14 项契约测试，检查允许、拒绝、既有 fallback 与文档一致性；这些仍是 CPU/mock 测试。硬件部分用同一软件栈，对照基线 `62ff466ac0`，以已有可运行 checkpoint 检查 Dense、MoE、Diffusion 的已实现路径能够加载、warmup、执行请求；Dense 从 TP=1 扩至实际要支持的 TP，MoE 另测实际使用的 TP/EP 与通信后端。预期拒绝项应在对应配置/加载校验点给出条件明确的错误，例如不符合当前 loader 的局部 K、MXFP MoE 配置 `ascend_fuseep`；仅在隔离测试进程构造非法输入，不修改真实 checkpoint。分别记录每个已测组合，不能把某一路通过扩展为全部 17 条硬件通过；在线 W4A8/W4A4 MoE 在本分支基线仍有既有全精度 fallback，不算 G1.2 的量化功能验收。
+
+2026-10-14 已准备 `ASCEND_RT_VISIBLE_DEVICES=0 bash validation/run_g2.sh capabilities /实际/SGLang/checkout`：记录真实算子注册情况（含可选 fused 算子），经 SRT/Diffusion 的实际 ModelSlim create/post-load 入口检查非法局部 K、weight/scale dtype 和 scale 数量；合法 W8A8 Linear 执行 post-load/apply 与解量化参考比较。`ascend_fuseep` 和缺算子用隔离元数据检查；fallback/blocked 项不标成硬件通过。该入口尚未在 NPU 执行，也不覆盖 MoE runner、TP/EP、真实 LLM checkpoint、全部 17 条能力或独立完整基线对照。Wan 可在元数据确认后用 `wan-g23` 与 `wan-baseline` 补同模型放行对照。
 
 G2.2 / G2.3 均未叠加 mixed gate/up 和 resize 修复，也不包含彼此的实现。当前 Qwen3.6 混合 checkpoint 的成功不能直接作为它们的通过证据；独立分支验证优先使用其基线已支持的 checkpoint。若要沿用该混合 checkpoint 验收 G2.3，先单独准备明确叠加兼容提交的集成 worktree，并核对能力元数据与新基线 loader 契约，不能直接替换服务源码后把旧兼容问题归为校验回归。
 

@@ -208,13 +208,15 @@ python3 validation/inspect_wan.py \
 
 同次日志有 SciPy 对 NumPy 2.4.6 超出其声明范围 `[1.22.4, 2.3.0)` 的告警，未中断转换；不据此修改服务环境或认定硬件故障。后续用户明确要求跳过数值对照，直接运行模型，有问题再定位；不再把 `linear` / `capabilities` 作为启动前置。模型数值、性能和 G2.3 全部能力仍无实测结论。
 
-**2026-10-14 当前运行入口**：按用户最新要求，沿用 `diffusion/` 的普通生成脚本，在 `diffusion/i2v_offline_mxfp8.sh` 中直接调用当前环境的 `sglang generate`。固定使用已 repack 的 I2V 权重和脚本旁的 `gyro.jpg`，704×1280、81 帧、40 步；不使用验收 wrapper 或 smoke 模式，不自动 fetch、切换分支、创建 worktree 或修改 PYTHONPATH。用户手动选择 SGLang 分支：G2.2 为 `junlin/diffusion-mxfp8-shared-execution`，G2.3 为 `junlin/ascend-mxfp-capabilities`。两分支独立，使用同一个启动脚本。主仓根目录执行：
+**2026-10-14 当前运行入口**：按用户最新要求，沿用 `diffusion/` 的普通生成脚本，在 `diffusion/i2v_offline_mxfp8.sh` 中直接调用当前环境的 `sglang generate`。固定使用已 repack 的 I2V 权重和脚本旁的 `gyro.jpg`，720×1280、81 帧、40 步；不使用验收 wrapper 或 smoke 模式，不自动 fetch、切换分支、创建 worktree 或修改 PYTHONPATH。用户手动选择 SGLang 分支：G2.2 为 `junlin/diffusion-mxfp8-shared-execution`，G2.3 为 `junlin/ascend-mxfp-capabilities`。两分支独立，使用同一个启动脚本。主仓根目录执行：
 
 ```bash
 ASCEND_RT_VISIBLE_DEVICES=0 bash diffusion/i2v_offline_mxfp8.sh
 ```
 
 视频、追加写入的 `run.log`、临时文件及可配置的 Hugging Face/PyTorch/Triton/SGLang Diffusion 缓存均位于执行命令的当前目录下 `./outputs_i2v_mxfp8/`。历史 `/tmp` 路径仅保留为已执行证据。之前准备的 `validation/` 工具不再作为本轮运行入口；跳过比较是用户选择，未将其记作 NPU 数值验证通过。
+
+**2026-10-14 15:47–15:49 用户服务器运行反馈**：双 transformer、text encoder、VAE、tokenizer、scheduler 已加载，文本编码和图片 VAE 编码完成，日志已进入 DenoisingStage，尚未回传去噪完成、解码或视频保存结果，也未附实际分支/HEAD，因此不认定 G2.2/G2.3 某提交已验收。当前选择 Torch SDPA；q_rot/k_rot 未加载符合 MXFP8 attention 默认关闭的路径，未证明 attention 量化执行。`fused linear+GELU ... quantized linear` 仅关闭面向非量化 Linear 的 GELU 融合优化，不改变量化 Linear 方法。日志提示 1280×704 非支持尺寸，已将 I2V 脚本修正为 1280×720；当前已启动的进程不受此修改影响。其余 SciPy、attentions/custom_ops 和内部格式告警尚未导致本次回传日志中的失败。
 
 可选的无需模型 NPU 数值入口（本轮跳过）：激活与服务相同的环境，在主仓根目录运行（第二参数可换成服务器任一已有 SGLang checkout；`PYTHON` 可指定服务 Python）：
 

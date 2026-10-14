@@ -23,7 +23,7 @@ sglang generate \
   --model-path /mnt/share/weight/Wan2.2-I2V-A14B-Diffusers-MXFP8-G2 \
   --image-path "$script_dir/gyro.jpg" \
   --prompt "A man slowly blinks, his hair and clothes move gently in the wind, raindrops fall, subtle natural motion, stable camera." \
-  --height 704 --width 1280 --num-gpus 1 \
+  --height 720 --width 1280 --num-gpus 1 \
   --num-frames 81 --num-inference-steps 40 \
   --guidance-scale 5.0 --fps 24 --seed 42 \
   --output-path "$output_dir" --output-file-name wan22_i2v_mxfp8.mp4

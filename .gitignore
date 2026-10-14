@@ -21,3 +21,6 @@ llm/.ais_bench_configs/
 # Python 字节码：曾被误提交，见 llm/__pycache__
 __pycache__/
 *.pyc
+
+# G2 run artifacts are written beneath the caller's current directory.
+g2-*/

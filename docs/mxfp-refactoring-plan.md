@@ -152,7 +152,7 @@ Scheme：格式相关参数、loader metadata、scale / packing 契约
 - [x] 完成针对性 CPU/mock 回归，覆盖二维/多维、dtype、bias、scale 边界和 loader 参数映射。
 - [ ] 真实 ModelSlim checkpoint 加载 → warmup → 图片请求；补目标硬件数值与性能证据。
 
-**验证方法**：当前按用户选择使用 Wan2.2 I2V-A14B ModelSlim MXFP8 候选，先完成下述双 transformer 格式检查与 repack，再通过 `validation/run_g2.sh wan-baseline` / `wan-g22` 传入 `--model-path`、`--image-path`、`--seed 42` 和固定分辨率/帧数/步数，验证图生视频。用独立 worktree 的基线 `62ff466ac0`、相同权重/图片/prompt/seed/软件栈做前后对照，比较代表性 Linear 输出误差、生成结果和稳定阶段耗时（一次完整形状 warmup 单列，至少重复三次）。两个 transformer 的实际加载和高/低噪声阶段执行需要日志证据；不能把只检查一套描述 JSON 的结果视为双模型验收。再用同架构原始 Diffusers 权重和 `--mode online` 做公共 kernel 兼容冒烟。不同在线/离线量化来源不要求逐元素相等。现有 `test/registered/unit/layers/quantization/test_diffusion_modelslim_mxfp8.py` 是 CPU/mock 契约回归，不能替代以上硬件项目。
+**完整验收方案（当前按用户要求跳过对照）**：使用 Wan2.2 I2V-A14B ModelSlim MXFP8，通过 `validation/run_g2.sh wan-baseline` / `wan-g22` 传入 `--model-path`、`--image-path`、`--seed 42` 和固定分辨率/帧数/步数，验证图生视频。用独立 worktree 的基线 `62ff466ac0`、相同权重/图片/prompt/seed/软件栈做前后对照，比较代表性 Linear 输出误差、生成结果和稳定阶段耗时（一次完整形状 warmup 单列，至少重复三次）。两个 transformer 的实际加载和高/低噪声阶段执行需要日志证据；不能把只检查一套描述 JSON 的结果视为双模型验收。再用同架构原始 Diffusers 权重和 `--mode online` 做公共 kernel 兼容冒烟。不同在线/离线量化来源不要求逐元素相等。现有 `test/registered/unit/layers/quantization/test_diffusion_modelslim_mxfp8.py` 是 CPU/mock 契约回归，不能替代以上硬件项目。
 
 **2026-10-14 验收入口准备，未取得 NPU 结果**：`validation/inspect_wan.py` 只用标准库读取 config、量化 JSON、safetensors header（不读取张量数据、不占 NPU、不转换权重），汇总物理 dtype/shape、量化格式、rotation/smooth 等附加键和缺失键。用户提供的 TI2V 候选如下，目录名称不作为格式确认；按用户要求，先检查再 repack，新增权重优先写入 `/mnt/share/weight/`：
 
@@ -162,7 +162,7 @@ python3 validation/inspect_wan.py \
   /mnt/weight/Wan2.2-TI2V-5B \
   /mnt/share/weight/Wan2.2-TI2V-5B-Diffusers \
   /mnt/weight/Wan2.2-TI2V-5B-w8a8c8-self-attn-bf16-rot \
-  > /tmp/g2_wan_inventory.json
+  > ./g2_wan_inventory.json
 ```
 
 目标分支的 `python/sglang/multimodal_gen/tools/wan_repack.py` 已支持 TI2V-5B 单 transformer 和 I2V/T2V-A14B 双 transformer；输入为同架构的 Diffusers 原模型及 ModelSlim `quant_model_weight*.safetensors` / `quant_model_description*.json`，负责复制组件、改参数名、恢复 transformer config，不负责量化。`w8a8c8` 名称不能证明 Linear 是 `W8A8_MXFP8`；确认浮点 FP8 weight、uint8 UE8M0 scale 及 rotation 契约后，才能决定是否复用。未开始下载或 repack。官方原模型可查 [TI2V-5B](https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B-Diffusers/tree/main)、[I2V-A14B](https://huggingface.co/Wan-AI/Wan2.2-I2V-A14B-Diffusers/tree/main)、[T2V-A14B](https://huggingface.co/Wan-AI/Wan2.2-T2V-A14B-Diffusers/tree/main)，优先利用已有 TI2V 目录。
@@ -173,13 +173,13 @@ python3 validation/inspect_wan.py \
 
 同时静态复现现有 repack 的兼容缺陷：`self_attn.q_rot/k_rot` 被前缀替换成 `attn1.to_q_rot/to_k_rot`，而 Wan 的 offline rotation opt-in 查询量化 JSON 中的 `attn1.q_rot/k_rot`；JSON-only `quant_type` 未同步改名。独立工具修复 `6e19df8e6f` 已发布，另加模板必需配置缺失时的提前拒绝；4 项隔离 CPU 文件回归及边界见 [branches.md](branches.md#current-branch-map)。该修复不启用 MXFP8 attention、不改变量化 scheme 或张量值，不能作为硬件通过证据。
 
-**2026-10-14 改用 I2V-A14B（当前下一步）**：用户报告 `/mnt/weight/Wan2.2-I2V-A14B-Diffusers` 已下载，`du -sh` 为 117G；对应 `/mnt/weight/Wan2.2-I2V-A14B-w8a8c8-self-attn-bf16-rot` 为 29G。按用户新选择先利用这两份候选，不再把 TI2V 模板下载作为前置步骤。目录大小不能证明组件完整或量化格式；TI2V 的 300 个 weight / 60 个 rotation 检查结果不能套到 I2V。主仓根目录先执行只读检查并回传 JSON：
+**2026-10-14 改用 I2V-A14B（格式检查阶段）**：用户报告 `/mnt/weight/Wan2.2-I2V-A14B-Diffusers` 已下载，`du -sh` 为 117G；对应 `/mnt/weight/Wan2.2-I2V-A14B-w8a8c8-self-attn-bf16-rot` 为 29G。按用户新选择先利用这两份候选，不再把 TI2V 模板下载作为前置步骤。目录大小不能证明组件完整或量化格式；TI2V 的 300 个 weight / 60 个 rotation 检查结果不能套到 I2V。主仓根目录先执行只读检查并回传 JSON：
 
 ```bash
 python3 validation/inspect_wan.py \
   /mnt/weight/Wan2.2-I2V-A14B-Diffusers \
   /mnt/weight/Wan2.2-I2V-A14B-w8a8c8-self-attn-bf16-rot \
-  > /tmp/g2_i2v_inventory.json
+  > ./g2_i2v_inventory.json
 ```
 
 **同日 I2V 检查回报**：模板包含 `WanImageToVideoPipeline` 的 `model_index.json`、boundary_ratio=0.9，以及两套相同结构的 transformer config（40 层、40 heads × 128、ffn_dim=13824、in_channels=36、out_channels=16）。text_encoder 的 3 个 BF16 分片和 VAE 的 1 个 F32 文件 header 可读；scheduler/tokenizer 目录存在，但本脚本不检查它们的每个文件。原始 `transformer` 只有 1–11/12 分片，缺 `diffusion_pytorch_model-00012-of-00012.safetensors`，`transformer_2` 有 12/12。缺少原始 transformer 分片不阻塞离线 repack（该目录整体替换），但原始在线对照需先补齐并核对 index；不再把 117G 占用视为原模型完整。
@@ -199,16 +199,29 @@ bash validation/run_g2.sh repack /实际/SGLang/checkout \
 
 python3 validation/inspect_wan.py \
   /mnt/share/weight/Wan2.2-I2V-A14B-Diffusers-MXFP8-G2 \
-  > /tmp/g2_i2v_repacked_inventory.json
+  > ./g2_i2v_repacked_inventory.json
 ```
 
-`repack` 模式固定工具提交、拒绝脏 checkout、复用/创建 `sglang/` 直属 worktree，保存完整命令及 `/tmp/g2-repack-…/run.log`；输出目录必须不存在。模板缺配置、描述文件缺失或多候选未选择会在复制大文件前终止。转换后每套 transformer 应保留 400 个 MXFP8 weight + 207 个 FLOAT weight、400 个 FP8 权重及 uint8 scale、80 个 rotation，并核对量化描述中的 `blocks.*.attn1.q_rot/k_rot=FLOAT`，再做 checkpoint load/warmup。baseline/G2.2/G2.3 使用同一份 repacked checkpoint 和输入图片；实际图片路径仍待确认。
+`repack` 模式固定工具提交、拒绝脏 checkout、复用/创建 `sglang/` 直属 worktree，保存完整命令及当前目录下的 `./g2-repack-…/run.log`；输出目录必须不存在。模板缺配置、描述文件缺失或多候选未选择会在复制大文件前终止。转换后每套 transformer 应保留 400 个 MXFP8 weight + 207 个 FLOAT weight、400 个 FP8 权重及 uint8 scale、80 个 rotation，并核对量化描述中的 `blocks.*.attn1.q_rot/k_rot=FLOAT`，再做 checkpoint load/warmup。后续直接复用 repacked checkpoint；单次运行默认使用仓库已有 `diffusion/gyro.jpg`。
 
 **2026-10-14 15:23 用户服务器 repack 成功**：日志 `/tmp/g2-repack-FYhE4Mpr/run.log`，实际 Python `/usr/local/python3.11.10/bin/python3`，工具源码为 `/mnt/share/hajimi/sglang_quant_eval/sglang/g2_validation_repack_1916bc208b`、HEAD `1916bc208baa931c3bd834d55f778c70d7d154d2`。已生成 `/mnt/share/weight/Wan2.2-I2V-A14B-Diffusers-MXFP8-G2`，回传检查结果 `/tmp/g2_i2v_repacked_inventory.json`。两套 transformer 各有 400 个 `W8A8_MXFP8` weight + 207 个 FLOAT weight，header 的 F8_E4M3=400、U8=400、F32=400、BF16=375 与输入一致，80 个 rotation 保留；示例 rotation 与 JSON 已改为 `attn1.q_rot/k_rot`，`model_quant_type=W8A8_MXFP8`，量化 weight 缺失列表为空。两份输出描述 SHA256 均为 `c3d6cfcc0bb54e01a6a54a896b53adf108cba07528626583eef920be9656e6ba`，每套 safetensors 为 14,973,551,240 字节。模型/transformer/text_encoder/VAE config 及已检查的非 transformer header 与转换前一致。结论仅为服务器转换完成、输出元数据匹配，未做全量张量字节对照或 NPU load/warmup/生成。
 
-同次日志有 SciPy 对 NumPy 2.4.6 超出其声明范围 `[1.22.4, 2.3.0)` 的告警，未中断转换；不据此修改服务环境或认定硬件故障。下一步在同一服务 Python 环境、空闲 NPU 上分别运行 `linear` 和 `capabilities`，先取得 G2.2 的 108 组实际算子对照及 G2.3 的真实 post-load/apply 日志，再用上述 checkpoint 进行完整模型对照。模型数值、性能和 G2.3 全部能力的状态仍未验收。
+同次日志有 SciPy 对 NumPy 2.4.6 超出其声明范围 `[1.22.4, 2.3.0)` 的告警，未中断转换；不据此修改服务环境或认定硬件故障。后续用户明确要求跳过数值对照，直接运行模型，有问题再定位；不再把 `linear` / `capabilities` 作为启动前置。模型数值、性能和 G2.3 全部能力仍无实测结论。
 
-无需模型的 NPU 数值入口：激活与服务相同的环境，在主仓根目录运行（第二参数可换成服务器任一已有 SGLang checkout；`PYTHON` 可指定服务 Python）：
+**2026-10-14 当前运行入口**：用户要求所有输出落在执行命令的当前目录。`run_g2.sh` 已将日志、媒体、TMPDIR 及 Hugging Face/PyTorch/Triton/SGLang Diffusion 缓存放在 `./g2-<mode>-…/` 下；历史 `/tmp` 路径仅保留为已执行证据，不再用于新命令。`--smoke` 仅加载模型并生成一次，不另跑 warmup、重复计时或基线对照。主仓保留 `main`，脚本自动选择 G2.2 的 `junlin/diffusion-mxfp8-shared-execution` 固定源码，无需切换已有 checkout：
+
+```bash
+ASCEND_RT_VISIBLE_DEVICES=0 bash validation/run_g2.sh wan-g22 sglang \
+  --smoke \
+  --model-path /mnt/share/weight/Wan2.2-I2V-A14B-Diffusers-MXFP8-G2 \
+  --image-path "$PWD/diffusion/gyro.jpg" \
+  --prompt "The subject moves naturally, gentle motion, static camera." \
+  --height 704 --width 1280 --num-frames 81 --num-inference-steps 40
+```
+
+G2.3 单独运行时只把 `wan-g22` 换为 `wan-g23`（`junlin/ascend-mxfp-capabilities`）；两个分支独立，没有将本次启动表述为两者的集成或完整验收。
+
+可选的无需模型 NPU 数值入口（本轮跳过）：激活与服务相同的环境，在主仓根目录运行（第二参数可换成服务器任一已有 SGLang checkout；`PYTHON` 可指定服务 Python）：
 
 ```bash
 ASCEND_RT_VISIBLE_DEVICES=0 bash validation/run_g2.sh linear /实际/SGLang/checkout
@@ -218,7 +231,7 @@ ASCEND_RT_VISIBLE_DEVICES=0 bash validation/run_g2.sh boundary /实际/SGLang/ch
 
 `linear` 固定 seed=42，K=64/128/512、N=128，覆盖 2D/3D/4D/非连续输入 × FP16/BF16/FP32 × 无 bias/FP32 bias/更新后的 FP16 layer bias，共 108 组；两边复制同一份合成 checkpoint bytes、检查 prepared bytes/stride，再运行实际 post-load/apply，旧/新阈值预设 `rtol=atol=0`。旧 Scheme 从独立基线直接加载，依赖来自目标分支（基线到 G2.2 仅 Scheme 和测试有变动），这不是两次独立完整模型启动。`boundary` 对解量化 FP32 参考使用预设 `rtol=atol=0.02`，仅为算子边界检查。失败保留输入、当前阶段、输出误差和 traceback；不得事后放宽阈值冒充通过。
 
-`run_g2.sh` 自动保存完整 `run.log` 和 `result/result.json` 至打印的 `/tmp/g2-…` 目录，记录源码/import 路径、SHA、Python/torch/torch_npu/kernel wheel、可读的 CANN/driver 信息及设备；缺失信息会显式保留，仍需补齐实际部署版本。没有 NPU 时非零退出，`full_g2_acceptance` 始终为 false。模型路径检查完后用同入口的 `wan-baseline` / `wan-g22` 模式分别执行 `--model-path … --image-path … --save-samples`；固定相同参数，单独记录加载、一次完整形状 warmup 请求和至少三次稳定生成，保留第一份稳定输出的解码数组（可能较大），供数值及媒体对照。`--mode online` 另测原始权重；模型入口不会因文件存在就标为完整验收。
+`run_g2.sh` 自动保存完整 `run.log` 和 `result/result.json` 至当前目录下打印的 `./g2-…` 子目录，记录源码/import 路径、SHA、Python/torch/torch_npu/kernel wheel、可读的 CANN/driver 信息及设备；缺失信息会显式保留，仍需补齐实际部署版本。没有 NPU 时非零退出，`full_g2_acceptance` 始终为 false。模型路径检查完后用同入口的 `wan-baseline` / `wan-g22` 模式分别执行 `--model-path … --image-path … --save-samples`；固定相同参数，单独记录加载、一次完整形状 warmup 请求和至少三次稳定生成，保留第一份稳定输出的解码数组（可能较大），供数值及媒体对照。`--mode online` 另测原始权重；模型入口不会因文件存在就标为完整验收。
 
 本机已通过验收工具的 CPU 回归、Python lint/语法及 Shell 语法；实际执行 wrapper 确认复用功能 worktree、创建独立基线后在缺 `torch_npu` 时返回 1 并保存失败报告。证据 `/tmp/g2-linear-1eVDkKbR/`。两个分支的标准 registered 契约测试本轮均在导入时缺 `orjson`，尚未进入测试（早期记录为缺 `psutil`，以本轮实测为准）；历史 3/14 项隔离结果未重新宣称为本轮标准入口通过。
 

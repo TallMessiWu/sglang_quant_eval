@@ -25,7 +25,20 @@ case "$mode" in
     *) echo "Unknown mode: $mode" >&2; exit 2 ;;
 esac
 
-evidence=$(mktemp -d "${TMPDIR:-/tmp}/g2-${mode}-XXXXXXXX")
+# Keep run artifacts and temporary/cache files on the caller's filesystem.
+evidence=$(mktemp -d "$PWD/g2-${mode}-XXXXXXXX")
+export TMPDIR="$evidence/tmp"
+export TMP="$TMPDIR" TEMP="$TMPDIR"
+export XDG_CACHE_HOME="$evidence/cache"
+export HF_HOME="$XDG_CACHE_HOME/huggingface"
+export HF_HUB_CACHE="$HF_HOME/hub" HUGGINGFACE_HUB_CACHE="$HF_HOME/hub"
+export TRANSFORMERS_CACHE="$HF_HOME/hub"
+export TORCH_HOME="$XDG_CACHE_HOME/torch"
+export TORCH_EXTENSIONS_DIR="$TORCH_HOME/extensions"
+export TORCHINDUCTOR_CACHE_DIR="$TORCH_HOME/inductor"
+export TRITON_CACHE_DIR="$XDG_CACHE_HOME/triton"
+export SGLANG_DIFFUSION_CACHE_ROOT="$XDG_CACHE_HOME/sgl_diffusion"
+mkdir -p "$TMPDIR" "$XDG_CACHE_HOME"
 exec > >(tee "$evidence/run.log") 2>&1
 echo "Evidence: $evidence"
 "$python_bin" -c 'import sys; print("Python:", sys.executable)'

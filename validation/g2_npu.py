@@ -26,6 +26,15 @@ SCHEME_PATH = (
     "python/sglang/multimodal_gen/runtime/layers/quantization/modelslim_mxfp8_scheme.py"
 )
 ENV_KEYS = (
+    "TMPDIR",
+    "XDG_CACHE_HOME",
+    "HF_HOME",
+    "HF_HUB_CACHE",
+    "TORCH_HOME",
+    "TORCH_EXTENSIONS_DIR",
+    "TORCHINDUCTOR_CACHE_DIR",
+    "TRITON_CACHE_DIR",
+    "SGLANG_DIFFUSION_CACHE_ROOT",
     "PYTHONPATH",
     "ASCEND_HOME_PATH",
     "ASCEND_OPP_PATH",
@@ -427,7 +436,9 @@ def wan(args, report, output, torch):
         raise ValueError(
             "Online run needs original weights, not a ModelSlim checkpoint"
         )
-    if args.repeats < 3 or args.num_frames <= 0 or (args.num_frames - 1) % 4:
+    if args.num_frames <= 0 or (args.num_frames - 1) % 4:
+        raise ValueError("Use num_frames=4n+1")
+    if not args.smoke and args.repeats < 3:
         raise ValueError("Use at least three repeats and num_frames=4n+1")
     report["model"] = {"path": str(model), "configs": {}}
     for name in ("config.json", "model_index.json", "quant_model_description.json"):
@@ -438,7 +449,9 @@ def wan(args, report, output, torch):
             }
     report["image"] = {"path": str(image), "sha256": digest(image)}
     report["scope"] = (
-        "Wan load + one full-shape warmup request + repeated image-to-video requests; media quality requires review"
+        "Wan load + one image-to-video request; no numerical or performance comparison"
+        if args.smoke
+        else "Wan load + one full-shape warmup request + repeated image-to-video requests; media quality requires review"
     )
     kwargs = {
         "model_path": str(model),
@@ -471,8 +484,13 @@ def wan(args, report, output, torch):
     try:
         report["resolved_server_args"] = vars(gen.server_args)
         save(report, output)
-        for index in range(args.repeats + 1):
-            stage = "warmup" if index == 0 else f"stable_{index}"
+        stages = (
+            ["smoke"]
+            if args.smoke
+            else ["warmup"]
+            + [f"stable_{index}" for index in range(1, args.repeats + 1)]
+        )
+        for stage in stages:
             report["stage"] = stage
             save(report, output)
             start = time.perf_counter()
@@ -498,7 +516,7 @@ def wan(args, report, output, torch):
                     "metrics": item.metrics,
                     "generation_seconds": item.generation_time,
                 }
-                if args.save_samples and index == 1:
+                if args.save_samples and stage == "stable_1":
                     import numpy as np
 
                     if item.samples is None:
@@ -524,9 +542,10 @@ def wan(args, report, output, torch):
             report["timings"].append(row)
             print(json.dumps(row, default=str), flush=True)
             save(report, output)
-        report["stable_median_seconds"] = statistics.median(
-            row["wall_seconds"] for row in report["timings"][1:]
-        )
+        if not args.smoke:
+            report["stable_median_seconds"] = statistics.median(
+                row["wall_seconds"] for row in report["timings"][1:]
+            )
     finally:
         gen.shutdown()
 
@@ -713,6 +732,11 @@ def parse_args(argv=None):
             sub.add_argument("--rtol", type=float, default=0.0)
             sub.add_argument("--atol", type=float, default=0.0)
         if name == "wan":
+            sub.add_argument(
+                "--smoke",
+                action="store_true",
+                help="Generate once, without a separate warmup or repeated timing runs",
+            )
             sub.add_argument("--model-path", required=True)
             sub.add_argument("--image-path", required=True)
             sub.add_argument("--mode", choices=("offline", "online"), default="offline")

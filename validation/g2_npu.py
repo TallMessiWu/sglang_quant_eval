@@ -438,7 +438,7 @@ def wan(args, report, output, torch):
             }
     report["image"] = {"path": str(image), "sha256": digest(image)}
     report["scope"] = (
-        "Wan load + one full-shape warmup request + repeated TI2V; media quality requires review"
+        "Wan load + one full-shape warmup request + repeated image-to-video requests; media quality requires review"
     )
     kwargs = {
         "model_path": str(model),

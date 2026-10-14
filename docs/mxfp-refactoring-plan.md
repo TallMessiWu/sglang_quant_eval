@@ -75,7 +75,7 @@ Scheme：格式相关参数、loader metadata、scale / packing 契约
 | G1.1 | 修正 MXFP8 partial-scale 与布局边界 | 已有对应修复；Diffusion loader 仍需单独核对 | 余块与奇数 scale 的表示、分片后 shape 和目标 NPU 验证；占位修正不等于任意 K 可运行 | #32745；状态见下方 PR 表 |
 | G1.2 | 补在线 MoE W4A8 / W4A4 与实际精度分配 | 两条功能分支已有实现，保持各自能力增量 | 专家确实量化；层级精度、融合、dispatch、TP/EP 与在线 RTN 精度需有证据 | #43739（原 #32601）/ #32602；状态见 PR 表 |
 | **G2.1** | **Dense W4A8 在线/离线公共执行** | **实现已提交并推送** | 8 个 CPU/mock 测试；2026-10-14 在线、离线启动与请求功能均获用户真机正常反馈；在线视觉 27 个 fc2 保留既有 BF16 回退。两入口及重构前后 NPU 数值对照待补，尚未完成完整验收 | 实现 `24e100f1e8`，离线验收载体 `2ef4c276be`；发布/合入单独跟踪 |
-| **G2.2** | **Diffusion 离线 MXFP8 委托公共 kernel** | **实现已提交并推送** | 3 个 CPU/mock 测试、27 组调用契约对照通过；用户已回传 TI2V MXFP8 权重格式检查，repack 工具兼容已修复；真实加载、warmup、图片请求、硬件数值/性能待补 | `6eb8e1dd1c`；独立分支，发布核验记录见 `branches.md` |
+| **G2.2** | **Diffusion 离线 MXFP8 委托公共 kernel** | **实现已提交并推送** | 3 个 CPU/mock 测试、27 组调用契约对照通过；repack 工具兼容已修复，当前改用已有 I2V-A14B 候选，双 transformer 格式检查待回传；真实加载、warmup、图片请求、硬件数值/性能待补 | `6eb8e1dd1c`；独立分支，发布核验记录见 `branches.md` |
 | **G2.3** | **Ascend MXFP 局部能力描述与提前校验** | **局部试点已提交并推送** | 17 条能力描述实际接入校验/fallback/文档；14 个 CPU/mock 测试通过；原支持路径与 TP/EP/backend 的硬件 probe 待补 | `d6a46f90d9`；独立分支，发布核验记录见 `branches.md` |
 | G3 | 权重生命周期与公共在线入口 | 待设计 / 实施，与公共框架工作协调 | 参数、元数据、重载语义明确；入口迁移兼容既有 CLI | 尚未拆出交付 PR |
 | G4 | 跨代际差异按契约归属收敛 | Gemma 切片已有实现；整体未完成 | provider 可追溯；构建 target、API 与配套 wheel 验证；只在必要处引入运行时契约层 | kernel #638 + #32745；状态见 PR 表 |
@@ -152,7 +152,7 @@ Scheme：格式相关参数、loader metadata、scale / packing 契约
 - [x] 完成针对性 CPU/mock 回归，覆盖二维/多维、dtype、bias、scale 边界和 loader 参数映射。
 - [ ] 真实 ModelSlim checkpoint 加载 → warmup → 图片请求；补目标硬件数值与性能证据。
 
-**验证方法**：在本节独立分支使用真实 Wan2.2 TI2V ModelSlim MXFP8 checkpoint，通过 `diffusion/run_wan22_ti2v_mxfp8_offline.py` 传入 `--model-path`、`--image-path`、`--seed 42` 和固定分辨率/帧数/步数，验证图生视频；`diffusion/ti2v_offline_mxfp8.sh` 的 `sglang generate ... --warmup` 可用于显式 warmup，需使用服务器实际模型路径。用独立 worktree 的基线 `62ff466ac0`、相同权重/图片/prompt/seed/软件栈做前后对照，比较代表性 Linear 输出误差、生成结果和稳定阶段耗时（warmup 单列，至少重复三次）。再用在线 MXFP8 脚本做公共 kernel 兼容冒烟。不同在线/离线量化来源不要求逐元素相等。现有 `test/registered/unit/layers/quantization/test_diffusion_modelslim_mxfp8.py` 是 CPU/mock 契约回归，不能替代以上硬件项目。
+**验证方法**：当前按用户选择使用 Wan2.2 I2V-A14B ModelSlim MXFP8 候选，先完成下述双 transformer 格式检查与 repack，再通过 `validation/run_g2.sh wan-baseline` / `wan-g22` 传入 `--model-path`、`--image-path`、`--seed 42` 和固定分辨率/帧数/步数，验证图生视频。用独立 worktree 的基线 `62ff466ac0`、相同权重/图片/prompt/seed/软件栈做前后对照，比较代表性 Linear 输出误差、生成结果和稳定阶段耗时（一次完整形状 warmup 单列，至少重复三次）。两个 transformer 的实际加载和高/低噪声阶段执行需要日志证据；不能把只检查一套描述 JSON 的结果视为双模型验收。再用同架构原始 Diffusers 权重和 `--mode online` 做公共 kernel 兼容冒烟。不同在线/离线量化来源不要求逐元素相等。现有 `test/registered/unit/layers/quantization/test_diffusion_modelslim_mxfp8.py` 是 CPU/mock 契约回归，不能替代以上硬件项目。
 
 **2026-10-14 验收入口准备，未取得 NPU 结果**：`validation/inspect_wan.py` 只用标准库读取 config、量化 JSON、safetensors header（不读取张量数据、不占 NPU、不转换权重），汇总物理 dtype/shape、量化格式、rotation/smooth 等附加键和缺失键。用户提供的 TI2V 候选如下，目录名称不作为格式确认；按用户要求，先检查再 repack，新增权重优先写入 `/mnt/share/weight/`：
 
@@ -173,27 +173,32 @@ python3 validation/inspect_wan.py \
 
 同时静态复现现有 repack 的兼容缺陷：`self_attn.q_rot/k_rot` 被前缀替换成 `attn1.to_q_rot/to_k_rot`，而 Wan 的 offline rotation opt-in 查询量化 JSON 中的 `attn1.q_rot/k_rot`；JSON-only `quant_type` 未同步改名。独立工具修复 `6e19df8e6f` 已发布，另加模板必需配置缺失时的提前拒绝；4 项隔离 CPU 文件回归及边界见 [branches.md](branches.md#current-branch-map)。该修复不启用 MXFP8 attention、不改变量化 scheme 或张量值，不能作为硬件通过证据。
 
-服务器下一步（主仓根目录、激活服务 Python 环境）：从官方仓库只补齐 repack 所需组件，保留 transformer config，不下载将被替换的约 20 GB transformer 权重；模板自身不能用于在线 MXFP8 冒烟。下载命令使用官方 [HF CLI 的 include/local-dir 参数](https://huggingface.co/docs/huggingface_hub/en/guides/cli#download-multiple-files)。尚未收到下载或真实 repack 成功回报。
+**2026-10-14 改用 I2V-A14B（当前下一步）**：用户报告 `/mnt/weight/Wan2.2-I2V-A14B-Diffusers` 已下载，`du -sh` 为 117G；对应 `/mnt/weight/Wan2.2-I2V-A14B-w8a8c8-self-attn-bf16-rot` 为 29G。按用户新选择先利用这两份候选，不再把 TI2V 模板下载作为前置步骤。目录大小不能证明组件完整或量化格式；TI2V 的 300 个 weight / 60 个 rotation 检查结果不能套到 I2V。主仓根目录先执行只读检查并回传 JSON：
 
 ```bash
-hf download Wan-AI/Wan2.2-TI2V-5B-Diffusers \
-  --include 'model_index.json' 'transformer/config.json' \
-            'scheduler/*' 'text_encoder/*' 'tokenizer/*' 'vae/*' 'examples/*' \
-  --local-dir /mnt/share/weight/Wan2.2-TI2V-5B-Diffusers-Repack-Template
+python3 validation/inspect_wan.py \
+  /mnt/weight/Wan2.2-I2V-A14B-Diffusers \
+  /mnt/weight/Wan2.2-I2V-A14B-w8a8c8-self-attn-bf16-rot \
+  > /tmp/g2_i2v_inventory.json
+```
+
+需逐套核对 `high_noise_model` / `low_noise_model` 的量化 JSON、weight/scale dtype 与 shape、rotation，以及模板 `model_index.json`、`transformer/config.json`、`transformer_2/config.json`。现有固定 repack 工具支持 `high_noise_model → transformer`、`low_noise_model → transformer_2`，无需改 G2.2/G2.3 运行时分支。检查确认兼容后再执行以下转换；尚未收到 I2V 检查、转换或 NPU 结果：
+
+```bash
 
 # 第二参数换成服务器已有的 SGLang git checkout；无需切换部署分支。
 bash validation/run_g2.sh repack /实际/SGLang/checkout \
-  --model-type Wan2.2-TI2V-5B \
-  --original-model-path /mnt/share/weight/Wan2.2-TI2V-5B-Diffusers-Repack-Template \
-  --quant-path /mnt/weight/Wan2.2-TI2V-5B-w8a8c8-self-attn-bf16-rot \
-  --output-path /mnt/share/weight/Wan2.2-TI2V-5B-Diffusers-MXFP8-G2
+  --model-type Wan2.2-I2V-A14B \
+  --original-model-path /mnt/weight/Wan2.2-I2V-A14B-Diffusers \
+  --quant-path /mnt/weight/Wan2.2-I2V-A14B-w8a8c8-self-attn-bf16-rot \
+  --output-path /mnt/share/weight/Wan2.2-I2V-A14B-Diffusers-MXFP8-G2
 
 python3 validation/inspect_wan.py \
-  /mnt/share/weight/Wan2.2-TI2V-5B-Diffusers-MXFP8-G2 \
-  > /tmp/g2_wan_repacked_inventory.json
+  /mnt/share/weight/Wan2.2-I2V-A14B-Diffusers-MXFP8-G2 \
+  > /tmp/g2_i2v_repacked_inventory.json
 ```
 
-`repack` 模式固定工具提交、拒绝脏 checkout、复用/创建 `sglang/` 直属 worktree，保存完整命令及 `/tmp/g2-repack-…/run.log`；输出目录必须不存在。模板缺配置会在复制大文件前终止。转换后应核对 300 个 MXFP8 weight/scale、60 个 rotation 与量化描述中的 `blocks.*.attn1.q_rot/k_rot=FLOAT`，再做 checkpoint load/warmup。下载的官方 `examples/i2v_input.JPG` 可作为固定图片候选，需确认服务器文件存在；baseline/G2.2/G2.3 使用同一份 repacked checkpoint 和输入。
+`repack` 模式固定工具提交、拒绝脏 checkout、复用/创建 `sglang/` 直属 worktree，保存完整命令及 `/tmp/g2-repack-…/run.log`；输出目录必须不存在。模板缺配置会在复制大文件前终止。转换后两套 transformer 分别与各自输入核对 MXFP8 weight/scale、rotation 数量和量化描述中的 `blocks.*.attn1.q_rot/k_rot=FLOAT`，再做 checkpoint load/warmup。baseline/G2.2/G2.3 使用同一份 repacked checkpoint 和输入图片；实际图片路径仍待确认。
 
 无需模型的 NPU 数值入口：激活与服务相同的环境，在主仓根目录运行（第二参数可换成服务器任一已有 SGLang checkout；`PYTHON` 可指定服务 Python）：
 

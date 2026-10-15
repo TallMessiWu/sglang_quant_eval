@@ -50,7 +50,8 @@
 - A5 默认 ATB attention 可能在 warmup/解码失败；本仓库 `llm/` 服务脚本用 `ASCEND_USE_FIA=1` 选择 FIA 路径。
 - SGLang 上游文档改动写入 `docs/docs/` 的 `.mdx`（`docs_new/` 已被上游改回 `docs/`）；改之前查一次实际路径，见 [docs/known-pitfalls.md](docs/known-pitfalls.md)。
 - Ascend 代际差异按 [RFC #35709](https://github.com/sgl-project/sglang/issues/35709) 分层：能藏在一个独立算子后面的（如 Gemma RMSNorm）由 `sgl-kernel-npu` wheel **构建期**选 provider，SGLang 只调用稳定 API；跨算子的运行时 dtype/layout/metadata 契约放 `srt/hardware_backend/npu/device_op.py` 的 device operator，启动时解析一次。两种情况都不要在 feature 代码里写 `is_npu_a5()` / `get_soc_version() == 260` 一类运行时代际分支。kernel 侧工作使用 `$sgl-kernel-npu-dev` skill，用户文档见 [docs/sgl-kernel-npu-build.md](docs/sgl-kernel-npu-build.md)。
-- 更细的 layout、dtype、offset、routing、GMM 与视觉塔契约统一放在 [docs/known-pitfalls.md](docs/known-pitfalls.md)，不要继续扩写 AGENTS.md。
+- 本文件含空行保持 **150 行以内**，只保留长期规则和入口；新增细则优先写入 `docs/agents/` 或对应专题文档并链接。状态记录保留结论、关键证据、未测范围和下一步，中间过程由 Git 历史追溯，不另建重复状态表。
+- 更细的 layout、dtype、offset、routing、GMM 与视觉塔契约统一放在 [docs/known-pitfalls.md](docs/known-pitfalls.md)。
 
 ## 验证与结论边界
 
@@ -76,7 +77,7 @@
 ## 文档入口
 
 - 重构目标 G1–G5、任务编号与验收进度：[目标跟踪表](docs/mxfp-refactoring-plan.md#refactoring-status)
-- G2.3 下一会话的分支、现成权重与直接运行命令：[接手入口](docs/mxfp-refactoring-plan.md#g23-handoff)；状态只维护在目标跟踪表，不复制到本文件。
+- G2 原验收分支、现成权重与按需运行命令：[接手入口](docs/mxfp-refactoring-plan.md#g23-handoff)；PR 发布分支可能不同，操作前核对分支表。验收状态不复制到本文件。
 - PR 合入计划、新旧编号与合入情况：[PR 跟踪表](docs/mxfp-refactoring-plan.md#pr-merge-status)；前置与并行范围：[依赖说明](docs/mxfp-refactoring-plan.md#merge-dependencies)
 - PR / branch / worktree / remote 定位与历史记录：[docs/branches.md](docs/branches.md)
 - 量化状态、入口与代码路径：[docs/quantization-overview.md](docs/quantization-overview.md)

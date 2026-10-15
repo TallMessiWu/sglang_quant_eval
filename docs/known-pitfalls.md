@@ -210,6 +210,17 @@ Qwen3.6-27B 部署曾出现 `chunk_state dtype must match initial_state`，显�
 
 `replay_with_input_update()` 的 update/replay 并发顺序由 #40814 有意引入，另有 #40446 的 rebind fence；底层图更新是否通过事件保证依赖，必须核对**实际部署的** torch_npu 实现。不能凭过时注释、Python 两行顺序或一个假定底层无同步的 mock 就交换顺序，也不能拿 torch_npu master 代替部署版本作为结论。
 
+<a id="npu-mtp-state-contract"></a>
+
+## MTP 的 SSM dtype、layout 与 prefill 必须匹配
+
+以下是 2026-09-20 联调保留下来的机制，不代表当前版本仍缺全部修复。当前待合入项与部署依赖见[PR 跟踪表](mxfp-refactoring-plan.md#pr-merge-status)。
+
+- **dtype**：历史 recurrent kernel 按 BF16 读取 state；传入 FP32 会按错误的元素位宽解释内存，可能先输出通顺、随后复读或产生极大值。kernel #808 增加 BF16 断言，SGLang #40419 配套让 persistent/intermediate speculative SSM state 使用相同 BF16，不能只改单侧。
+- **layout**：kernel #747 与 SGLang #39589 配套统一 `(HV,V,K)`。只更新一侧会让 prefill、decode、verify 对同一 pool 的解释不同；`K=V` 时 shape 相同会掩盖转置错误，应以 `K != V` 的 probe 核对实际 stride 和内容。
+- **prefill/gating**：历史 wheel 将 gating 输出改为二维，并提供返回 `(V,K)` state 的 AscendC prefill，而旧调用仍期待三维 gating 和 `(K,V)` state。后续功能分支已保留 main 的 GDN backend/prefill；不要直接重新套用归档补维或换算子补丁。旧 probe 中 attention 输出接近不等于 recurrent state 已等价，曾有 state 对照未解释清楚的记录。
+- **构建与资源**：旧 `move_intermediate_cache` 的 `h_block_size=2` 曾在 Ascend 950 超出 UB，#651/#742 组合将其改为 1。旧实验 worktree 已删除，恢复验证应检查当前实现与 wheel target；相关诊断脚本位于 `llm/diagnostics/`，不能用退出码代替脚本中的数值失败统计。
+
 ## A8W4 `npu_quant_matmul` 的 bias 必须是 BF16 二维 `[1,N]`
 
 Qwen3.5 在线 W4A8 的首次图片请求会进入视觉塔 QKV；该层带一维 bias。若沿用其他量化 matmul 的 FP32 `[N]` 处理，A5 会在 `NPUMXFP4W4A8LinearMethod.apply` 报 `The dimension of bias should be 2. Actual bias dimension is: 1.`。MindIE-SD 的同类 W4A8 路径会将 bias 转为 BF16，并把 `[N]` 扩成 `[1,N]`。
@@ -229,6 +240,10 @@ upstream 先把文档从 `docs/`（`.md`）迁到 `docs_new/docs/`（`.mdx`）�
 **最危险的是长期分支**：目录改名 + 文件重排后 git 的 rename 检测认不出来，合并 `upstream/main` 时**不报冲突**，只是把你在 `docs_new/` 下的改动一起删掉。合并后必须 `git diff upstream/main -- docs` 复核自己的文档改动还在不在，为空就说明被吞了，要手动搬到新路径。
 
 ---
+
+## MDX 表格标记不能使用 HTML 注释
+
+`.mdx` 的不可见标记使用 `{/* marker */}`，不能写 `<!-- marker -->`。#44366 的旧 head 在 Mintlify 解析时因 HTML 注释失败；只检查 Python 测试中的表格内容一致性无法发现 MDX 语法错误。更换标记时同步生成器/测试中的匹配字符串，并运行文档解析与链接检查。语法依据见 [MDX 官方说明](https://mdxjs.com/docs/what-is-mdx/)。
 
 ## MoE MXFP8 `npu_grouped_matmul` 必须显式传 `x_dtype` + `weight_dtype`
 

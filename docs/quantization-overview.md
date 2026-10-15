@@ -52,7 +52,7 @@ MoE 的离线 MXFP4 路径已由上游 #30318 / #30319 落地，#43739（原 #32
   - `modelslim.py`：离线 scheme 分发
   - `modelslim_mxfp8_scheme.py`、`modelslim_mxfp4_scheme.py`：离线实现
 
-G2.2 分支的 MXFP8 离线 Scheme 保留 checkpoint 参数/loader 和必要的 scale 适配，post-load/apply 委托 SRT `NPUMXFP8LinearMethod`。G2.3 的局部能力描述位于 `srt/hardware_backend/npu/quantization/mxfp_capabilities.py`，两分支独立；实现与验证进度见 [G2 跟踪](mxfp-refactoring-plan.md#refactoring-status)。
+G2.2 的 MXFP8 离线 Scheme 保留 checkpoint 参数/loader 和必要的 scale 适配，post-load/apply 委托 SRT `NPUMXFP8LinearMethod`。G2.3 的局部能力描述位于 `srt/hardware_backend/npu/quantization/mxfp_capabilities.py`。原验收分支相互独立，发布时 G2.3 叠加 G2.2 并同步 partial-scale 校验；实现、验收和 PR 依赖见 [G2 跟踪](mxfp-refactoring-plan.md#refactoring-status)。
 
 ### LLM Dense / ModelSlim
 

@@ -41,6 +41,18 @@ python3 -c "import sglang.srt.models.qwen3_5"
 
 ---
 
+<a id="mxfp-shared-execution-adapters"></a>
+
+## MXFP 公共执行复用仍需适配加载布局与缓存
+
+以下契约来自 2026-10 的 G2 与 MoE 重构记录；适用于对应代码路径，不是所有 MXFP 格式通用的转换规则。
+
+- **checkpoint 名称与执行名称分开。** Diffusion ModelSlim 加载时必须保留 `weight_scale`、`uint8`、parameter 类和 loader metadata；不能为复用 SRT 提前改名为 `weight_scale_inv`。按分片后的 K 分配 `ceil(K/32)` 个 scale，奇数个补一个 0 字节后再配对、转置；K=4304 是 135→136，额外字节不对应权重。执行布局可在 post-load 后转换，离线权重不能再次量化或打包。
+- **公共 Method 的缓存可能改变调用语义。** G2.2 清空公共 Method 建立的 `bias_fp32`，保留原离线每次调用转 FP32 的行为；否则 post-load 后更新 bias 可能仍使用旧值。共享执行回归应覆盖 bias 更新和非连续输入，不能只验证首次调用。
+- **四维 scale 不一定已转置。** 在线 MoE 的 `[E,N,K/64,2]` 与 prepared `[E,K/64,N,2]` 同为四维；将前者直接交给把四维视为 prepared 的 helper 会漏转置。该路径先 `flatten(-2)` 还原 block 序列，再委托 helper；用 N 与 K/64 不同的形状核对内容及 stride。
+
+loader 支持 partial block 后，组合分支还需同步能力校验、文档与测试，避免旧的 K 按 64 对齐校验继续误拒绝；不能据此解除其他 loader 或 FP4 算子的对齐限制。上述 CPU 契约检查不证明 NPU 数值等价，验收仍见[目标跟踪](mxfp-refactoring-plan.md#refactoring-status)。
+
 ## 模块级 `import torch_npu` 会炸掉全平台 CI
 
 `quantization/__init__.py` 无条件 import `ModelSlimConfig`，链路上任何文件顶层 `import torch_npu` 都会让 CUDA/CPU/AMD/XPU CI 在 import 时 `ModuleNotFoundError`（PR #22352 踩过两次：`linear_method_npu.py`、`modelslim_mxfp8.py`）。

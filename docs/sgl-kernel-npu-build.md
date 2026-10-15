@@ -101,11 +101,17 @@ python -c "from sgl_kernel_npu.norm.gemma_rmsnorm import npu_gemma_rms_norm; pri
 构建验收至少检查：
 
 1. 910 和 950 的 `build/lib/sgl_kernel_npu/norm/gemma_rmsnorm.py` 分别只包含目标 provider。
-2. wheel 内不含 `target_providers/` 目录，也没有另一个 target 的 provider。
+2. wheel 内不含 `target_providers/` 目录，也没有另一个 target 的 provider；顶层 Python 包只能有 `sgl_kernel_npu`。历史 `find_namespace_packages` 曾漏排除 `build_tools`，检查实际发现的包及产物，不能只断言 setup.py 中出现了 exclude 字符串。
 3. 安装后的 `site-packages` 与 wheel 内容一致。
 4. 950 跑 ordinary/residual 数值测试与 Qwen3.5 e2e；910B/910C 跑 native provider smoke。
 
 静态/CPU 测试不能替代真实 NPU 验证。使用错误 target 的 wheel 不受支持。
+
+### 算子注册与 wheel 对照的历史教训
+
+- **设备 kernel 编过不代表 Python 算子已注册。** 2026-09 的 `causal_conv1d` 故障来自 host/注册仍在 A3-only 门内。核对 host、device 源、schema、impl 和头文件声明的条件是否一致；跨代际共享入口与内部 arch 实现分别检查，不能因缺符号就全局放开所有专属算子。
+- **A/B 先核对完整 diff 和实际构建 target。** 旧 MTP 集成分支还混入 cache-loc 修复，不能把全部差异归给 recurrent kernel；兼容目标 `Ascend910_9382` 的成功也不是原生 `arch35` 证据。需记录两侧提交、构建日志与安装来源，再解释结果。
+- **通过同一 golden 容差不等于两实现相同。** 历史 #808/#823 的矩阵均过容差，但跨 wheel 逐元素比较仍发现 BF16 单 ULP 差异；部分脚本数值失败也退出 0，应读失败统计。微基准收益不能直接推为模型 e2e 收益。这些是按需对照的方法，不为用户已跳过的数值验收新增前置。
 
 ## 环境问题
 

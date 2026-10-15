@@ -37,3 +37,15 @@
 - 同日上游 [#802](https://github.com/sgl-project/sgl-kernel-npu/pull/802) 用同样方式解除了 `causal_conv1d`，用户说「既然上游已经修好了……那移除我们多余的……修复代码」；#638 因此删掉该提交（改写历史，与本仓对历史改写的偏好一致）并 merge 上游 main，让分支仍然带着这个修复。
 
 **怎么用**：发现的问题超出当前 PR 目标时，说清哪部分属于本 PR、其余建议另开分支 / PR，并且不要先动手。同步或汇报 PR 状态前，先查上游是否已落地重叠修复；若已落地，提议删掉我们那份（并 merge 上游让分支继续可用），同时把 PR 描述改到与 diff 一致。
+
+## PR 状态与 CI 的核对陷阱
+
+以下是 2026-09 至 10 月操作记录提炼的核对方法；具体权限、workflow 和检查规则以目标仓当前版本为准。
+
+- **操作提示不是最终状态。** 曾出现 CLI 打印 `Reopened`，独立查询仍为 CLOSED 且没有 ReopenedEvent；已获授权的变更执行后应再查状态和事件。通用 422 或 `viewerCanReopen=false` 不足以证明具体拒绝原因，不靠反复重试推断权限。
+- **PR head 与分支 tip 可能不同。** 已关闭 PR 的 `headRefOid` 曾停在关闭时，而 `headRef.target.oid` 已前进；对照 fork ref、远端分支与本地 HEAD，再确认 CI run 的事件和实际测试 SHA（含可能的 merge ref）。旧 PR 的 checks 不代表新分支或替代 PR 已验证。
+- **触发阻塞与测试失败分别归因。** 从日志区分 Draft、缺 `run-ci` / `run-ci-extra`、用户级冷却、`action_required` 与实际执行后的失败；规则不写死，读取该次 workflow。gate 后的测试未跑不等于通过；import 阶段的镜像依赖冲突也不能直接归为 NPU 回归。
+- **squash 合入按内容核实。** 原 head 不是 main 祖先不代表功能未合入；检查 PR 的 merge commit，并比较相关 diff/blob，必要时辅助用 patch-id。删除重复实现前核对语义，不能只看标题或提交哈希。
+- **注册测试会随 main 漂移。** 长期分支曾因 `kernels/` 目录与 CPU suite 不匹配，只在 CI 合并最新 main 后失败。按当前 `scripts/lint/check_registered_tests.py`、CI registry 和 workflow 检查目录、注册项及实际收集；本地旧 checker 通过或测试文件存在都不证明 CI 会执行。
+
+当前状态只更新[PR 跟踪表](../mxfp-refactoring-plan.md#pr-merge-status)；本节不保存每次检查计数，也不授权重开、改标签或触发 CI。

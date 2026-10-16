@@ -11,7 +11,7 @@
 | PR / 任务 | 分支 | HEAD | worktree（相对主仓） |
 | --- | --- | --- | --- |
 | [kernel #638](https://github.com/sgl-project/sgl-kernel-npu/pull/638) | `codex/a5-gemma-rmsnorm-csrc` | `4a4f838e8f` | `sgl-kernel-npu/` |
-| [SGLang #32745](https://github.com/sgl-project/sglang/pull/32745) | `junlin_qwen3.5_dense_w8a8` | `f7e13ef09d` | `sglang/qwen3.5_dense_w8a8/` |
+| [SGLang #32745](https://github.com/sgl-project/sglang/pull/32745) | `junlin_qwen3.5_dense_w8a8` | `33ece791f7` | `sglang/qwen3.5_dense_w8a8/` |
 | [SGLang #40419](https://github.com/sgl-project/sglang/pull/40419) | `junlin_npu_mamba_ssm_dtype` | `756dac5a66` | `sglang/npu_mamba_ssm_dtype/` |
 | [kernel #824](https://github.com/sgl-project/sgl-kernel-npu/pull/824) | `cache-loc-assign-bounds` | `1c6fad69a1` | `sgl-kernel-npu-worktrees/cache-loc-assign-bounds/` |
 | [SGLang #43739](https://github.com/sgl-project/sglang/pull/43739)（原 [#32601](https://github.com/sgl-project/sglang/pull/32601)） | `junlin_qwen3.5_moe_w4a8` | `ded4671577` | `sglang/qwen3.5_moe_w4a8/` |
@@ -28,7 +28,7 @@
 | [SGLang #44365](https://github.com/sgl-project/sglang/pull/44365)：G2.2 发布 | `junlin/pr-diffusion-mxfp8-shared-execution` | `4cfdf3d543` | `sglang/pr_diffusion_mxfp8_shared_execution/` |
 | [SGLang #44366](https://github.com/sgl-project/sglang/pull/44366)：G2.3 发布 | `junlin/pr-ascend-mxfp-capabilities` | `9f9aa27254` | `sglang/pr_ascend_mxfp_capabilities/` |
 | kernel 编译组合（无 PR） | `main-638-824` | `e629e45a51` | `sgl-kernel-npu-worktrees/main-638-824/` |
-| #32745 / #36426 / #40419 历史组合验证（无 PR） | `junlin_qwen3.5_dense_w8a8_pr36426` | `f9a2f2fb64` | `sglang/qwen3.5_dense_w8a8_pr36426/` |
+| #32745 / #36426 / #40419 历史组合验证（无 PR） | `junlin_qwen3.5_dense_w8a8_pr36426` | `173ad6c310` | `sglang/qwen3.5_dense_w8a8_pr36426/` |
 | 旧 ModelSlim / 视觉塔分支（#32266） | `junlin_qwen3.5_moe_w8a8` | `3d72a9dc00` | `sglang/qwen3.5_moe_w8a8/` |
 | MoE LoRA 实验（无 PR） | `junlin-ascend-moe-lora` | `bc9a4d0753` | `sglang/ascend_moe_lora/` |
 | 本地只读参考（不是实时远端 main） | `upstream-main` | `0dd66def7c` | `sglang/upstream-main/` |

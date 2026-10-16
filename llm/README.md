@@ -24,23 +24,39 @@ VLLM_PORT=6969 ./llm/gpqa.sh
 VLLM_PORT=6969 ./llm/mmmu.sh
 ```
 
-## 启动前清理与确认
+## 卡号、TP 与启动前清理
+
+`qwen*.sh`、`a5_fia_mixed_split_serve.sh` 和 `ascend_moe_lora/serve.sh` 共用设备解析规则：显式卡号的**数量**决定 TP；不传卡号保留该脚本写定的默认 TP，`TP_SIZE` 环境变量不再覆盖它。
+
+以 8 卡环境为例：
+
+| 卡号参数 | TP | `ASCEND_RT_VISIBLE_DEVICES` |
+| --- | --- | --- |
+| 不传 | 脚本默认值；默认 TP2 时仍用 TP2 | `0,1,2,3,4,5,6,7` |
+| `3` | 1 | `3` |
+| `3 5` | 2 | `3,5` |
+| `all` | 8 | `0,1,2,3,4,5,6,7` |
+
+不传卡号或传 `all` 时，子进程移除继承的 `ASCEND_RT_VISIBLE_DEVICES`，通过 `torch_npu.npu.device_count()` 查询当前环境可访问的 NPU，并显式设置升序完整列表；默认 TP1/TP2 分别使用前 1/2 张卡。查询失败或没有 NPU 时中止启动。`all` 不能与卡号混用，重复或无效卡号也会报错。模型自身的 TP 限制仍由 SGLang 校验，脚本不自动降低 TP。
 
 `qwen*.sh` 和 `a5_fia_mixed_split_serve.sh` 共用清理规则：
 
-- 指定卡号时清理所选卡；不指定卡号时不清理，并 unset `ASCEND_RT_VISIBLE_DEVICES`。
+- 指定卡号时清理所选卡；`all` 清理全部卡；不指定卡号时不清理。
 - `npu-smi info` 只要查到所选卡上有任何 PID，就显示 `PID / START_TIME / COMMAND / 工作目录`，启动时间通过 `ps` 获取，工作目录通过 `pwdx` 获取，供你判断，随后 **Enter 确认，Esc 取消整个启动**；确认前不会终止任何进程。
 - “工作目录”是进程**当前工作目录**，不一定是最初启动目录。权限不足或进程已退出时该列显示“不可获取”；未安装 `pwdx` 时显示“不可获取（未安装 pwdx）”，仍必须确认；`-f/--force` 下也会展示表格。
 - 不判断进程是否“自己的”：同 UID、不同 UID、`sudo` 或无法通过 `ps` 查询归属，都不能跳过确认。只有所选卡上没有 PID 时才直接继续。
 - `-f` / `--force` 是有 PID 时唯一跳过确认的方式，但不会提升系统权限；清理失败仍中止启动。
 - 没有交互终端且所选卡上有 PID 时默认取消，只有显式 `-f` 才继续。
-- `-f` 不会进入 `ASCEND_RT_VISIBLE_DEVICES`；`all` 表示清理所有卡并取消设备可见性限制。仅传 `-f` 而无卡号不会清理任何卡。
+- `-f` 不计入卡号数量，也不会进入 `ASCEND_RT_VISIBLE_DEVICES`；`-f all` 使用全部卡并跳过清理确认。仅传 `-f` 而无卡号不会清理任何卡，TP 仍取脚本默认值。
 
 ```bash
 ./llm/npu-cleaner.sh 0 1                     # 单独清理；目标卡有 PID 就确认
 ./llm/qwen3.5_dense_bf16.sh 0 1              # 确认取消会阻止模型启动
 ./llm/qwen3.5_dense_bf16.sh -f 0 1           # 显式跳过确认
+./llm/qwen3.5_dense_bf16.sh all              # TP=全部 NPU 数量，有进程则确认
 ./llm/a5_fia_mixed_split_serve.sh on -f 0    # 模式参数在前
+./llm/a5_fia_mixed_split_serve.sh off all    # off/on 均支持 all
+MODEL_PATH=/weights/Qwen3-30B-A3B ./llm/ascend_moe_lora/serve.sh baseline graph all
 ```
 
 原本不调用清理器的 Diffusion 与 MoE LoRA 脚本保持不清理进程的行为。
@@ -71,8 +87,8 @@ python3 -m unittest discover -s llm/tests -p 'test_npu_cleaner.py' -v
 # 在线：不设置 MODEL_PATH 时默认使用上表的原始 27B 权重，也可显式覆盖。
 MODEL_PATH=/实际的BF16或FP16权重目录 ./llm/qwen3.5_dense_online_w4a8.sh 0
 
-# 可切换端口、上下文、TP 和 eager 模式；多个位置参数表示 NPU 卡号。
-TP_SIZE=2 VLLM_PORT=6970 CONTEXT_LENGTH=8192 EXTRA_ARGS="--disable-cuda-graph" \
+# 两个卡号使用 TP2；可切换端口、上下文和 eager 模式。
+VLLM_PORT=6970 CONTEXT_LENGTH=8192 EXTRA_ARGS="--disable-cuda-graph" \
     ./llm/qwen3.5_dense_offline_w4a8.sh 0 1
 ```
 
@@ -80,7 +96,7 @@ TP_SIZE=2 VLLM_PORT=6970 CONTEXT_LENGTH=8192 EXTRA_ARGS="--disable-cuda-graph" \
 
 当前 Qwen3.6-27B 部署验证使用 `SGLANG_MAMBA_SSM_DTYPE=bfloat16`，这是该部署条件，不将它设为所有模型的通用默认。恢复默认 graph 配置需去掉 `EXTRA_ARGS` 中的禁用参数并重启服务；单独在终端 `unset` 不会改变运行中服务。在线视觉 fc2 的 K=4304 回退提示及混精加载边界见 [已知陷阱](../docs/known-pitfalls.md#w4a8-alignment-fallback)，功能与数值验收见 [G2.1 清单](../docs/mxfp-refactoring-plan.md#refactoring-status)。
 
-传入卡号会先调用 `npu-cleaner.sh` 清理所选卡上的进程；不传卡号则不清理，并取消 `ASCEND_RT_VISIBLE_DEVICES` 限制。做在线/离线对照时须使用同一模型版本的原始和预量化 checkpoint，并确认服务器实际运行的是目标 SGLang 代码；启动脚本本身不证明 NPU 数值、warmup 或图片请求通过。
+传入卡号会先调用 `npu-cleaner.sh` 清理所选卡上的进程；不传卡号则不清理，保留默认 TP 并设置全部卡可见。做在线/离线对照时须使用同一模型版本的原始和预量化 checkpoint，并确认服务器实际运行的是目标 SGLang 代码；启动脚本本身不证明 NPU 数值、warmup 或图片请求通过。
 
 AIS Bench 的公共逻辑在 `ais_bench/run_ais_bench.sh`。生成的配置仍写入 `llm/.ais_bench_configs/`；FIA benchmark 与 profiler 结果仍写入 `llm/fia_bench/`。这些本地产物已被 Git 忽略。
 

@@ -32,16 +32,17 @@ SGLANG_DIR=/path/to/sglang \
 
 ## 2. Eager 端到端
 
-每个服务单独启动并保存日志。以下以 TP=2 为例；TP=4 时把卡号和 `TP_SIZE` 改为 4。Qwen3-30B-A3B TP=1 只有在 HBM 足够时运行，否则以单元小层覆盖 TP=1。
+每个服务单独启动并保存日志。以下以 TP=2 为例；TP=4 时传四个卡号，如 `0 1 2 3`。传 `all` 使用当前环境全部 NPU，TP 等于设备数；不传卡号保留脚本默认 TP=1，但显式设置全部卡可见。`TP_SIZE` 环境变量不再覆盖 TP，脚本仍不清理进程。Qwen3-30B-A3B TP=1 只有在 HBM 足够时运行，否则以单元小层覆盖 TP=1。
 
 先启动纯 MoE baseline：
 
 ```bash
 export MODEL_PATH=/weights/Qwen3-30B-A3B
-export TP_SIZE=2
 ./llm/ascend_moe_lora/serve.sh baseline eager 0 1 \
   2>&1 | tee baseline-eager-tp2.log
 ```
+
+例如，全部卡启动 baseline graph：`./llm/ascend_moe_lora/serve.sh baseline graph all`；LoRA 的 eager/graph 模式同样支持 `all`。
 
 另一个终端采集固定的 3-request batch，然后停止 baseline 服务：
 

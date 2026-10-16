@@ -4,14 +4,14 @@
 
 <a id="current-branch-map"></a>
 
-## 当前分支定位（2026-10-15）
+## 当前分支定位
 
-本轮以真实 worktree 注册表、本地 HEAD 和 GitHub PR head 核对。原验收分支与新 PR 发布分支分别保留；当前状态会漂移，操作前仍须实时查询。
+表中快照以 2026-10-15 的 worktree 注册表、本地 HEAD 和 GitHub PR head 核对为基础；2026-10-16 单独更新了 #32745 及其组合验证分支。原验收分支与新 PR 发布分支分别保留；当前状态会漂移，操作前仍须实时查询。
 
 | PR / 任务 | 分支 | HEAD | worktree（相对主仓） |
 | --- | --- | --- | --- |
 | [kernel #638](https://github.com/sgl-project/sgl-kernel-npu/pull/638) | `codex/a5-gemma-rmsnorm-csrc` | `4a4f838e8f` | `sgl-kernel-npu/` |
-| [SGLang #32745](https://github.com/sgl-project/sglang/pull/32745) | `junlin_qwen3.5_dense_w8a8` | `cf48b477db` | `sglang/qwen3.5_dense_w8a8/` |
+| [SGLang #32745](https://github.com/sgl-project/sglang/pull/32745) | `junlin_qwen3.5_dense_w8a8` | `ef34aaead1` | `sglang/qwen3.5_dense_w8a8/` |
 | [SGLang #40419](https://github.com/sgl-project/sglang/pull/40419) | `junlin_npu_mamba_ssm_dtype` | `756dac5a66` | `sglang/npu_mamba_ssm_dtype/` |
 | [kernel #824](https://github.com/sgl-project/sgl-kernel-npu/pull/824) | `cache-loc-assign-bounds` | `1c6fad69a1` | `sgl-kernel-npu-worktrees/cache-loc-assign-bounds/` |
 | [SGLang #43739](https://github.com/sgl-project/sglang/pull/43739)（原 [#32601](https://github.com/sgl-project/sglang/pull/32601)） | `junlin_qwen3.5_moe_w4a8` | `ded4671577` | `sglang/qwen3.5_moe_w4a8/` |
@@ -28,7 +28,7 @@
 | [SGLang #44365](https://github.com/sgl-project/sglang/pull/44365)：G2.2 发布 | `junlin/pr-diffusion-mxfp8-shared-execution` | `4cfdf3d543` | `sglang/pr_diffusion_mxfp8_shared_execution/` |
 | [SGLang #44366](https://github.com/sgl-project/sglang/pull/44366)：G2.3 发布 | `junlin/pr-ascend-mxfp-capabilities` | `9f9aa27254` | `sglang/pr_ascend_mxfp_capabilities/` |
 | kernel 编译组合（无 PR） | `main-638-824` | `e629e45a51` | `sgl-kernel-npu-worktrees/main-638-824/` |
-| #32745 / #36426 / #40419 历史组合验证（无 PR） | `junlin_qwen3.5_dense_w8a8_pr36426` | `05f11fdab0` | `sglang/qwen3.5_dense_w8a8_pr36426/` |
+| #32745 / #36426 / #40419 历史组合验证（无 PR） | `junlin_qwen3.5_dense_w8a8_pr36426` | `a5bbbe6b4d` | `sglang/qwen3.5_dense_w8a8_pr36426/` |
 | 旧 ModelSlim / 视觉塔分支（#32266） | `junlin_qwen3.5_moe_w8a8` | `3d72a9dc00` | `sglang/qwen3.5_moe_w8a8/` |
 | MoE LoRA 实验（无 PR） | `junlin-ascend-moe-lora` | `bc9a4d0753` | `sglang/ascend_moe_lora/` |
 | 本地只读参考（不是实时远端 main） | `upstream-main` | `0dd66def7c` | `sglang/upstream-main/` |
@@ -37,6 +37,7 @@
 - `sgl-kernel-npu/` 是主仓子模块。主仓 gitlink 仍为 `500ea7bb0e`，checkout 为上表 #638 head；两者差异是保留的既有状态，不随本轮文档提交。
 - kernel `main-638-824` 是 2026-10-09 的固定构建组合：`84ce0315e4` + #638 的 squash `cefb0f9d` + #824 的 squash `e629e45a`。它未跟随两个 PR 的后续 head 更新；26 项 CPU provider/build-target 测试通过不等于 wheel 构建或 NPU 通过。构建说明见 [kernel 文档](sgl-kernel-npu-build.md)。
 - `junlin_qwen3.5_dense_w8a8_pr36426` 只用于组合验证，不能因它包含上游适配就把 #36426 混入正式功能栈。
+- 2026-10-16 的 MXFP8 TP 修复先在 #32745 分支发布，再单独移植到组合验证分支，各只修改 scheme 与回归测试两个文件。前者读取 `layer.tp_group`，后者沿用 `layer.tp_rank`，未合并其他上游提交。两分支均普通推送，远端 SHA 与本地一致；验证边界见[目标表](mxfp-refactoring-plan.md#refactoring-status)。
 
 ## 远程地址
 

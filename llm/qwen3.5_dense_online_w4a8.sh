@@ -15,7 +15,7 @@ fi
 # 用法: $0 [-f|--force] [NPU_ID ... | all]
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 source "$SCRIPT_DIR/common/npu-launch.sh" || exit $?
-npu_prepare_launch "$@" || exit $?
+npu_prepare_launch 1 "$@" || exit $?
 
 # A5 prefill/decode 使用 FIA，避免默认 ATB 路径。
 export ASCEND_USE_FIA=1
@@ -31,7 +31,7 @@ exec sglang serve \
     --port "${VLLM_PORT:-6969}" \
     --quantization mxfp_w4a8 \
     --device npu \
-    --tp "${TP_SIZE:-1}" \
+    --tp "$NPU_TP_SIZE" \
     --reasoning-parser qwen3 \
     --context-length "${CONTEXT_LENGTH:-131072}" \
     --trust-remote-code \

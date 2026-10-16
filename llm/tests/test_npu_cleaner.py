@@ -14,6 +14,7 @@ import unittest
 
 LLM_DIR = Path(__file__).resolve().parents[1]
 CLEANER = LLM_DIR / "npu-cleaner.sh"
+LORA = LLM_DIR / "ascend_moe_lora/serve.sh"
 LAUNCHERS = sorted(LLM_DIR.glob("qwen*.sh")) + [
     LLM_DIR / "a5_fia_mixed_split_serve.sh"
 ]
@@ -25,7 +26,7 @@ ROWS = f"| 0 | {OWN_PID} | python |\n| 0 | {OTHER_PID} | python |\n| 1 | {OTHER_
 
 class NpuCleanerTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        self.temp = tempfile.TemporaryDirectory(dir=Path.cwd())
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.bin_dir = self.root / "bin"
@@ -33,12 +34,14 @@ class NpuCleanerTests(unittest.TestCase):
         self.kill_log = self.root / "kill.log"
         self.launch_log = self.root / "launch.log"
         self.query_log = self.root / "query.log"
+        self.device_log = self.root / "devices.log"
         self.pwdx_log = self.root / "pwdx.log"
         self.online = self.root / "online"
         self.offline = self.root / "offline"
         self.online.mkdir()
         self.offline.mkdir()
         (self.offline / "quant_model_description.json").write_text("{}")
+        (self.root / "sglang/python/sglang").mkdir(parents=True)
         self.bash_env = self.root / "bash-env.sh"
         self.bash_env.write_text(
             'kill() { printf "%s\\n" "$*" >> "$TEST_KILL_LOG"; '
@@ -65,6 +68,8 @@ class NpuCleanerTests(unittest.TestCase):
         )
         self.mock(
             "ps",
+            'if [[ "${4:-}" == lstart= ]]; then\n'
+            '    echo "Wed Oct 14 08:30:00 2026"; exit 0\nfi\n'
             'if [[ "${4:-}" != uid= ]]; then\n'
             '    if [[ "${TEST_PS_STATUS:-0}" != 0 ]]; then exit "$TEST_PS_STATUS"; fi\n'
             '    if [[ "$2" == "${TEST_PS_MISSING_PID:-}" ]]; then exit 1; fi\n'
@@ -99,6 +104,15 @@ class NpuCleanerTests(unittest.TestCase):
             'printf "visible:%s\\nargs:%s\\n" "${ASCEND_RT_VISIBLE_DEVICES-<unset>}" '
             '"$*" >> "$TEST_LAUNCH_LOG"\n',
         )
+        self.mock(
+            "python3",
+            'if [[ "$1" == -c ]]; then\n'
+            '    printf "%s\\n" "${ASCEND_RT_VISIBLE_DEVICES-<unset>}" >> "$TEST_DEVICE_LOG"\n'
+            '    printf "%s\\n" "${TEST_NPU_COUNT:-8}"\n'
+            '    exit "${TEST_DEVICE_STATUS:-0}"\nfi\n'
+            'if [[ "$1" == -m && "$2" == sglang.launch_server ]]; then\n'
+            '    exec sglang "$@"\nfi\nexit 2\n',
+        )
         self.env = os.environ.copy()
         for name in ("SUDO_UID", "MTP", "EXTRA_ARGS"):
             self.env.pop(name, None)
@@ -108,6 +122,7 @@ class NpuCleanerTests(unittest.TestCase):
             TEST_KILL_LOG=str(self.kill_log),
             TEST_LAUNCH_LOG=str(self.launch_log),
             TEST_QUERY_LOG=str(self.query_log),
+            TEST_DEVICE_LOG=str(self.device_log),
             TEST_PWDX_LOG=str(self.pwdx_log),
             TEST_IDENTITY_LOG=str(self.identity_log),
             TEST_SMI_ROWS=ROWS,
@@ -115,6 +130,11 @@ class NpuCleanerTests(unittest.TestCase):
             MODEL_PATH=str(self.online),
             BENCH_ROOT=str(self.root / "bench"),
             ASCEND_RT_VISIBLE_DEVICES="stale-mask",
+            TP_SIZE="99",
+            NPU_TP_SIZE="99",
+            SGLANG_DIR=str(self.root / "sglang"),
+            ADAPTER_A_PATH=str(self.root / "adapter-a"),
+            ADAPTER_B_PATH=str(self.root / "adapter-b"),
         )
 
     def mock(self, name, body):
@@ -123,7 +143,7 @@ class NpuCleanerTests(unittest.TestCase):
         path.chmod(0o755)
 
     def clear_logs(self):
-        for path in (self.kill_log, self.launch_log, self.query_log, self.identity_log, self.pwdx_log):
+        for path in (self.kill_log, self.launch_log, self.query_log, self.device_log, self.identity_log, self.pwdx_log):
             path.unlink(missing_ok=True)
 
     @staticmethod
@@ -136,8 +156,10 @@ class NpuCleanerTests(unittest.TestCase):
         return rows[0]
 
     def command(self, script, args):
-        if script.name == "a5_fia_mixed_split_serve.sh":
+        if script.name == "a5_fia_mixed_split_serve.sh" and (not args or args[0] not in ("on", "off")):
             args = ["on", *args]
+        if script == LORA and (not args or args[0] not in ("baseline", "lora")):
+            args = ["baseline", "graph", *args]
         return ["bash", str(script), *args]
 
     def environment(self, script, overrides):
@@ -241,7 +263,7 @@ class NpuCleanerTests(unittest.TestCase):
     def test_enter_confirms_all_selected_processes(self):
         code, output = self.run_interactive(b"\n")
         self.assertEqual(code, 0, output)
-        self.assertRegex(self.process_row(output, OTHER_PID), rf"^{OTHER_PID}\s+python other\s+/work/bob/my project$")
+        self.assertRegex(self.process_row(output, OTHER_PID), rf"^{OTHER_PID}\s+2026-10-14 08:30:00\s+python other\s+/work/bob/my project$")
         self.assertEqual(self.contents(self.kill_log), f"-9 -- {OWN_PID} {OTHER_PID}\n")
 
     def test_escape_cancels_without_killing_any_process(self):
@@ -252,7 +274,7 @@ class NpuCleanerTests(unittest.TestCase):
     def test_process_table_has_working_directory_as_last_column(self):
         result = self.run_script(args=("-f", "0"))
         self.assertEqual(result.returncode, 0, result.stdout)
-        headers = [line for line in result.stdout.splitlines() if line.split() == ["PID", "COMMAND", "工作目录"]]
+        headers = [line for line in result.stdout.splitlines() if line.split() == ["PID", "START_TIME", "COMMAND", "工作目录"]]
         self.assertEqual(len(headers), 1, result.stdout)
         for pid, command, directory in (
             (OWN_PID, "python own", "/work/alice/models"),
@@ -260,7 +282,7 @@ class NpuCleanerTests(unittest.TestCase):
         ):
             rows = [line for line in result.stdout.splitlines() if line.split() and line.split()[0] == pid]
             self.assertEqual(len(rows), 1, result.stdout)
-            self.assertRegex(rows[0], rf"^{pid}\s+{command}\s+{directory}$")
+            self.assertRegex(rows[0], rf"^{pid}\s+2026-10-14 08:30:00\s+{command}\s+{directory}$")
         self.assertNotIn("USER", result.stdout)
         self.assertNotIn("进程当前工作目录", result.stdout)
         self.assertNotIn(f"{OWN_PID}: /work/alice/models", result.stdout)
@@ -277,8 +299,8 @@ class NpuCleanerTests(unittest.TestCase):
     def test_unavailable_process_metadata_does_not_shift_directory_rows(self):
         result = self.run_script(args=("-f", "0"), overrides={"TEST_PS_MISSING_PID": OWN_PID})
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertRegex(self.process_row(result.stdout, OWN_PID), rf"^{OWN_PID}\s+\?\s+/work/alice/models$")
-        self.assertRegex(self.process_row(result.stdout, OTHER_PID), rf"^{OTHER_PID}\s+python other\s+/work/bob/my project$")
+        self.assertRegex(self.process_row(result.stdout, OWN_PID), rf"^{OWN_PID}\s+2026-10-14 08:30:00\s+\?\s+/work/alice/models$")
+        self.assertRegex(self.process_row(result.stdout, OTHER_PID), rf"^{OTHER_PID}\s+2026-10-14 08:30:00\s+python other\s+/work/bob/my project$")
 
     def test_pwdx_directories_are_shown_before_confirmation(self):
         def check_display(output):
@@ -411,9 +433,10 @@ class NpuCleanerTests(unittest.TestCase):
                 with self.subTest(script=script.name, args=args):
                     result = self.run_script(script, args)
                     self.assertEqual(result.returncode, 0, result.stdout)
-                    mask = "<unset>" if "all" in args else "0,1" if "1" in args else "0"
+                    mask = "0,1,2,3,4,5,6,7" if "all" in args else "0,1" if "1" in args else "0"
                     launch = self.contents(self.launch_log)
                     self.assertIn(f"visible:{mask}\n", launch)
+                    self.assertRegex(launch, rf"--tp {len(mask.split(','))}(?: |$)")
                     self.assertNotIn("--force", launch)
                     self.assertNotIn("-f ", launch)
 
@@ -423,7 +446,9 @@ class NpuCleanerTests(unittest.TestCase):
                 with self.subTest(script=script.name, args=args):
                     result = self.run_script(script, args)
                     self.assertEqual(result.returncode, 0, result.stdout)
-                    self.assertIn("visible:<unset>\n", self.contents(self.launch_log))
+                    self.assertIn("visible:0,1,2,3,4,5,6,7\n", self.contents(self.launch_log))
+                    self.assertRegex(self.contents(self.launch_log), r"--tp 1(?: |$)")
+                    self.assertEqual(self.contents(self.device_log), "<unset>\n")
                     self.assertEqual(self.contents(self.query_log), "")
                     self.assertEqual(self.contents(self.kill_log), "")
 
@@ -479,10 +504,96 @@ class NpuCleanerTests(unittest.TestCase):
                 self.assertIn("visible:0\n", self.contents(self.launch_log))
 
     def test_shell_syntax(self):
-        for script in [CLEANER, LLM_DIR / "common/npu-launch.sh", *LAUNCHERS]:
+        for script in [CLEANER, LLM_DIR / "common/npu-launch.sh", *LAUNCHERS, LORA]:
             with self.subTest(script=script.name):
                 result = subprocess.run(["bash", "-n", str(script)], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_device_count_and_all_for_every_launcher(self):
+        for script in [*LAUNCHERS, LORA]:
+            for count in (1, 2, 8):
+                with self.subTest(script=script.name, count=count):
+                    result = self.run_script(
+                        script, ("all",),
+                        {"TEST_NPU_COUNT": str(count), "TEST_SMI_ROWS": ""},
+                    )
+                    self.assertEqual(result.returncode, 0, result.stdout)
+                    mask = ",".join(map(str, range(count)))
+                    launch = self.contents(self.launch_log)
+                    self.assertIn(f"visible:{mask}\n", launch)
+                    self.assertRegex(launch, rf"--tp(?:-size)? {count}(?: |$)")
+                    self.assertEqual(self.contents(self.device_log), "<unset>\n")
+
+    def test_nonzero_device_ids_determine_tp_by_count(self):
+        for script in [*LAUNCHERS, LORA]:
+            for devices in (("3",), ("5", "3")):
+                with self.subTest(script=script.name, devices=devices):
+                    result = self.run_script(script, devices, {"TEST_SMI_ROWS": ""})
+                    self.assertEqual(result.returncode, 0, result.stdout)
+                    launch = self.contents(self.launch_log)
+                    self.assertIn(f"visible:{','.join(devices)}\n", launch)
+                    self.assertRegex(launch, rf"--tp(?:-size)? {len(devices)}(?: |$)")
+                    self.assertEqual(self.contents(self.device_log), "")
+
+    def test_default_tp_two_is_preserved_with_all_devices_visible(self):
+        script = self.root / "default-tp-two.sh"
+        script.write_text(
+            f'source "{LLM_DIR}/common/npu-launch.sh"\n'
+            'npu_prepare_launch 2 "$@" || exit $?\n'
+            'sglang serve --tp "$NPU_TP_SIZE"\n'
+        )
+        for args, tp in (((), 2), (("-f",), 2), (("3",), 1), (("all",), 8)):
+            with self.subTest(args=args):
+                result = self.run_script(script, args, {"TEST_SMI_ROWS": ""})
+                self.assertEqual(result.returncode, 0, result.stdout)
+                mask = "3" if args == ("3",) else "0,1,2,3,4,5,6,7"
+                self.assertIn(f"visible:{mask}\n", self.contents(self.launch_log))
+                self.assertRegex(self.contents(self.launch_log), rf"--tp {tp}(?: |$)")
+                if not args or args == ("-f",):
+                    self.assertEqual(self.contents(self.query_log), "")
+
+    def test_invalid_devices_and_failed_count_abort_before_cleanup(self):
+        cases = [(("all", "0"), {}), (("all", "all"), {}), (("3", "3"), {}), (("oops",), {})]
+        for args in ((), ("all",)):
+            for overrides in ({"TEST_DEVICE_STATUS": "1"}, {"TEST_NPU_COUNT": "0"}, {"TEST_NPU_COUNT": "invalid"}):
+                cases.append((args, overrides))
+        for script in [*LAUNCHERS, LORA]:
+            for args, overrides in cases:
+                with self.subTest(script=script.name, args=args, overrides=overrides):
+                    result = self.run_script(script, args, overrides)
+                    self.assertNotEqual(result.returncode, 0, result.stdout)
+                    self.assertEqual(self.contents(self.query_log), "")
+                    self.assertEqual(self.contents(self.kill_log), "")
+                    self.assertEqual(self.contents(self.launch_log), "")
+
+    def test_all_confirmation_can_continue_or_cancel(self):
+        for script in LAUNCHERS:
+            for key in (b"\n", b"\x1b"):
+                with self.subTest(script=script.name, key=key):
+                    code, output = self.run_interactive(key, script, args=("all",))
+                    self.assertEqual(code, 0 if key == b"\n" else 130, output)
+                    if key == b"\n":
+                        self.assertEqual(self.contents(self.kill_log), f"-9 -- {OWN_PID} {OTHER_PID} {OTHER_CARD_PID}\n")
+                        self.assertIn("visible:0,1,2,3,4,5,6,7\n", self.contents(self.launch_log))
+                    else:
+                        self.assertEqual(self.contents(self.kill_log), "")
+                        self.assertEqual(self.contents(self.launch_log), "")
+
+    def test_a5_modes_and_lora_modes_accept_all(self):
+        script = LLM_DIR / "a5_fia_mixed_split_serve.sh"
+        for mode in ("on", "off"):
+            result = self.run_script(script, (mode, "-f", "all"))
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertRegex(self.contents(self.launch_log), r"--tp 8(?: |$)")
+        for kind in ("baseline", "lora"):
+            for mode in ("eager", "graph"):
+                for devices, tp in (((), 1), (("all",), 8), (("3", "5"), 2)):
+                    with self.subTest(kind=kind, mode=mode, devices=devices):
+                        result = self.run_script(LORA, (kind, mode, *devices))
+                        self.assertEqual(result.returncode, 0, result.stdout)
+                        self.assertRegex(self.contents(self.launch_log), rf"--tp-size {tp}(?: |$)")
+                        self.assertEqual(self.contents(self.query_log), "")
+                        self.assertEqual(self.contents(self.kill_log), "")
 
 
 if __name__ == "__main__":

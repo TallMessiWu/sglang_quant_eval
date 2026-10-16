@@ -43,7 +43,7 @@ Config：格式、来源、层与策略
 
 | 编号 | 目标 / 任务 | 实现进度（2026-10-15） | 验证与剩余验收 | 交付载体 / 合入跟踪 |
 | --- | --- | --- | --- | --- |
-| G1.1 | 修正 MXFP8 partial-scale 与布局边界 | 已有对应修复；Diffusion loader 仍需单独核对 | 余块与奇数 scale 的表示、分片后 shape 和目标 NPU 验证；占位修正不等于任意 K 可运行 | #32745；状态见下方 PR 表 |
+| G1.1 | 修正 MXFP8 partial-scale 与布局边界 | 2026-10-16 补齐 SRT ModelSlim RowParallel 未对齐 TP 的 scale 切片与 W/X 补零，并移植到组合验证分支；Diffusion loader 仍需单独核对 | 两分支各 6 项隔离 CPU 测试通过，含 K=4304、TP1/2/4/8 全部 rank；对应 TP 的目标 NPU 加载、warmup 和请求尚未验证 | #32745；分支与 HEAD 见 `branches.md`，状态见下方 PR 表 |
 | G1.2 | 补在线 MoE W4A8 / W4A4 与实际精度分配 | 两条功能分支已有实现，保持各自能力增量 | 专家确实量化；层级精度、融合、dispatch、TP/EP 与在线 RTN 精度需有证据 | #43739（原 #32601）/ #32602；状态见 PR 表 |
 | **G2.1** | **Dense W4A8 在线/离线公共执行** | **实现已发布 PR；原验收分支在线/离线功能通过** | 原 8 项 CPU/mock；新 PR 去除无关配置测试后 6 项通过。2026-10-14 用户确认在线/离线请求正常；在线视觉 27 个 fc2 保留 BF16 回退。新发布 head 尚无同场景真机通过证据，数值等价未测 | #44363；混精独立 #44364。原实现 `24e100f1e8`、离线验收载体 `2ef4c276be` |
 | **G2.2** | **Diffusion 离线 MXFP8 委托公共 kernel** | **实现已发布 PR；原验收分支图生视频功能通过** | 2026-10-14 用户确认 I2V 输出成功、视频观感正常；新 PR 3 项 CPU/mock 通过。新发布 head 尚无同场景真机通过证据；按用户要求跳过数值比较，独立 warmup、量化误差和性能未实测 | #44365；原实现 `6eb8e1dd1c`，发布定位见 `branches.md` |
@@ -53,6 +53,10 @@ Config：格式、来源、层与策略
 | G5 | 模型、算子、并行与 CI 的硬件验收 | 持续工作 | G2.1 在线/离线、G2.2 / G2.3 图生视频均已有用户真机功能通过反馈；数值、性能、并行与其他能力覆盖仍分别记录 | 随各任务记录证据，CI 通过不替代实际硬件覆盖 |
 
 原分支的用户真机反馈只证明报告场景的功能结果；新 PR head 的 CPU/mock 或 lint 不能继承为 NPU 验收。PR 状态统一见第 5 节。
+
+**G1.1 本轮验证（2026-10-16）**：按全局权重起点读取 scale，并将左侧偏移计入 scale 数量，覆盖 TP4 部分 rank 需要 35 个 block 的情况。实际 scheme、Parameter 与离线 kernel 源码在隔离 serving 导入后通过 CPU 回归，包含 checkpoint 权重参考计算、二维/三维输入 padding、已分片 scale、TP1/Column/已对齐路径；未扩展未对齐 TP 的预量化 tuple 输入。标准 SRT 测试入口因缺 `orjson` 未完成，未调用真实 NPU 算子。组合验证分支的默认全仓注册检查仍有 572 条历史 taxonomy 错误，修改前后输出完全一致；以该分支为比较基线的注册检查通过。
+
+主仓启动脚本另有 37 项隔离 shell/PTY 测试通过，覆盖按卡号数量决定 TP、保留默认 TP2、`all` 的 1/2/8 卡、旧设备掩码、清理确认/取消及 LoRA 不清理。下一步由现有启动脚本在目标 NPU 验证 TP2、TP4 和设备数量允许时的 `all`，检查加载、warmup、文本/图片请求；本轮未获得这些真机结果，也无精度或性能结论。
 
 ## 3. G2 实施与验收摘要
 
@@ -107,14 +111,14 @@ ASCEND_RT_VISIBLE_DEVICES=0 bash diffusion/i2v_offline_mxfp8.sh
 
 <a id="pr-merge-status"></a>
 
-### 当前 PR 跟踪（2026-10-15 实时查询）
+### 当前 PR 跟踪（2026-10-15 快照；#32745 于 2026-10-16 更新）
 
 保留原计划序号；序号不是合入顺序。所有 Open PR 均 `base=main`、仍需 review。`UNKNOWN` 不推定为无冲突，CI 跳过不等于硬件通过；本表不是自动监控面板。
 
 | 序号 | PR | 职责 | 状态 / Git 合并检查 | 当前 CI 与下一步 |
 | --- | --- | --- | --- | --- |
 | 1 | [kernel #638](https://github.com/sgl-project/sgl-kernel-npu/pull/638) | Gemma 稳定 API / 构建期 provider；G4 | Open，非 Draft；MERGEABLE | 检查通过，1 项跳过；#32745 的 wheel/API 前置 |
-| 2 | [SGLang #32745](https://github.com/sgl-project/sglang/pull/32745) | Gemma API、MXFP8 partial-scale；G1.1/G4 | Open，非 Draft；UNKNOWN | lint 通过，整体 FAILURE；按当前 head 归因并审阅 |
+| 2 | [SGLang #32745](https://github.com/sgl-project/sglang/pull/32745) | Gemma API、MXFP8 partial-scale / TP 对齐；G1.1/G4 | Open，非 Draft；MERGEABLE | 10-16 新 head lint 通过；整体未通过：要求包含基线 `b67785153a55`、现有标题不符合新格式、extra 缺 `run-ci-extra`；部分检查仍运行/排队。本轮只提交最小 TP 修复，未同步 main、调整标题或添加标签 |
 | 3 | [SGLang #32041](https://github.com/sgl-project/sglang/pull/32041) | Wan2.2 MXFP8 Attention 历史实现 | Closed，未合并 | 移出队列；核心 Attention 由 #39438 替代，不等于 G2.2 去重 |
 | 4 | [SGLang #40419](https://github.com/sgl-project/sglang/pull/40419) | speculative SSM/intermediate state BF16 | Open，非 Draft；UNKNOWN | lint 通过，整体 FAILURE；与已合入 kernel #808 配套 |
 | 5 | [kernel #808](https://github.com/sgl-project/sgl-kernel-npu/pull/808) | Ascend 950 recurrent GDN / BF16 断言 | Merged，2026-09-29 | 已移出队列，不在原 PR 继续追加 |

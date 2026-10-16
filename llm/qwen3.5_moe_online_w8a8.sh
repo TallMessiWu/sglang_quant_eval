@@ -3,7 +3,7 @@
 # 用法: $0 [-f|--force] [NPU_ID ... | all]
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 source "$SCRIPT_DIR/common/npu-launch.sh" || exit $?
-npu_prepare_launch "$@" || exit $?
+npu_prepare_launch 1 "$@" || exit $?
 
 export ASCEND_USE_FIA=1
 
@@ -13,7 +13,7 @@ sglang serve \
     --port ${VLLM_PORT:-6969} \
     --quantization mxfp8 \
     --device npu \
-    --tp 1 \
+    --tp "$NPU_TP_SIZE" \
     --reasoning-parser qwen3 \
     --context-length "${CONTEXT_LENGTH:-131072}" \
     --trust-remote-code

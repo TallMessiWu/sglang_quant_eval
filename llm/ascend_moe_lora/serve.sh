@@ -5,7 +5,9 @@ set -euo pipefail
 usage() {
     cat <<'EOF'
 Usage:
-  serve.sh <baseline|lora> <eager|graph> [NPU_ID ...]
+  serve.sh <baseline|lora> <eager|graph> [NPU_ID ... | all]
+  Explicit IDs set TP to their count; all uses every NPU. Default TP is 1.
+  Without IDs, all NPUs are visible. This script does not clean up processes.
 
 Required environment:
   MODEL_PATH       BF16, unquantized Qwen3-30B-A3B checkpoint.
@@ -18,18 +20,17 @@ Optional environment:
   SGLANG_DIR          SGLang checkout (default: <repo>/sglang/ascend_moe_lora)
   SERVER_HOST         Listen address (default: 127.0.0.1)
   SERVER_PORT         Listen port (default: VLLM_PORT or 6969)
-  TP_SIZE             Tensor parallel size (default: number of NPU IDs, else 1)
   CONTEXT_LENGTH      Maximum context length (default: 4096)
   MEM_FRACTION_STATIC Static memory fraction (default: 0.80)
   GRAPH_BATCH_SIZE    Decode NPU Graph bucket (default: 3)
   SGLANG_EXTRA_ARGS   Extra launch arguments, split on shell whitespace.
 
 Examples:
-  MODEL_PATH=/weights/Qwen3-30B-A3B TP_SIZE=2 \
+  MODEL_PATH=/weights/Qwen3-30B-A3B \
     ./llm/ascend_moe_lora/serve.sh baseline eager 0 1
 
   MODEL_PATH=/weights/Qwen3-30B-A3B \
-  ADAPTER_A_PATH=/weights/lora-a ADAPTER_B_PATH=/weights/lora-b TP_SIZE=2 \
+  ADAPTER_A_PATH=/weights/lora-a ADAPTER_B_PATH=/weights/lora-b \
     ./llm/ascend_moe_lora/serve.sh lora graph 0 1
 EOF
 }
@@ -78,17 +79,11 @@ fi
 
 export PYTHONPATH="${sglang_dir}/python${PYTHONPATH:+:${PYTHONPATH}}"
 
-if [[ $# -gt 0 ]]; then
-    device_list=$(IFS=,; echo "$*")
-    export ASCEND_RT_VISIBLE_DEVICES=$device_list
-    default_tp_size=$#
-else
-    default_tp_size=1
-fi
+source "$script_dir/../common/npu-launch.sh"
+npu_resolve_devices 1 "$@"
 
 host=${SERVER_HOST:-127.0.0.1}
 port=${SERVER_PORT:-${VLLM_PORT:-6969}}
-tp_size=${TP_SIZE:-$default_tp_size}
 context_length=${CONTEXT_LENGTH:-4096}
 mem_fraction_static=${MEM_FRACTION_STATIC:-0.80}
 graph_batch_size=${GRAPH_BATCH_SIZE:-3}
@@ -101,7 +96,7 @@ cmd=(
     --port "$port"
     --device npu
     --dtype bfloat16
-    --tp-size "$tp_size"
+    --tp-size "$NPU_TP_SIZE"
     --context-length "$context_length"
     --mem-fraction-static "$mem_fraction_static"
     --moe-a2a-backend none
@@ -142,7 +137,7 @@ fi
 echo "server_kind=$server_kind"
 echo "execution_mode=$execution_mode"
 echo "model_path=$MODEL_PATH"
-echo "tp_size=$tp_size"
+echo "tp_size=$NPU_TP_SIZE"
 echo "ASCEND_RT_VISIBLE_DEVICES=${ASCEND_RT_VISIBLE_DEVICES:-<unset>}"
 echo "endpoint=http://${host}:${port}"
 printf 'command:'

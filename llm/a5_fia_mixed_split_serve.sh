@@ -21,16 +21,17 @@ usage() {
 用法:
   a5_fia_mixed_split_serve.sh <off|on> [-f|--force] [NPU 卡号... | all]
   目标卡上有任何 PID 时 Enter 确认、Esc 取消；-f 跳过确认。
+  卡号数量决定 TP；all 使用全部卡；不传卡号则全部可见、默认 TP=1、不清理。
 
 示例:
   ./llm/a5_fia_mixed_split_serve.sh off 0
   ./llm/a5_fia_mixed_split_serve.sh on 0
+  ./llm/a5_fia_mixed_split_serve.sh on all
 
 环境变量覆盖:
   MODEL_PATH            模型权重      (默认 /home/weights/Qwen3.5-27B)
   SERVER_HOST           监听地址      (默认 127.0.0.1)
   SERVER_PORT           监听端口      (默认 $VLLM_PORT，再默认 6969)
-  TP_SIZE               张量并行      (默认 1)
   CONTEXT_LENGTH        最大上下文    (默认 10240)
   CHUNKED_PREFILL_SIZE  prefill 分块  (默认 4096，同时是 mixed batch 里
                                        prefill 段的长度上限)
@@ -62,7 +63,6 @@ repo_root=$(dirname "$script_dir")
 model_path=${MODEL_PATH:-/home/weights/Qwen3.5-27B}
 host=${SERVER_HOST:-127.0.0.1}
 port=${SERVER_PORT:-${VLLM_PORT:-6969}}
-tp_size=${TP_SIZE:-1}
 context_length=${CONTEXT_LENGTH:-10240}
 chunked_prefill_size=${CHUNKED_PREFILL_SIZE:-4096}
 bench_root=${BENCH_ROOT:-${repo_root}/llm/fia_bench}
@@ -70,7 +70,7 @@ profile_dir="${bench_root}/${mode}"
 
 # ================= 1. 前置清理 NPU =================
 source "$script_dir/common/npu-launch.sh" || exit $?
-npu_prepare_launch "$@" || exit $?
+npu_prepare_launch 1 "$@" || exit $?
 
 # ================= 2. 环境变量 =================
 # A5(Ascend 950) 走 FIA 融合注意力算子 npu_fused_infer_attention_score；
@@ -96,7 +96,7 @@ exec sglang serve \
     --host "$host" \
     --port "$port" \
     --device npu \
-    --tp "$tp_size" \
+    --tp "$NPU_TP_SIZE" \
     --context-length "$context_length" \
     --enable-mixed-chunk \
     --chunked-prefill-size "$chunked_prefill_size" \

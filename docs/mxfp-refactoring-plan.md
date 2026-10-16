@@ -56,7 +56,9 @@ Config：格式、来源、层与策略
 
 **G1.1 本轮验证（2026-10-16）**：按全局权重起点读取 scale，并将左侧偏移计入 scale 数量，覆盖 TP4 部分 rank 需要 35 个 block 的情况。实际 scheme、Parameter 与离线 kernel 源码在隔离 serving 导入后通过 CPU 回归，包含 checkpoint 权重参考计算、二维/三维输入 padding、已分片 scale、TP1/Column/已对齐路径；未扩展未对齐 TP 的预量化 tuple 输入。标准 SRT 测试入口因缺 `orjson` 未完成，未调用真实 NPU 算子。组合验证分支的默认全仓注册检查仍有 572 条历史 taxonomy 错误，修改前后输出完全一致；以该分支为比较基线的注册检查通过。
 
-主仓启动脚本另有 37 项隔离 shell/PTY 测试通过，覆盖按卡号数量决定 TP、保留默认 TP2、`all` 的 1/2/8 卡、旧设备掩码、清理确认/取消及 LoRA 不清理。下一步由现有启动脚本在目标 NPU 验证 TP2、TP4 和设备数量允许时的 `all`，检查加载、warmup、文本/图片请求；本轮未获得这些真机结果，也无精度或性能结论。
+主仓启动脚本另有 37 项隔离 shell/PTY 测试通过，覆盖按卡号数量决定 TP、保留默认 TP2、`all` 的 1/2/8 卡、旧设备掩码、清理确认/取消及 LoRA 不清理。下一步由现有启动脚本在目标 NPU 验证 TP2、TP4 和设备数量允许时的 `all`，检查加载、warmup、文本/图片请求；目前尚无这些配置的真机通过结果，也无精度或性能结论。
+
+**Qwen3.5 TP2 MRoPE 复测（2026-10-16）**：用户在组合分支的上一版 TP 修复上运行 `./qwen3.5_dense_offline_w8a8.sh 6 7`，请求进入语言模型后报 `Expected positions shape to be [80] in rope mode, but got [3, 80]`。按 Qwen3.5-27B 配置，Q 的本地宽度从 TP1 的 6144 降为 TP2 的 3072，触发原有 `<=4096` NPU 分支，其固定 `[0,0,0]` section 选择了普通 RoPE。两分支已单独提交并同步最小修复：二维位置复用现有 native MRoPE，保留三轴、交错与 partial rotary 语义；未展平位置或降低 TP。各分支 2 项隔离 CPU/mock 回归通过，包含 TP1/2/4/8 全部 rank、1/80 token、不同三轴坐标、分段/交错排列、未旋转尾部及一维 NPU 分流，原 6 项 MXFP8 测试也通过。这不是 NPU 复测通过；仍需相同脚本完成加载、warmup 和实际请求，性能未测。
 
 ## 3. G2 实施与验收摘要
 

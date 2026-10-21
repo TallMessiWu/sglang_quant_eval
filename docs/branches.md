@@ -4,14 +4,16 @@
 
 <a id="current-branch-map"></a>
 
-## 当前分支定位
+## 当前分支定位（2026-10-21）
 
-表中快照以 2026-10-15 的 worktree 注册表、本地 HEAD 和 GitHub PR head 核对为基础；2026-10-16 单独更新了 #32745 及其组合验证分支。原验收分支与新 PR 发布分支分别保留；当前状态会漂移，操作前仍须实时查询。
+本轮重新核对真实 worktree 注册表、本地 HEAD、remote 和 GitHub PR head。表中 HEAD 均为本地 checkout；#44365 与 GitHub 的差异、#32745 与 kernel 的正式合入提交见表后说明。原验收分支与新 PR 发布分支分别保留；当前状态会漂移，操作前仍须实时查询。
 
-| PR / 任务 | 分支 | HEAD | worktree（相对主仓） |
+本轮刷新定位与合入证据，并按用户授权为 #32041 的自动路由续作新增独立 worktree / PR #45550。既有 checkout、功能分支和子模块 gitlink 未移动；#32745 源分支及其 #36426 组合验证分支继续保留。
+
+| PR / 任务 | 分支 | 本地 HEAD | worktree（相对主仓） |
 | --- | --- | --- | --- |
 | [kernel #638](https://github.com/sgl-project/sgl-kernel-npu/pull/638) | `codex/a5-gemma-rmsnorm-csrc` | `4a4f838e8f` | `sgl-kernel-npu/` |
-| [SGLang #32745](https://github.com/sgl-project/sglang/pull/32745) | `junlin_qwen3.5_dense_w8a8` | `773d3b43a6` | `sglang/qwen3.5_dense_w8a8/` |
+| [SGLang #32745](https://github.com/sgl-project/sglang/pull/32745) | `junlin_qwen3.5_dense_w8a8` | `c89095b6e5` | `sglang/qwen3.5_dense_w8a8/` |
 | [SGLang #40419](https://github.com/sgl-project/sglang/pull/40419) | `junlin_npu_mamba_ssm_dtype` | `756dac5a66` | `sglang/npu_mamba_ssm_dtype/` |
 | [kernel #824](https://github.com/sgl-project/sgl-kernel-npu/pull/824) | `cache-loc-assign-bounds` | `1c6fad69a1` | `sgl-kernel-npu-worktrees/cache-loc-assign-bounds/` |
 | [SGLang #43739](https://github.com/sgl-project/sglang/pull/43739)（原 [#32601](https://github.com/sgl-project/sglang/pull/32601)） | `junlin_qwen3.5_moe_w4a8` | `ded4671577` | `sglang/qwen3.5_moe_w4a8/` |
@@ -27,16 +29,22 @@
 | [SGLang #44364](https://github.com/sgl-project/sglang/pull/44364)：ModelSlim gate/up 混精发布 | `junlin/pr-modelslim-mixed-gate-up` | `ec1383b441` | `sglang/pr_modelslim_mixed_gate_up/` |
 | [SGLang #44365](https://github.com/sgl-project/sglang/pull/44365)：G2.2 发布 | `junlin/pr-diffusion-mxfp8-shared-execution` | `4cfdf3d543` | `sglang/pr_diffusion_mxfp8_shared_execution/` |
 | [SGLang #44366](https://github.com/sgl-project/sglang/pull/44366)：G2.3 发布 | `junlin/pr-ascend-mxfp-capabilities` | `9f9aa27254` | `sglang/pr_ascend_mxfp_capabilities/` |
+| [SGLang #45550](https://github.com/sgl-project/sglang/pull/45550)：#32041 自动 FA 路由续作 | `junlin/diffusion-mxfp8-fa-auto-selection` | `79dba73be8` | `sglang/diffusion_mxfp8_fa_auto_selection/` |
 | kernel 编译组合（无 PR） | `main-638-824` | `e629e45a51` | `sgl-kernel-npu-worktrees/main-638-824/` |
-| #32745 / #36426 / #40419 历史组合验证（无 PR） | `junlin_qwen3.5_dense_w8a8_pr36426` | `c563a009e8` | `sglang/qwen3.5_dense_w8a8_pr36426/` |
+| #32745 + #36426 组合验证（无 PR） | `junlin_qwen3.5_dense_w8a8_pr36426` | `1593019ff9` | `sglang/qwen3.5_dense_w8a8_pr36426/` |
 | 旧 ModelSlim / 视觉塔分支（#32266） | `junlin_qwen3.5_moe_w8a8` | `3d72a9dc00` | `sglang/qwen3.5_moe_w8a8/` |
 | MoE LoRA 实验（无 PR） | `junlin-ascend-moe-lora` | `bc9a4d0753` | `sglang/ascend_moe_lora/` |
 | 本地只读参考（不是实时远端 main） | `upstream-main` | `0dd66def7c` | `sglang/upstream-main/` |
 
 - `sglang/qwen3.5_dense_w8a8/` 是共享 `.git` 的主 clone，其余 SGLang checkout 为直属 worktree。`sglang/` 被主仓忽略，不是子模块；不得在已有 worktree 内切换功能分支。
-- `sgl-kernel-npu/` 是主仓子模块。主仓 gitlink 仍为 `500ea7bb0e`，checkout 为上表 #638 head；两者差异是保留的既有状态，不随本轮文档提交。
-- kernel `main-638-824` 是 2026-10-09 的固定构建组合：`84ce0315e4` + #638 的 squash `cefb0f9d` + #824 的 squash `e629e45a`。它未跟随两个 PR 的后续 head 更新；26 项 CPU provider/build-target 测试通过不等于 wheel 构建或 NPU 通过。构建说明见 [kernel 文档](sgl-kernel-npu-build.md)。
-- `junlin_qwen3.5_dense_w8a8_pr36426` 只用于组合验证，不能因它包含上游适配就把 #36426 混入正式功能栈。
+- `sgl-kernel-npu/` 是主仓子模块。主仓 gitlink 仍为 `500ea7bb0e`，checkout 为上表 #638 head；两者差异是保留的既有状态，本轮文档更新未调整 checkout 或主仓 gitlink。
+- #32745 于 2026-10-21 14:50:39（Asia/Shanghai）由源 head `c89095b6e5` squash 为 [`844d2b5dec`](https://github.com/sgl-project/sglang/commit/844d2b5decf6257aa192744cbdaaffb8ad797263)。合入后首轮 GitHub 查询时官方 `main` 即此提交，compare 为 `identical`；后续 #45550 使用重新 fetch 的 main，基线见下。源分支与正式 squash 提交分别保留；下游同步 main 后按内容核对并去除重复增量，不再将原源 head 作为待合入前置。
+- #45550 基于实时 `upstream/main@f7b8c6fe404ca4f29c3188cb50692f7735d45a99`，仅移植 #32041 尚未合入的自动 FA 选择逻辑并适配当前 selector；未复制已由 #39438 合入的 kernel。提交 `79dba73be8af4db97431b84839b65a2e4d8fbb38` 已普通推送到 `origin/junlin/diffusion-mxfp8-fa-auto-selection`，本地 / origin / GitHub head 一致，ahead/behind `0 0`。GitHub commit authors 已识别原作者 `hxhhhlalala <hyh_hh@163.com>` 为 co-author。验证与状态见[合入计划](mxfp-refactoring-plan.md#pr-merge-status)，原 PR、署名、正文和隔离测试证据在 `.pi/pr32041-continuation/`。
+- kernel 正式合入证据：#638 于 2026-10-16 15:16:44（Asia/Shanghai）squash 为 [`684b4c4036`](https://github.com/sgl-project/sgl-kernel-npu/commit/684b4c40361d38dd60fd888a5f5e2e224cab0c7a)，#824 于 15:16:53 squash 为 [`e1ef758b22`](https://github.com/sgl-project/sgl-kernel-npu/commit/e1ef758b2262f0b3edd886306a1951d457bafd00)。2026-10-16 查询时官方 `main` 为后者，GitHub compare 确认包含前者；2026-10-21 复核两项合入记录不变。上表两个本地源分支 HEAD 与正式 squash 提交分别保留，PR 状态和下一步见[合入计划](mxfp-refactoring-plan.md#pr-merge-status)。
+- kernel `main-638-824` 是 2026-10-09 的固定构建组合：`84ce0315e4` + #638 的 squash `cefb0f9d` + #824 的 squash `e629e45a`。它未跟随两个 PR 的后续 head 更新，只作历史复现；后续构建使用包含两项正式合入的官方 main。26 项 CPU provider/build-target 测试通过不等于 wheel 构建或 NPU 通过。构建说明见 [kernel 文档](sgl-kernel-npu-build.md)。
+- #44365 的 GitHub 当前 head 为 `06f27b4dda`，与表中本地 `4cfdf3d543` 不一致；其他活跃 PR 的本地 HEAD 与 GitHub head 一致。本轮只记录差异，后续修改前需先核对远端增量及 worktree。
+- `junlin_qwen3.5_dense_w8a8_pr36426` 持续同步最新 dense 分支并只叠加 #36426，供服务器组合验证；更新 dense 时须一并验证和推送该分支。#36426 不混入正式功能栈。
+- 2026-10-20 组合分支普通 merge/push 到 `1593019ff9`：基于 dense `c89095b6e5`，叠加 #36426 当前 head `9ea4881cc3` 的补丁。相对 dense 仅 4 文件、97 行新增和 43 行删除，逐项核对与 PR 补丁一致；旧 GDN 适配及额外 #40419 dtype 改动已移除，沿用 dense 的当前上游实现。推送后本地与远端 SHA 一致，ahead/behind `0 0`，可由旧 `c563a009e8` 快进拉取。验证边界见[目标表](mxfp-refactoring-plan.md#refactoring-status)，本地证据在 `.pi/pr32745-combo-sync-20261020/`。
 - 2026-10-16 的 MXFP8 TP 修复先在 #32745 分支发布，再单独移植到组合验证分支，各只修改 scheme 与回归测试两个文件。前者读取 `layer.tp_group`，后者沿用 `layer.tp_rank`，未合并其他上游提交。两分支均普通推送，远端 SHA 与本地一致；验证边界见[目标表](mxfp-refactoring-plan.md#refactoring-status)。
 
 ## 远程地址
@@ -53,13 +61,13 @@
 
 - 原 G2.1 `24e100f1e8` 基于 #43739 的 `ded4671577`；混精提交 `185fad010a` 叠在 G2.1 上，之后 `2ef4c276be` 回移已合入的 resize 修复。原 G2.2 `6eb8e1dd1c` 与 G2.3 `d6a46f90d9` 均独立基于 `62ff466ac0`。
 - 2026-10-15 按用户授权从实时 `upstream/main@9fa9308e952398ee235c5b43dfda7025e91d5f92` 提取最小增量：#44363 为公共 W4A8 执行及必要的 BF16 `[1,N]` bias 契约；#44364 为四文件混精修复；#44365 为两文件 Diffusion adapter 与测试。三者无需整个 Gemma / MoE / FIA 功能栈。
-- #44366 叠加 #44365 的 `4cfdf3d543`，同步 Diffusion partial-scale 校验、回归与文档导航；能力增量相对该前置为 13 文件。后续 `9f9aa27254` 仅将 MDX 表格标记改为合法注释，并同步测试中的标记。
+- #44366 叠加 #44365 的原发布提交 `4cfdf3d543`，同步 Diffusion partial-scale 校验、回归与文档导航；能力增量相对该前置为 13 文件。后续 `9f9aa27254` 仅将 MDX 表格标记改为合法注释，并同步测试中的标记；它不代表已同步 #44365 的当前远端 head。
 - **混精去重**：发布前核对 main 的合并 gate/up 结构及两条 loader，并检索相关 PR，未发现等价 ModelSlim Dense 异构拆分；#38870 修的是 Quark MTP 排除列表。**resize 去重**：#43309 已合入，main 与回移提交对应文件的 blob 同为 `c5c9ea5c24180459e8faf16623fac26d13242a85`，patch-id 也相同，四个新 PR 均不重复携带该 diff。
-- 四条发布分支均普通 push，本地、origin 与 GitHub head 一致，tracking ahead/behind `0 0`。原验收分支与服务器环境未改动，没有强推。
-- 初次发布隔离 CPU 检查：G2.1 6 项、混精 7 项、G2.2 3 项、G2.3 15 项，以及 G2.3 组合分支上的 3 项 adapter 测试通过。真实目标模块/函数体配合 serving/hardware 隔离与 NPU mock；标准入口因缺 `orjson` 未完成。本轮 MDX 修正后再跑 15 项能力检查通过。
+- 2026-10-15 初次发布及 MDX 修正时，四条发布分支均普通 push，本地、origin 与 GitHub head 一致，tracking ahead/behind `0 0`。当前 #44365 的差异见上；其余原验收分支与服务器环境未在本轮修改。
+- 初次发布隔离 CPU 检查：G2.1 6 项、混精 7 项、G2.2 3 项、G2.3 15 项，以及 G2.3 组合分支上的 3 项 adapter 测试通过。真实目标模块/函数体配合 serving/hardware 隔离与 NPU mock；标准入口因缺 `orjson` 未完成。2026-10-15 MDX 修正后再跑 15 项能力检查通过。
 - 本地 Ruff/isort/codespell、语法和 diff 检查通过，G2.3 另有 JSON/CI 注册检查；CI 结果见唯一 PR 表。本轮未执行模型复跑，新发布 head 尚无同场景真机通过证据；原分支的用户功能反馈不能继承为新 head、数值等价或全部能力覆盖。
 
-证据目录：`.pi/g2-pr-20261015/` 保存初次测试日志、PR 正文及 SHA 核对；`.pi/docs-refresh-20261015/` 保存本轮 GitHub 状态、MDX 错误日志与修正后的 CPU 结果。它们是本地辅助证据，不是上游可访问的测试报告。
+证据目录：`.pi/pr-status-20261021/` 保存本轮 PR、门禁日志、#32745 正式合入和 main 包含关系及本地 worktree 审计；`.pi/pr-status-20261016/` 保留 kernel 合入时的快照。`.pi/g2-pr-20261015/` 保存初次测试日志、PR 正文及 SHA 核对；`.pi/docs-refresh-20261015/` 保存当时 GitHub 状态、MDX 错误日志与修正后的 CPU 结果。它们是本地辅助证据，不是上游可访问的测试报告。
 
 <a id="g2-runtime-record"></a>
 

@@ -56,7 +56,7 @@ npu_prepare_launch() {
         echo "🧹 [前置任务] 准备释放 NPU (${devices[*]}) 的资源..."
         if "$cleaner_path" "${cleaner_args[@]}" "${devices[@]}"; then
             sleep 1
-            echo "✅ [前置任务] 清理完毕！"
+            echo "✅ [前置任务] 进程检查完成，继续启动！"
         else
             status=$?
             echo "取消模型启动：NPU 清理未完成。" >&2

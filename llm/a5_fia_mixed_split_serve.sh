@@ -20,7 +20,7 @@ usage() {
     cat <<'EOF'
 用法:
   a5_fia_mixed_split_serve.sh <off|on> [-f|--force] [NPU 卡号... | all]
-  目标卡上有任何 PID 时 Enter 确认、Esc 取消；-f 跳过确认。
+  目标卡上有任何 PID 时 Enter 确认清理、S 保留进程并继续、Esc 取消；-f 跳过确认并清理。
   卡号数量决定 TP；all 使用全部卡；不传卡号则全部可见、默认 TP=1、不清理。
 
 示例:

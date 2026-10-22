@@ -266,6 +266,19 @@ class NpuCleanerTests(unittest.TestCase):
         self.assertRegex(self.process_row(output, OTHER_PID), rf"^{OTHER_PID}\s+2026-10-14 08:30:00\s+python other\s+/work/bob/my project$")
         self.assertEqual(self.contents(self.kill_log), f"-9 -- {OWN_PID} {OTHER_PID}\n")
 
+    def test_skip_keeps_processes_and_returns_success(self):
+        for key in (b"s", b"S"):
+            for args in (("0",), ("all",)):
+                with self.subTest(key=key, args=args):
+                    code, output = self.run_interactive(
+                        key, args=args, overrides={"TEST_KILL_STATUS": "1"}
+                    )
+                    self.assertEqual(code, 0, output)
+                    self.assertIn("S 跳过清理并继续", output)
+                    self.assertIn("已跳过清理", output)
+                    self.assertEqual(self.contents(self.kill_log), "")
+                    self.assertNotIn("清理完成！", output)
+
     def test_escape_cancels_without_killing_any_process(self):
         code, output = self.run_interactive(b"\x1b")
         self.assertEqual(code, 130, output)
@@ -477,6 +490,22 @@ class NpuCleanerTests(unittest.TestCase):
                 code, output = self.run_interactive(b"\n", script)
                 self.assertEqual(code, 0, output)
                 self.assertIn("visible:0\n", self.contents(self.launch_log))
+
+    def test_every_launcher_skip_continues_without_killing(self):
+        for script in LAUNCHERS:
+            for args in (("0",), ("all",)):
+                with self.subTest(script=script.name, args=args):
+                    code, output = self.run_interactive(
+                        b"s", script, args=args, overrides={"TEST_KILL_STATUS": "1"}
+                    )
+                    self.assertEqual(code, 0, output)
+                    self.assertEqual(self.contents(self.kill_log), "")
+                    self.assertIn("已跳过清理", output)
+                    self.assertNotIn("清理完毕", output)
+                    mask = "0,1,2,3,4,5,6,7" if args == ("all",) else "0"
+                    launch = self.contents(self.launch_log)
+                    self.assertIn(f"visible:{mask}\n", launch)
+                    self.assertRegex(launch, rf"--tp {len(mask.split(','))}(?: |$)")
 
     def test_every_launcher_single_same_uid_pid_requires_confirmation(self):
         for script in LAUNCHERS:

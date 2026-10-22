@@ -267,14 +267,14 @@ class NpuCleanerTests(unittest.TestCase):
         self.assertEqual(self.contents(self.kill_log), f"-9 -- {OWN_PID} {OTHER_PID}\n")
 
     def test_skip_keeps_processes_and_returns_success(self):
-        for key in (b"s", b"S"):
+        for key in (b"p", b"P"):
             for args in (("0",), ("all",)):
                 with self.subTest(key=key, args=args):
                     code, output = self.run_interactive(
                         key, args=args, overrides={"TEST_KILL_STATUS": "1"}
                     )
                     self.assertEqual(code, 0, output)
-                    self.assertIn("S 跳过清理并继续", output)
+                    self.assertIn("P 保留进程并继续", output)
                     self.assertIn("已跳过清理", output)
                     self.assertEqual(self.contents(self.kill_log), "")
                     self.assertNotIn("清理完成！", output)
@@ -384,10 +384,12 @@ class NpuCleanerTests(unittest.TestCase):
                 self.assertEqual(self.contents(self.launch_log), "")
 
     def test_other_keys_do_not_authorize_cleanup(self):
-        code, output = self.run_interactive(b"y\x1b")
-        self.assertEqual(code, 130, output)
-        self.assertIn("请按 Enter", output)
-        self.assertEqual(self.contents(self.kill_log), "")
+        for key in (b"y", b"s", b"S"):
+            with self.subTest(key=key):
+                code, output = self.run_interactive(key + b"\x1b")
+                self.assertEqual(code, 130, output)
+                self.assertIn("请按 Enter", output)
+                self.assertEqual(self.contents(self.kill_log), "")
 
     def test_force_short_and_long_flags_in_any_position(self):
         for args in (("-f", "0"), ("0", "--force")):
@@ -496,7 +498,7 @@ class NpuCleanerTests(unittest.TestCase):
             for args in (("0",), ("all",)):
                 with self.subTest(script=script.name, args=args):
                     code, output = self.run_interactive(
-                        b"s", script, args=args, overrides={"TEST_KILL_STATUS": "1"}
+                        b"p", script, args=args, overrides={"TEST_KILL_STATUS": "1"}
                     )
                     self.assertEqual(code, 0, output)
                     self.assertEqual(self.contents(self.kill_log), "")

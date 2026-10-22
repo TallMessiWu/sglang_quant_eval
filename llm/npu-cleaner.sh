@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
     echo "用法: $0 [-f|--force] <NPU_ID_1> [NPU_ID_2] ... | all"
-    echo "目标卡上有 PID 时：Enter 确认清理，S 跳过清理并继续，Esc 取消；不判断进程所属用户。"
+    echo "目标卡上有 PID 时：Enter 确认清理，P 保留进程并继续，Esc 取消；不判断进程所属用户。"
     echo "-f / --force: 跳过已有进程的确认（不改变系统权限）。"
 }
 
@@ -99,7 +99,7 @@ else
         echo "没有可用的交互终端，取消清理；如确定要强制清理，请显式传入 -f。" >&2
         exit 1
     fi
-    printf 'NPU (%s) 上有运行进程。Enter 确认强制终止，S 跳过清理并继续，Esc 取消：' "$TARGETS" >&3
+    printf 'NPU (%s) 上有运行进程。Enter 确认强制终止，P 保留进程并继续，Esc 取消：' "$TARGETS" >&3
     while true; do
         if ! IFS= read -r -s -n 1 -u 3 key; then
             echo "取消清理。" >&2
@@ -107,13 +107,13 @@ else
         fi
         case "$key" in
             ''|$'\r') printf '\n' >&3; break ;;
-            s|S)
+            p|P)
                 printf '\n已跳过清理，保留全部已有进程，继续后续启动。\n' >&3
                 exec 3>&-
                 exit 0
                 ;;
             $'\e') printf '\n取消清理，未终止任何进程。\n' >&3; exit 130 ;;
-            *) printf '\n请按 Enter 确认强制终止，S 跳过清理并继续，或 Esc 取消：' >&3 ;;
+            *) printf '\n请按 Enter 确认强制终止，P 保留进程并继续，或 Esc 取消：' >&3 ;;
         esac
     done
     exec 3>&-

@@ -42,7 +42,7 @@ VLLM_PORT=6969 ./llm/mmmu.sh
 `qwen*.sh` 和 `a5_fia_mixed_split_serve.sh` 共用清理规则：
 
 - 指定卡号时清理所选卡；`all` 清理全部卡；不指定卡号时不清理。
-- `npu-smi info` 只要查到所选卡上有任何 PID，就显示 `PID / START_TIME / COMMAND / 工作目录`，启动时间通过 `ps` 获取，工作目录通过 `pwdx` 获取，供你判断，随后 **Enter 确认，Esc 取消整个启动**；确认前不会终止任何进程。
+- `npu-smi info` 只要查到所选卡上有任何 PID，就显示 `PID / START_TIME / COMMAND / 工作目录`，启动时间通过 `ps` 获取，工作目录通过 `pwdx` 获取，供你判断，随后 **Enter 确认清理，P 保留进程并继续，Esc 取消整个启动**；确认前不会终止任何进程。
 - “工作目录”是进程**当前工作目录**，不一定是最初启动目录。权限不足或进程已退出时该列显示“不可获取”；未安装 `pwdx` 时显示“不可获取（未安装 pwdx）”，仍必须确认；`-f/--force` 下也会展示表格。
 - 不判断进程是否“自己的”：同 UID、不同 UID、`sudo` 或无法通过 `ps` 查询归属，都不能跳过确认。只有所选卡上没有 PID 时才直接继续。
 - `-f` / `--force` 是有 PID 时唯一跳过确认的方式，但不会提升系统权限；清理失败仍中止启动。
@@ -59,7 +59,15 @@ VLLM_PORT=6969 ./llm/mmmu.sh
 MODEL_PATH=/weights/Qwen3-30B-A3B ./llm/ascend_moe_lora/serve.sh baseline graph all
 ```
 
-原本不调用清理器的 Diffusion 与 MoE LoRA 脚本保持不清理进程的行为。
+`diffusion/*.sh` 也共用上述选卡与清理规则，但卡数传给 **`--num-gpus`**，不强制设置 LLM 的 `--tp`，具体并行策略由 SGLang 决定。不传卡号保留默认 `--num-gpus 1`、全部卡可见且跳过清理；`all` 使用全部可访问卡。请保留仓库中的 `llm/common/npu-launch.sh` 和 `llm/npu-cleaner.sh`，不要单独复制 Diffusion 脚本。
+
+```bash
+bash diffusion/ti2v_online_mxfp8.sh 3 5      # 两张卡，--num-gpus 2；有进程时确认
+bash diffusion/t2v_bf16.sh all              # 自动检测卡数并使用全部卡
+bash diffusion/i2v_offline_mxfp8.sh -f 0     # 显式跳过确认并清理卡 0
+```
+
+MoE LoRA 脚本仍保持不清理进程的行为。
 
 隔离回归测试（模拟 NPU 查询、进程信息与 kill，不会终止真实进程）：
 

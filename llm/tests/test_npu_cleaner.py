@@ -15,9 +15,12 @@ import unittest
 LLM_DIR = Path(__file__).resolve().parents[1]
 CLEANER = LLM_DIR / "npu-cleaner.sh"
 LORA = LLM_DIR / "ascend_moe_lora/serve.sh"
-LAUNCHERS = sorted(LLM_DIR.glob("qwen*.sh")) + [
+LLM_LAUNCHERS = sorted(LLM_DIR.glob("qwen*.sh")) + [
     LLM_DIR / "a5_fia_mixed_split_serve.sh"
 ]
+DIFFUSION_DIR = LLM_DIR.parent / "diffusion"
+DIFFUSION_LAUNCHERS = sorted(DIFFUSION_DIR.glob("*.sh"))
+LAUNCHERS = LLM_LAUNCHERS + DIFFUSION_LAUNCHERS
 HYBRID_LAUNCHERS = [
     script for script in LAUNCHERS
     if script.name.startswith("qwen3.5_") or script.name == "a5_fia_mixed_split_serve.sh"
@@ -119,6 +122,11 @@ class NpuCleanerTests(unittest.TestCase):
             'if [[ "$1" == -m && "$2" == sglang.launch_server ]]; then\n'
             '    exec sglang "$@"\nfi\nexit 2\n',
         )
+        self.mock(
+            "python",
+            '[[ -f "$1" ]] || exit 2\n'
+            'exec sglang "$@"\n',
+        )
         self.env = os.environ.copy()
         for name in ("SUDO_UID", "MTP", "EXTRA_ARGS", "SGLANG_MAMBA_SSM_DTYPE"):
             self.env.pop(name, None)
@@ -155,6 +163,10 @@ class NpuCleanerTests(unittest.TestCase):
     @staticmethod
     def contents(path):
         return path.read_text() if path.exists() else ""
+
+    def assert_parallel_size(self, script, launch, size):
+        option = "--num-gpus" if script in DIFFUSION_LAUNCHERS else "--tp-size" if script == LORA else "--tp"
+        self.assertRegex(launch, rf"{option} {size}(?: |$)")
 
     def process_row(self, output, pid):
         rows = [line for line in output.splitlines() if line.split() and line.split()[0] == pid]
@@ -457,7 +469,7 @@ class NpuCleanerTests(unittest.TestCase):
                     mask = "0,1,2,3,4,5,6,7" if "all" in args else "0,1" if "1" in args else "0"
                     launch = self.contents(self.launch_log)
                     self.assertIn(f"visible:{mask}\n", launch)
-                    self.assertRegex(launch, rf"--tp {len(mask.split(','))}(?: |$)")
+                    self.assert_parallel_size(script, launch, len(mask.split(',')))
                     self.assertNotIn("--force", launch)
                     self.assertNotIn("-f ", launch)
 
@@ -468,7 +480,7 @@ class NpuCleanerTests(unittest.TestCase):
                     result = self.run_script(script, args)
                     self.assertEqual(result.returncode, 0, result.stdout)
                     self.assertIn("visible:0,1,2,3,4,5,6,7\n", self.contents(self.launch_log))
-                    self.assertRegex(self.contents(self.launch_log), r"--tp 1(?: |$)")
+                    self.assert_parallel_size(script, self.contents(self.launch_log), 1)
                     self.assertEqual(self.contents(self.device_log), "<unset>\n")
                     self.assertEqual(self.contents(self.query_log), "")
                     self.assertEqual(self.contents(self.kill_log), "")
@@ -513,7 +525,7 @@ class NpuCleanerTests(unittest.TestCase):
                     mask = "0,1,2,3,4,5,6,7" if args == ("all",) else "0"
                     launch = self.contents(self.launch_log)
                     self.assertIn(f"visible:{mask}\n", launch)
-                    self.assertRegex(launch, rf"--tp {len(mask.split(','))}(?: |$)")
+                    self.assert_parallel_size(script, launch, len(mask.split(',')))
 
     def test_every_launcher_single_same_uid_pid_requires_confirmation(self):
         for script in LAUNCHERS:
@@ -541,7 +553,7 @@ class NpuCleanerTests(unittest.TestCase):
                 self.assertIn("visible:0\n", self.contents(self.launch_log))
 
     def test_launchers_default_ssm_dtype_by_model_family(self):
-        for script in [*LAUNCHERS, LORA]:
+        for script in [*LLM_LAUNCHERS, LORA]:
             with self.subTest(script=script.name):
                 result = self.run_script(script, args=())
                 self.assertEqual(result.returncode, 0, result.stdout)
@@ -560,7 +572,7 @@ class NpuCleanerTests(unittest.TestCase):
 
     def test_launchers_preserve_explicit_ssm_dtype(self):
         # Only tests env forwarding, not NPU support for these override values.
-        for script in [*LAUNCHERS, LORA]:
+        for script in [*LLM_LAUNCHERS, LORA]:
             for dtype in ("float32", "float16", "bfloat16"):
                 with self.subTest(script=script.name, dtype=dtype):
                     result = self.run_script(
@@ -602,7 +614,7 @@ class NpuCleanerTests(unittest.TestCase):
                     mask = ",".join(map(str, range(count)))
                     launch = self.contents(self.launch_log)
                     self.assertIn(f"visible:{mask}\n", launch)
-                    self.assertRegex(launch, rf"--tp(?:-size)? {count}(?: |$)")
+                    self.assert_parallel_size(script, launch, count)
                     self.assertEqual(self.contents(self.device_log), "<unset>\n")
 
     def test_nonzero_device_ids_determine_tp_by_count(self):
@@ -613,7 +625,7 @@ class NpuCleanerTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stdout)
                     launch = self.contents(self.launch_log)
                     self.assertIn(f"visible:{','.join(devices)}\n", launch)
-                    self.assertRegex(launch, rf"--tp(?:-size)? {len(devices)}(?: |$)")
+                    self.assert_parallel_size(script, launch, len(devices))
                     self.assertEqual(self.contents(self.device_log), "")
 
     def test_default_tp_two_is_preserved_with_all_devices_visible(self):
@@ -659,6 +671,33 @@ class NpuCleanerTests(unittest.TestCase):
                     else:
                         self.assertEqual(self.contents(self.kill_log), "")
                         self.assertEqual(self.contents(self.launch_log), "")
+
+    def test_diffusion_uses_native_parallelism_not_llm_tp(self):
+        self.assertEqual(len(DIFFUSION_LAUNCHERS), 10)
+        for script in DIFFUSION_LAUNCHERS:
+            with self.subTest(script=script.name):
+                result = self.run_script(script, ("5", "3"), {"TEST_SMI_ROWS": ""})
+                self.assertEqual(result.returncode, 0, result.stdout)
+                launch = self.contents(self.launch_log)
+                self.assertIn("visible:5,3\n", launch)
+                self.assert_parallel_size(script, launch, 2)
+                self.assertNotIn("--tp", launch)
+                self.assertNotIn("TP=", result.stdout)
+
+    def test_diffusion_resource_paths_are_independent_of_cwd(self):
+        result = self.run_script(DIFFUSION_DIR / "ti2v_bf16.sh", args=())
+        self.assertEqual(result.returncode, 0, result.stdout)
+        launch = self.contents(self.launch_log)
+        self.assertIn(f"args:{DIFFUSION_DIR}/run_wan22_ti2v.py ", launch)
+        self.assertIn(f"--image-path {DIFFUSION_DIR}/gyro.jpg ", launch)
+        self.assertIn("--output-dir ./outputs_bf16", launch)
+
+        result = self.run_script(DIFFUSION_DIR / "i2v_offline_mxfp8.sh", args=())
+        self.assertEqual(result.returncode, 0, result.stdout)
+        launch = self.contents(self.launch_log)
+        self.assertIn(f"--image-path {DIFFUSION_DIR}/gyro.jpg ", launch)
+        self.assertIn(f"--output-path {self.root}/outputs_i2v_mxfp8 ", launch)
+        self.assertTrue((self.root / "outputs_i2v_mxfp8/run.log").exists())
 
     def test_a5_modes_and_lora_modes_accept_all(self):
         script = LLM_DIR / "a5_fia_mixed_split_serve.sh"

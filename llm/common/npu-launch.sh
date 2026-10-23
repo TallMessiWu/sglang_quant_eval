@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# 仅解析设备和 TP，不清理进程；首参为调用脚本自己的默认 TP。
+# 仅解析设备和并行设备数，不清理进程；首参为调用脚本自己的默认值。
+# NPU_TP_SIZE 在 LLM 中用于 --tp，在 Diffusion 中用于 --num-gpus。
 npu_resolve_devices() {
     local default_tp=$1 count id seen=" "
     shift
@@ -28,7 +29,7 @@ npu_resolve_devices() {
     if [[ $# -gt 0 ]]; then NPU_TP_SIZE=${#devices[@]}; fi
     export ASCEND_RT_VISIBLE_DEVICES
     ASCEND_RT_VISIBLE_DEVICES=$(IFS=,; echo "${devices[*]}")
-    echo "🚀 [启动任务] TP=$NPU_TP_SIZE，ASCEND_RT_VISIBLE_DEVICES=$ASCEND_RT_VISIBLE_DEVICES"
+    echo "🚀 [启动任务] 并行设备数=$NPU_TP_SIZE，ASCEND_RT_VISIBLE_DEVICES=$ASCEND_RT_VISIBLE_DEVICES"
 }
 
 # 由模型启动脚本 source；参数为 DEFAULT_TP [-f|--force] [NPU_ID ... | all]。
@@ -47,7 +48,7 @@ npu_prepare_launch() {
     npu_resolve_devices "$default_tp" "${devices[@]}" || return $?
     if [[ ${#devices[@]} -eq 0 ]]; then
         # 不指定卡号（包括仅传 -f）时，保留不清理进程的行为。
-        echo "⚠️ 未传入 NPU 卡号，保留脚本默认 TP，跳过清理。"
+        echo "⚠️ 未传入 NPU 卡号，保留脚本默认并行设备数，跳过清理。"
         return 0
     fi
 

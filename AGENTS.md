@@ -4,7 +4,7 @@
 
 - SGLang fork：<https://github.com/TallMessiWu/sglang>
 - 关联 Issue：[Diffusion #14424](https://github.com/sgl-project/sglang/issues/14424)、[LLM #21584](https://github.com/sgl-project/sglang/issues/21584)
-- 重构目标与验收进度、PR 合入顺序与依赖：[docs/mxfp-refactoring-plan.md](docs/mxfp-refactoring-plan.md)
+- 重构目标与验收进度、PR 当前状态、合入顺序与依赖：[docs/mxfp-refactoring-plan.md](docs/mxfp-refactoring-plan.md)
 - PR 与分支映射、HEAD、worktree 与远程地址：[docs/branches.md](docs/branches.md)
 - 能力矩阵与关键代码路径：[docs/quantization-overview.md](docs/quantization-overview.md)
 - 已知故障模式与机制：[docs/known-pitfalls.md](docs/known-pitfalls.md)
@@ -24,6 +24,7 @@
 5. 新建修改分支时，同时创建 `sglang/<worktree-name>/`。如果该分支已在 `sglang/` 外注册，先停止修改，再将其迁移或移除后重建到 `sglang/`。
 6. `sglang/` 整体被主仓 `.gitignore` 忽略，不是子模块；SGLang 提交和推送都在具体 worktree 内完成，主仓不记录其 gitlink。
 7. worktree、PR 编号与分支映射或 remote 变化后，更新 [docs/branches.md](docs/branches.md)；PR 合入状态、依赖及重构目标进度统一更新 [docs/mxfp-refactoring-plan.md](docs/mxfp-refactoring-plan.md)，不要另建重复状态表，也不要把易漂移的 HEAD/PR 状态复制回本文件。
+8. #36426 只放在独立组合验证分支，不混入正式功能栈；组合分支持续跟随对应功能分支。更新基础功能分支时，同一轮同步、验证并普通推送组合分支；当前映射和版本证据见 [docs/branches.md](docs/branches.md)。
 
 当前映射见 [docs/branches.md](docs/branches.md)。历史遗留、位于系统临时目录的 `junlin_codeowners` worktree 已清除；复用该分支必须先在 `sglang/` 下新建 worktree。
 
@@ -36,6 +37,7 @@
 | `vllm-ascend/` | 以本地 remote 为准 | `vllm-project/vllm-ascend` | 参考子模块 |
 | `MindIE-SD/`、`msmodelslim/` | 以 `.gitmodules` 为准 | 以本地 remote 为准 | 参考子模块 |
 
+- SGLang 与 `sgl-kernel-npu` fork 的 `main` 只作上游镜像，不在其上开发；功能改动放独立分支。同步遇到 fork 独有提交时先确认处置方式，未经授权不得强推丢弃。
 - LLM serving (`srt`) 的 MXFP8/MXFP4 实现优先对齐 `vllm-ascend` 的语义和 NPU API 契约。
 - Diffusion (`multimodal_gen`) 优先参考 `MindIE-SD`。
 - 离线 checkpoint 的真实存储格式以当前 `msmodelslim` 导出代码和 `quant_model_description.json` 为准。

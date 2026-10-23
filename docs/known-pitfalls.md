@@ -3,6 +3,12 @@
 > 已确认的故障机制、适用条件，以及尚未定位问题的诊断边界。
 > 流程规则见 AGENTS.md；分支证据和当前验收分别见 branches.md 与 mxfp-refactoring-plan.md。
 
+## Qwen-VL 图片预热与 Transformers 接口不匹配
+
+2026-10-21 用户在组合分支上启动离线 W8A8 服务，`/model_info` 成功，但图片预热报 `TorchvisionBackend.resize() missing 1 required positional argument: 'image'`。服务器确认安装 Transformers 5.12.1；同步后的 SGLang `python/pyproject.toml` 固定为 5.19.0。5.12.1 的 Qwen2VLImageProcessor 继承 backend 的 `resize(image, ...)`；5.19.0 覆写为 `resize(images, size, resample, factor, ...)`，并在内部计算 smart resize。当前 NPU wrapper 已随上游 #43309 使用后者，旧包会把 `images` 收进 `**kwargs`，缺少必需的 `image`，尚未进入模型量化算子就返回 500。
+
+处理方式是将服务器 Transformers 对齐当前 checkout 的固定依赖并重启，不能只把调用参数改成 `image=`：新旧接口的尺寸计算职责也不同。用官方 5.12.1 源码函数体和实际 wrapper 的隔离 CPU 复现连续两次得到同一异常；换成 5.19.0 函数体后相同输入通过，另有 4 项图片/视频契约检查通过。证据在 `.pi/qwen-vl-resize-20261021/`；尚无服务器升级后的 NPU 重启或精度通过结果。
+
 ## 量化不生效/乱码输出
 
 先验证模型是否注册成功。若 `sgl_kernel_npu` 某 kernel 不存在会导致模型模块 import 失败，`ModelRegistry` 静默跳过，fallback 到 HF Transformers（无量化感知），FP8 权重被当 BF16 解读 → 乱码。

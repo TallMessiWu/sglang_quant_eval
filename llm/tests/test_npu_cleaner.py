@@ -178,7 +178,8 @@ class NpuCleanerTests(unittest.TestCase):
             args = ["on", *args]
         if script == LORA and (not args or args[0] not in ("baseline", "lora")):
             args = ["baseline", "graph", *args]
-        return ["bash", str(script), *args]
+        # Execute via the shebang so missing executable bits fail like on servers.
+        return [str(script), *args]
 
     def environment(self, script, overrides):
         env = self.env | (overrides or {})
@@ -596,6 +597,11 @@ class NpuCleanerTests(unittest.TestCase):
                 if overrides.get("MTP") == "1":
                     self.assertIn("--speculative-algorithm NEXTN", launch)
 
+    def test_launchers_are_executable(self):
+        for script in [CLEANER, *LAUNCHERS, LORA]:
+            with self.subTest(script=script.name):
+                self.assertTrue(os.access(script, os.X_OK), f"Not executable: {script}")
+
     def test_shell_syntax(self):
         for script in [CLEANER, LLM_DIR / "common/npu-launch.sh", *LAUNCHERS, LORA]:
             with self.subTest(script=script.name):
@@ -631,10 +637,12 @@ class NpuCleanerTests(unittest.TestCase):
     def test_default_tp_two_is_preserved_with_all_devices_visible(self):
         script = self.root / "default-tp-two.sh"
         script.write_text(
+            '#!/bin/bash\n'
             f'source "{LLM_DIR}/common/npu-launch.sh"\n'
             'npu_prepare_launch 2 "$@" || exit $?\n'
             'sglang serve --tp "$NPU_TP_SIZE"\n'
         )
+        script.chmod(0o755)
         for args, tp in (((), 2), (("-f",), 2), (("3",), 1), (("all",), 8)):
             with self.subTest(args=args):
                 result = self.run_script(script, args, {"TEST_SMI_ROWS": ""})

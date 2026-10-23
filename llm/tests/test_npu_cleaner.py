@@ -110,6 +110,8 @@ class NpuCleanerTests(unittest.TestCase):
             "sglang",
             'printf "ssm_dtype:%s\\n" "${SGLANG_MAMBA_SSM_DTYPE-<unset>}" '
             '>> "$TEST_LAUNCH_LOG"\n'
+            'printf "mxfp8_attention:%s\\n" "${SGLANG_DIFFUSION_ENABLE_MXFP8_ATTENTION-<unset>}" '
+            '>> "$TEST_LAUNCH_LOG"\n'
             'printf "visible:%s\\nargs:%s\\n" "${ASCEND_RT_VISIBLE_DEVICES-<unset>}" '
             '"$*" >> "$TEST_LAUNCH_LOG"\n',
         )
@@ -128,7 +130,10 @@ class NpuCleanerTests(unittest.TestCase):
             'exec sglang "$@"\n',
         )
         self.env = os.environ.copy()
-        for name in ("SUDO_UID", "MTP", "EXTRA_ARGS", "SGLANG_MAMBA_SSM_DTYPE"):
+        for name in (
+            "SUDO_UID", "MTP", "EXTRA_ARGS", "SGLANG_MAMBA_SSM_DTYPE",
+            "SGLANG_DIFFUSION_ENABLE_MXFP8_ATTENTION",
+        ):
             self.env.pop(name, None)
         self.env.update(
             PATH=f"{self.bin_dir}:{self.env['PATH']}",
@@ -704,8 +709,30 @@ class NpuCleanerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         launch = self.contents(self.launch_log)
         self.assertIn(f"--image-path {DIFFUSION_DIR}/gyro.jpg ", launch)
-        self.assertIn(f"--output-path {self.root}/outputs_i2v_mxfp8 ", launch)
-        self.assertTrue((self.root / "outputs_i2v_mxfp8/run.log").exists())
+        self.assertIn(f"--output-path {self.root}/outputs_i2v_mxfp8_fa_check ", launch)
+        self.assertTrue((self.root / "outputs_i2v_mxfp8_fa_check/run.log").exists())
+
+    def test_i2v_mxfp8_attention_check_defaults(self):
+        result = self.run_script(DIFFUSION_DIR / "i2v_offline_mxfp8.sh", args=())
+        self.assertEqual(result.returncode, 0, result.stdout)
+        launch = self.contents(self.launch_log)
+        self.assertIn("mxfp8_attention:1\n", launch)
+        # The launcher must not print the runtime success marker itself.
+        self.assertNotIn("Using MXFP8 quantized Ascend Flash Attention.", result.stdout)
+        self.assertIn("--height 720 --width 1024 ", launch)
+        self.assertIn("--num-frames 81 --num-inference-steps 2 ", launch)
+        self.assertNotIn("--attention-backend", launch)
+        self.assertNotIn("--quantization", launch)
+        self.assertIn(f"--image-path {DIFFUSION_DIR}/gyro.jpg ", launch)
+        self.assertFalse((self.root / "outputs_i2v_mxfp8").exists())
+
+    def test_i2v_mxfp8_attention_check_preserves_explicit_opt_out(self):
+        result = self.run_script(
+            DIFFUSION_DIR / "i2v_offline_mxfp8.sh", args=(),
+            overrides={"SGLANG_DIFFUSION_ENABLE_MXFP8_ATTENTION": "0"},
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("mxfp8_attention:0\n", self.contents(self.launch_log))
 
     def test_a5_modes_and_lora_modes_accept_all(self):
         script = LLM_DIR / "a5_fia_mixed_split_serve.sh"

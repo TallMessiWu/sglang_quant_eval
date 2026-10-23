@@ -6,6 +6,8 @@ source "$SCRIPT_DIR/common/npu-launch.sh" || exit $?
 npu_prepare_launch 1 "$@" || exit $?
 
 export ASCEND_USE_FIA=1
+# NPU GDN/SSM state 默认 BF16，与权重量化格式无关；允许显式覆盖。
+export SGLANG_MAMBA_SSM_DTYPE="${SGLANG_MAMBA_SSM_DTYPE:-bfloat16}"
 
 # Offline W4A4 MXFP4: msmodelslim checkpoint exported from
 # qwen_mxfp_quant/qwen3_5_35b_moe_w4a4_mxfp4.yaml (mixed precision — experts

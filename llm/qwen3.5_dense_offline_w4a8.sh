@@ -15,6 +15,8 @@ npu_prepare_launch 1 "$@" || exit $?
 
 # A5 prefill/decode 使用 FIA，避免默认 ATB 路径。
 export ASCEND_USE_FIA=1
+# NPU GDN/SSM state 默认 BF16，与权重量化格式无关；允许显式覆盖。
+export SGLANG_MAMBA_SSM_DTYPE="${SGLANG_MAMBA_SSM_DTYPE:-bfloat16}"
 
 # 与既有脚本一致，EXTRA_ARGS 按空白分词，例如 --disable-cuda-graph。
 EXTRA_ARGS_ARR=()

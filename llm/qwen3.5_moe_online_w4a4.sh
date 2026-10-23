@@ -6,6 +6,8 @@ source "$SCRIPT_DIR/common/npu-launch.sh" || exit $?
 npu_prepare_launch 1 "$@" || exit $?
 
 export ASCEND_USE_FIA=1
+# NPU GDN/SSM state 默认 BF16，与权重量化格式无关；允许显式覆盖。
+export SGLANG_MAMBA_SSM_DTYPE="${SGLANG_MAMBA_SSM_DTYPE:-bfloat16}"
 
 # Online W4A4 MXFP4: BF16 weights, experts quantised to single-level MXFP4 at
 # load time (non-expert Linear stays dual-level MXFP4). Requires Ascend 950 (A5).

@@ -18,6 +18,10 @@ LORA = LLM_DIR / "ascend_moe_lora/serve.sh"
 LAUNCHERS = sorted(LLM_DIR.glob("qwen*.sh")) + [
     LLM_DIR / "a5_fia_mixed_split_serve.sh"
 ]
+HYBRID_LAUNCHERS = [
+    script for script in LAUNCHERS
+    if script.name.startswith("qwen3.5_") or script.name == "a5_fia_mixed_split_serve.sh"
+]
 OWN_PID = "900000001"
 OTHER_PID = "900000002"
 OTHER_CARD_PID = "900000003"
@@ -101,6 +105,8 @@ class NpuCleanerTests(unittest.TestCase):
         )
         self.mock(
             "sglang",
+            'printf "ssm_dtype:%s\\n" "${SGLANG_MAMBA_SSM_DTYPE-<unset>}" '
+            '>> "$TEST_LAUNCH_LOG"\n'
             'printf "visible:%s\\nargs:%s\\n" "${ASCEND_RT_VISIBLE_DEVICES-<unset>}" '
             '"$*" >> "$TEST_LAUNCH_LOG"\n',
         )
@@ -114,7 +120,7 @@ class NpuCleanerTests(unittest.TestCase):
             '    exec sglang "$@"\nfi\nexit 2\n',
         )
         self.env = os.environ.copy()
-        for name in ("SUDO_UID", "MTP", "EXTRA_ARGS"):
+        for name in ("SUDO_UID", "MTP", "EXTRA_ARGS", "SGLANG_MAMBA_SSM_DTYPE"):
             self.env.pop(name, None)
         self.env.update(
             PATH=f"{self.bin_dir}:{self.env['PATH']}",
@@ -533,6 +539,50 @@ class NpuCleanerTests(unittest.TestCase):
                 self.assertNotIn("Enter", result.stdout)
                 self.assertEqual(self.contents(self.kill_log), "")
                 self.assertIn("visible:0\n", self.contents(self.launch_log))
+
+    def test_launchers_default_ssm_dtype_by_model_family(self):
+        for script in [*LAUNCHERS, LORA]:
+            with self.subTest(script=script.name):
+                result = self.run_script(script, args=())
+                self.assertEqual(result.returncode, 0, result.stdout)
+                expected = "bfloat16" if script in HYBRID_LAUNCHERS else "<unset>"
+                self.assertIn(f"ssm_dtype:{expected}\n", self.contents(self.launch_log))
+                self.assertEqual(self.contents(self.kill_log), "")
+
+    def test_hybrid_launchers_empty_ssm_dtype_uses_bfloat16(self):
+        for script in HYBRID_LAUNCHERS:
+            with self.subTest(script=script.name):
+                result = self.run_script(
+                    script, args=(), overrides={"SGLANG_MAMBA_SSM_DTYPE": ""}
+                )
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertIn("ssm_dtype:bfloat16\n", self.contents(self.launch_log))
+
+    def test_launchers_preserve_explicit_ssm_dtype(self):
+        # Only tests env forwarding, not NPU support for these override values.
+        for script in [*LAUNCHERS, LORA]:
+            for dtype in ("float32", "float16", "bfloat16"):
+                with self.subTest(script=script.name, dtype=dtype):
+                    result = self.run_script(
+                        script, args=(), overrides={"SGLANG_MAMBA_SSM_DTYPE": dtype}
+                    )
+                    self.assertEqual(result.returncode, 0, result.stdout)
+                    self.assertIn(f"ssm_dtype:{dtype}\n", self.contents(self.launch_log))
+
+    def test_mtp_and_fia_modes_use_bfloat16_ssm_state(self):
+        cases = [
+            (LLM_DIR / "qwen3.5_dense_bf16.sh", (), {"MTP": "1"}),
+            (LLM_DIR / "a5_fia_mixed_split_serve.sh", ("on",), {}),
+            (LLM_DIR / "a5_fia_mixed_split_serve.sh", ("off",), {}),
+        ]
+        for script, args, overrides in cases:
+            with self.subTest(script=script.name, args=args, overrides=overrides):
+                result = self.run_script(script, args, overrides)
+                self.assertEqual(result.returncode, 0, result.stdout)
+                launch = self.contents(self.launch_log)
+                self.assertIn("ssm_dtype:bfloat16\n", launch)
+                if overrides.get("MTP") == "1":
+                    self.assertIn("--speculative-algorithm NEXTN", launch)
 
     def test_shell_syntax(self):
         for script in [CLEANER, LLM_DIR / "common/npu-launch.sh", *LAUNCHERS, LORA]:

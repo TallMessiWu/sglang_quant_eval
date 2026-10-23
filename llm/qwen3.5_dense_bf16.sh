@@ -9,6 +9,8 @@ npu_prepare_launch 1 "$@" || exit $?
 # 否则默认走 ATB SelfAttentionOperation(_npu_flash_attention_qlens)，在 A5 上 CreateOperation 失败、warmup 请求崩溃。
 # prefill+decode 一起绕开 ATB（decode 默认走 _npu_paged_attention，同源）。
 export ASCEND_USE_FIA=1
+# NPU GDN/SSM state 默认 BF16，与权重量化格式无关；允许显式覆盖。
+export SGLANG_MAMBA_SSM_DTYPE="${SGLANG_MAMBA_SSM_DTYPE:-bfloat16}"
 
 # ================= 4. MTP（NEXTN 投机解码）总开关 =================
 # MTP=1 开启，默认关闭。draft 层在 Qwen3.5 checkpoint 内，不需要额外的 draft 权重路径。
@@ -22,10 +24,7 @@ if [ "${MTP:-0}" = "1" ]; then
         --speculative-eagle-topk 1
         --speculative-num-draft-tokens 4
     )
-    # 这里不设 SGLANG_MAMBA_SSM_DTYPE：SSM state 必须是 bf16（verify 用的
-    # recurrent_gated_delta_rule 只有 RGDR<bfloat16_t, bfloat16_t> 一份实例化），
-    # 这件事已经由 SGLang #40419 在 MambaPool 里自动处理。启动日志里出现
-    # "not supported by the NPU speculative verify kernels" 就说明覆盖生效了。
+    # MTP 与普通推理共用上方的 BF16 SSM state 默认值，不依赖 MTP 才触发 dtype 修正。
     echo "🔮 [MTP] NEXTN 已开启：num-steps=3, eagle-topk=1, num-draft-tokens=4"
 fi
 

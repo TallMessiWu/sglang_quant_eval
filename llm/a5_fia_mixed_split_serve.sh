@@ -76,6 +76,8 @@ npu_prepare_launch 1 "$@" || exit $?
 # A5(Ascend 950) 走 FIA 融合注意力算子 npu_fused_infer_attention_score；
 # 否则默认走 ATB SelfAttentionOperation，在 A5 上 warmup 会崩。
 export ASCEND_USE_FIA=1
+# 默认 Qwen3.5 模型的 NPU GDN/SSM state 使用 BF16；允许显式覆盖。
+export SGLANG_MAMBA_SSM_DTYPE="${SGLANG_MAMBA_SSM_DTYPE:-bfloat16}"
 
 # 混合 batch 的 FIA 拆分开关。代码里默认就是开的，这里显式写死是为了让
 # off 组也能明确关掉，两组之间只差这一个变量。

@@ -15,6 +15,13 @@ llm/profiling/
 # 一次性渲染产物（进度图 HTML/PNG），只在本机有意义
 artifacts/
 
+# 本地 agent 日志、检查结果和临时证据，不作为源码发布
+/.pi/
+
+# 已发布讲义的本地制作工作区；交付 HTML 跟踪在 presentations/
+/docs/learning/pr638/
+/docs/learning/pr824/
+
 # ais_bench 按端点生成的模型配置：run_ais_bench.sh 的产物，不用手动维护
 llm/.ais_bench_configs/
 

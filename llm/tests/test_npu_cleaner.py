@@ -720,7 +720,8 @@ class NpuCleanerTests(unittest.TestCase):
         # The launcher must not print the runtime success marker itself.
         self.assertNotIn("Using MXFP8 quantized Ascend Flash Attention.", result.stdout)
         self.assertIn("--height 720 --width 1024 ", launch)
-        self.assertIn("--num-frames 81 --num-inference-steps 2 ", launch)
+        self.assertIn("--num-frames 81 --num-inference-steps 40 ", launch)
+        self.assertIn("steps=40", result.stdout)
         self.assertNotIn("--attention-backend", launch)
         self.assertNotIn("--quantization", launch)
         self.assertIn(f"--image-path {DIFFUSION_DIR}/gyro.jpg ", launch)

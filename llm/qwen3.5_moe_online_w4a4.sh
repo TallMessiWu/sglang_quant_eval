@@ -12,7 +12,7 @@ export SGLANG_MAMBA_SSM_DTYPE="${SGLANG_MAMBA_SSM_DTYPE:-bfloat16}"
 # Online W4A4 MXFP4: BF16 weights, experts quantised to single-level MXFP4 at
 # load time (non-expert Linear stays dual-level MXFP4). Requires Ascend 950 (A5).
 sglang serve \
-    --model-path /mnt/share/weight/Qwen3.5-35B-A3B \
+    --model-path /mnt/share/weight/Qwen3.6-35B-A3B \
     --host 127.0.0.1 \
     --port ${VLLM_PORT:-6969} \
     --quantization mxfp4 \

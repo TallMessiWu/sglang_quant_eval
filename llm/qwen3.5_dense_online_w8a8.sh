@@ -10,7 +10,7 @@ export ASCEND_USE_FIA=1
 export SGLANG_MAMBA_SSM_DTYPE="${SGLANG_MAMBA_SSM_DTYPE:-bfloat16}"
 
 sglang serve \
-    --model-path /mnt/share/weight/Qwen3.6-27B \
+    --model-path /mnt/share/weights/Qwen3.5-27B \
     --host 127.0.0.1 \
     --port ${VLLM_PORT:-6969} \
     --quantization mxfp8 \

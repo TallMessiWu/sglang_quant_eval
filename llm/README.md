@@ -75,18 +75,22 @@ MoE LoRA 脚本仍保持不清理进程的行为。
 python3 -m unittest discover -s llm/tests -p 'test_npu_cleaner.py' -v
 ```
 
-## Dense W4A8 在线 / 离线
+## BF16 与在线量化权重
 
-沿用 `qwen3.5_*.sh` 的入口命名；实际模型以加载目录的 config 为准，Dense 与 MoE 不共用同一个模型目录。以下是本轮已更新入口的默认值，不代表其他脚本已全部迁移：
+所有 `qwen*_online_*.sh` 的默认模型路径均以同前缀的 `*_bf16.sh` 为基准；在线量化必须使用同一份原始 BF16/FP16 权重，不能指向离线预量化 checkpoint。沿用 `qwen3.5_*.sh` 的入口命名，实际模型以加载目录的 config 为准。
 
-| 入口 | 默认模型目录 | 覆盖方式 |
-| --- | --- | --- |
-| `qwen3.5_dense_online_w4a8.sh` | `/mnt/share/weight/Qwen3.6-27B` | `MODEL_PATH` 环境变量 |
-| `qwen3.5_dense_online_w8a8.sh` | `/mnt/share/weight/Qwen3.6-27B` | 当前脚本固定路径 |
-| `qwen3.5_dense_offline_w4a8.sh` | `/mnt/share/weight/Qwen3.6-27B_mxfp-w4a8-0821` | `MODEL_PATH` 环境变量 |
-| `qwen3.5_moe_bf16.sh` | `/mnt/share/weight/Qwen3.6-35B-A3B` | 当前脚本固定路径 |
+| 脚本前缀 | BF16 与在线量化共用的默认模型目录 |
+| --- | --- |
+| `qwen3.5_dense` | `/mnt/share/weights/Qwen3.5-27B` |
+| `qwen3.5_moe` | `/mnt/share/weight/Qwen3.6-35B-A3B` |
+| `qwen3_dense` | `/mnt/share/weight/Qwen3-32B-ori/Qwen3-32B` |
+| `qwen3_moe` | `/mnt/share/weights/Qwen3-30B-A3B` |
 
-在线入口需要原始 BF16/FP16 权重，离线量化格式由 `quant_model_description.json` 判断。已有 `MODEL_PATH` 会覆盖 W4A8 默认值；切换在线/离线模式时要同时检查这个变量。
+`qwen3.5_dense_online_w4a8.sh` 保留 `MODEL_PATH` 环境变量覆盖，其余上述 BF16/在线脚本使用固定路径。做对照时须检查显式覆盖，避免覆盖后偏离 BF16 基准。隔离启动回归同时检查 LLM 和 Diffusion 在线入口与对应 BF16 入口的默认路径一致性。
+
+### Dense W4A8 在线 / 离线
+
+`qwen3.5_dense_offline_w4a8.sh` 仍默认使用 `/mnt/share/weight/Qwen3.6-27B_mxfp-w4a8-0821`，支持 `MODEL_PATH` 覆盖；本次不改离线权重。离线格式由 `quant_model_description.json` 判断。当前在线默认是 Qwen3.5、离线默认是 Qwen3.6，**不能直接将这两个默认配置作为同模型量化对照**；需显式选择同版本的原始与预量化 checkpoint。切换在线/离线模式时也要检查已有 `MODEL_PATH`。
 
 ```bash
 # 离线：读取 quant_model_description.json 自动选择 ModelSlim，不传 --quantization。

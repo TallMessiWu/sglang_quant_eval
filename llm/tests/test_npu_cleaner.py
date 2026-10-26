@@ -558,6 +558,39 @@ class NpuCleanerTests(unittest.TestCase):
                 self.assertEqual(self.contents(self.kill_log), "")
                 self.assertIn("visible:0\n", self.contents(self.launch_log))
 
+    def test_online_launchers_default_to_matching_bf16_weights(self):
+        # Exercise default CLI arguments without creating checkpoint directories
+        # on the system disk. Only the online MODEL_PATH file checks are mocked.
+        self.env["MODEL_PATH"] = ""
+        with self.bash_env.open("a") as stream:
+            stream.write(
+                '[() {\n'
+                '    if [[ "$#" == 4 && "$1" == ! && "$2" == -d && "$3" == "${MODEL_PATH:-}" ]]; then return 1; fi\n'
+                '    if [[ "$#" == 3 && "$1" == -f && "$2" == "${MODEL_PATH:-}/quant_model_description.json" ]]; then return 1; fi\n'
+                '    builtin [ "$@"\n'
+                '}\n'
+            )
+        online_launchers = [script for script in LAUNCHERS if "_online_" in script.name]
+        self.assertTrue(online_launchers)
+        for online in online_launchers:
+            with self.subTest(script=online.name):
+                baseline = online.with_name(online.name.split("_online_", 1)[0] + "_bf16.sh")
+                self.assertTrue(baseline.is_file(), f"Missing BF16 baseline: {baseline}")
+                model_paths = []
+                for script in (baseline, online):
+                    result = self.run_script(script, args=())
+                    self.assertEqual(result.returncode, 0, result.stdout)
+                    launch = self.contents(self.launch_log).split()
+                    self.assertEqual(launch.count("--model-path"), 1, launch)
+                    model_paths.append(launch[launch.index("--model-path") + 1])
+                    self.assertEqual(self.contents(self.kill_log), "")
+                self.assertEqual(model_paths[0], model_paths[1])
+
+    def test_dense_online_explicit_model_path_is_preserved(self):
+        result = self.run_script(LLM_DIR / "qwen3.5_dense_online_w4a8.sh", args=())
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(f"--model-path {self.online} ", self.contents(self.launch_log))
+
     def test_launchers_default_ssm_dtype_by_model_family(self):
         for script in [*LLM_LAUNCHERS, LORA]:
             with self.subTest(script=script.name):

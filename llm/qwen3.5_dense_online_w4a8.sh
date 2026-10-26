@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # 在线 W4A8：必须使用原始 BF16/FP16 checkpoint，不可使用离线 packed 权重。
-MODEL_PATH="${MODEL_PATH:-/mnt/share/weight/Qwen3.6-27B}"
+MODEL_PATH="${MODEL_PATH:-/mnt/share/weights/Qwen3.5-27B}"
 if [ ! -d "$MODEL_PATH" ]; then
     echo "错误：原始权重目录不存在：$MODEL_PATH" >&2
     exit 1

@@ -1,6 +1,6 @@
 # LLM 启动、评测与排查
 
-一级目录只保留 28 个直接使用的入口：23 个服务启动脚本（`qwen*.sh`、`a5_fia_mixed_split_serve.sh`）、`curl.sh`、`npu-cleaner.sh`，以及 AIS Bench 的 `gpqa.sh`、`gsm8k.sh`、`mmmu.sh`。辅助脚本按用途放进子目录。
+一级目录只保留 29 个直接使用的入口：23 个服务启动脚本（`qwen*.sh`、`a5_fia_mixed_split_serve.sh`）、`curl.sh`、`npu-cleaner.sh`、`bench_serving.sh`，以及 AIS Bench 的 `gpqa.sh`、`gsm8k.sh`、`mmmu.sh`。辅助脚本按用途放进子目录。
 
 | 目录 | 用途 | 保留原因 |
 | --- | --- | --- |
@@ -19,9 +19,30 @@
 ```bash
 ./llm/qwen3.5_dense_bf16.sh 0
 ./llm/curl.sh
+VLLM_PORT=6969 ./llm/bench_serving.sh
 VLLM_PORT=6969 ./llm/gsm8k.sh --batch-size 16
 VLLM_PORT=6969 ./llm/gpqa.sh
 VLLM_PORT=6969 ./llm/mmmu.sh
+```
+
+## ShareGPT 服务性能测试
+
+先启动模型服务，再运行 `./llm/bench_serving.sh`。菜单以模型名为主、实际路径放在淡色括号内；**↑/↓ 选择，Enter 开始，Esc/Q 退出**，Ctrl+C 也会恢复终端状态。选项直接读取同目录 `*_bf16.sh` 的固定 `--model-path`，不会执行这些启动脚本，也不会清理 NPU 或切换服务端模型。请选择与当前服务一致的 tokenizer；同模型 BF16/在线量化对照应选同一项。
+
+默认保留原压测配置：`--backend sglang`、`127.0.0.1:${VLLM_PORT:-6969}`、ShareGPT 数据集 `/mnt/share/dataset/ShareGPT_V3_unfiltered_cleaned_split.json`、并发 32、500 条请求。
+
+```bash
+VLLM_PORT=6969 ./llm/bench_serving.sh
+MAX_CONCURRENCY=16 NUM_PROMPTS=100 VLLM_PORT=7979 ./llm/bench_serving.sh
+./llm/bench_serving.sh --help
+```
+
+`SERVER_HOST`、`DATASET_PATH` 可覆盖地址和数据集；`NO_COLOR=1` 关闭强调/淡化效果。结果默认写入**执行时当前目录**的 `artifacts/bench-serving/<时间戳>-<随机后缀>/`，包含 `bench.log`、`results.jsonl`，临时文件与 tokenizer 缓存也位于该目录下；`BENCH_ROOT` 可改结果根目录。压测进程失败时脚本保留非零退出码。脚本需要交互终端，不依赖额外 TUI 工具。
+
+隔离菜单回归（真实 PTY、模拟 benchmark，不访问模型服务）：
+
+```bash
+python3 -m unittest discover -s llm/tests -p 'test_bench_serving.py' -v
 ```
 
 ## 卡号、TP 与启动前清理

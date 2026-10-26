@@ -63,7 +63,10 @@ python3 -m unittest discover -s llm/tests -p 'test_bench_serving.py' -v
 `qwen*.sh` 和 `a5_fia_mixed_split_serve.sh` 共用清理规则：
 
 - 指定卡号时清理所选卡；`all` 清理全部卡；不指定卡号时不清理。
-- `npu-smi info` 只要查到所选卡上有任何 PID，就显示 `PID / START_TIME / COMMAND / 工作目录`，启动时间通过 `ps` 获取，工作目录通过 `pwdx` 获取，供你判断，随后 **Enter 确认清理，P 保留进程并继续，Esc 取消整个启动**；确认前不会终止任何进程。
+- `npu-smi info` 只要查到所选卡上有任何 PID，就显示 `PID / START_TIME / COMMAND / 工作目录`，启动时间通过 `ps` 获取，工作目录通过 `pwdx` 获取，供你判断，随后 **Enter 确认清理，P 保留进程并继续，R 换到空闲卡，Esc 取消整个启动**；确认前不会终止任何进程。
+- **R / r** 会重新查询当前可访问卡数和进程占用，保留原选卡中的空闲卡及其位置，按卡号升序替换被占用的卡，显示前后卡号并直接继续启动；**不杀任何已有进程、不减少卡数或 TP**。例如指定 `0 2`，若 0、1 被占用且 2、3 空闲，则改用 `3 2`，仍为 TP2。
+- 空闲卡不足时显示“需要 X 张卡，当前仅 Y 张空闲”及空闲卡号，保持原卡号并留在菜单，不启动、不清理；可再次按 R 重查，或选择 Enter/P/Esc。查询失败也留在菜单。`all` 按 R 时仍需满足全部卡数，不会自动降为剩余空闲卡数。
+- 换卡只在启动器的冲突菜单提供；单独执行 `npu-cleaner.sh` 仍仅支持清理/保留/取消。空闲的判据是查询时 `npu-smi info` 未报告 PID，不是显存容量、健康或互联拓扑保证；不预留卡，其他任务仍可能在查询后抢占。
 - “工作目录”是进程**当前工作目录**，不一定是最初启动目录。权限不足或进程已退出时该列显示“不可获取”；未安装 `pwdx` 时显示“不可获取（未安装 pwdx）”，仍必须确认；`-f/--force` 下也会展示表格。
 - 不判断进程是否“自己的”：同 UID、不同 UID、`sudo` 或无法通过 `ps` 查询归属，都不能跳过确认。只有所选卡上没有 PID 时才直接继续。
 - `-f` / `--force` 是有 PID 时唯一跳过确认的方式，但不会提升系统权限；清理失败仍中止启动。
@@ -72,7 +75,7 @@ python3 -m unittest discover -s llm/tests -p 'test_bench_serving.py' -v
 
 ```bash
 ./llm/npu-cleaner.sh 0 1                     # 单独清理；目标卡有 PID 就确认
-./llm/qwen3.5_dense_bf16.sh 0 1              # 确认取消会阻止模型启动
+./llm/qwen3.5_dense_bf16.sh 0 1              # 有冲突时按 R 换卡；Esc 取消启动
 ./llm/qwen3.5_dense_bf16.sh -f 0 1           # 显式跳过确认
 ./llm/qwen3.5_dense_bf16.sh all              # TP=全部 NPU 数量，有进程则确认
 ./llm/a5_fia_mixed_split_serve.sh on -f 0    # 模式参数在前

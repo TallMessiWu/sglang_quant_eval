@@ -65,6 +65,9 @@ class NpuCleanerTests(unittest.TestCase):
         self.mock(
             "npu-smi",
             'printf "query\\n" >> "$TEST_QUERY_LOG"\n'
+            'if [[ $(wc -l < "$TEST_QUERY_LOG") -gt 1 ]]; then\n'
+            '    printf "%s" "${TEST_SMI_ROWS_AFTER-$TEST_SMI_ROWS}"\n'
+            '    exit "${TEST_SMI_STATUS_AFTER:-${TEST_SMI_STATUS:-0}}"\nfi\n'
             'printf "%s" "$TEST_SMI_ROWS"\nexit "${TEST_SMI_STATUS:-0}"\n',
         )
         self.identity_log = self.root / "identity.log"
@@ -532,6 +535,163 @@ class NpuCleanerTests(unittest.TestCase):
                     launch = self.contents(self.launch_log)
                     self.assertIn(f"visible:{mask}\n", launch)
                     self.assert_parallel_size(script, launch, len(mask.split(',')))
+
+    def test_every_launcher_reassigns_only_busy_cards_without_killing(self):
+        # Card 2 must be reserved before filling card 0's slot, not reused.
+        for script in LAUNCHERS:
+            for key in (b"r", b"R"):
+                with self.subTest(script=script.name, key=key):
+                    code, output = self.run_interactive(
+                        key, script, args=("0", "2", "1"),
+                        overrides={"TEST_KILL_STATUS": "1"},
+                    )
+                    self.assertEqual(code, 0, output)
+                    self.assertIn("R 换到空闲卡", output)
+                    self.assertIn("0 2 1 -> 3 2 4", output)
+                    self.assertEqual(self.contents(self.kill_log), "")
+                    self.assertEqual(self.contents(self.query_log), "query\nquery\n")
+                    self.assertEqual(self.contents(self.device_log), "<unset>\n")
+                    launch = self.contents(self.launch_log)
+                    self.assertIn("visible:3,2,4\n", launch)
+                    self.assert_parallel_size(script, launch, 3)
+
+    def test_reassign_can_replace_all_cards_or_preserve_nonascending_order(self):
+        script = LLM_DIR / "qwen3.5_dense_bf16.sh"
+        for args, mask in (
+            (("0",), "2"),
+            (("1", "0"), "2,3"),
+            (("5", "0", "3", "1"), "5,2,3,4"),
+        ):
+            with self.subTest(args=args):
+                code, output = self.run_interactive(b"r", script, args=args)
+                self.assertEqual(code, 0, output)
+                self.assertEqual(self.contents(self.kill_log), "")
+                self.assertIn(f"visible:{mask}\n", self.contents(self.launch_log))
+                self.assert_parallel_size(script, self.contents(self.launch_log), len(args))
+
+    def test_reassign_shared_pid_on_multiple_cards_marks_all_busy(self):
+        rows = f"| 0 | {OWN_PID} | python |\n| 1 | {OWN_PID} | python |\n"
+        code, output = self.run_interactive(
+            b"r", LLM_DIR / "qwen3.5_dense_bf16.sh", args=("0", "1"),
+            overrides={"TEST_SMI_ROWS": rows * 2},
+        )
+        self.assertEqual(code, 0, output)
+        self.assertEqual(self.contents(self.kill_log), "")
+        self.assertIn("visible:2,3\n", self.contents(self.launch_log))
+
+    def test_reassign_insufficient_cards_stays_in_menu_without_launch_or_kill(self):
+        for script in LAUNCHERS:
+            for args in (("0", "1", "2", "3"), ("all",)):
+                with self.subTest(script=script.name, args=args):
+                    code, output = self.run_interactive(
+                        b"r\x1b", script, args=args,
+                        overrides={"TEST_NPU_COUNT": "4"},
+                    )
+                    self.assertEqual(code, 130, output)
+                    self.assertIn("需要 4 张卡，当前仅 2 张空闲", output)
+                    self.assertIn("空闲卡：2 3", output)
+                    self.assertEqual(self.contents(self.kill_log), "")
+                    self.assertEqual(self.contents(self.launch_log), "")
+
+    def test_reassign_insufficient_cards_keeps_original_enter_and_skip_options(self):
+        script = LLM_DIR / "qwen3.5_dense_bf16.sh"
+        for key in (b"\n", b"p"):
+            with self.subTest(key=key):
+                code, output = self.run_interactive(
+                    b"r" + key, script, args=("0", "1", "2", "3"),
+                    overrides={"TEST_NPU_COUNT": "4"},
+                )
+                self.assertEqual(code, 0, output)
+                self.assertIn("需要 4 张卡，当前仅 2 张空闲", output)
+                self.assertIn("visible:0,1,2,3\n", self.contents(self.launch_log))
+                self.assert_parallel_size(script, self.contents(self.launch_log), 4)
+                if key == b"p":
+                    self.assertEqual(self.contents(self.kill_log), "")
+                else:
+                    self.assertEqual(
+                        self.contents(self.kill_log),
+                        f"-9 -- {OWN_PID} {OTHER_PID} {OTHER_CARD_PID}\n",
+                    )
+
+    def test_reassign_rechecks_processes_when_key_is_pressed(self):
+        script = LLM_DIR / "qwen3.5_dense_bf16.sh"
+        cases = (
+            # Card 1 became free; card 2 became busy while waiting for input.
+            (f"| 0 | {OWN_PID} |\n| 2 | {OTHER_CARD_PID} |\n", "1,3"),
+            ("", "0,2"),  # All originally selected cards became free.
+        )
+        for rows, mask in cases:
+            with self.subTest(rows=rows):
+                code, output = self.run_interactive(
+                    b"r", script, args=("0", "2"),
+                    overrides={"TEST_SMI_ROWS_AFTER": rows},
+                )
+                self.assertEqual(code, 0, output)
+                self.assertEqual(self.contents(self.kill_log), "")
+                self.assertEqual(self.contents(self.query_log), "query\nquery\n")
+                self.assertIn(f"visible:{mask}\n", self.contents(self.launch_log))
+
+    def test_reassign_can_retry_after_insufficient_capacity(self):
+        self.mock(
+            "npu-smi",
+            'printf "query\\n" >> "$TEST_QUERY_LOG"\n'
+            'if [[ $(wc -l < "$TEST_QUERY_LOG") -lt 3 ]]; then\n'
+            '    printf "%s" "$TEST_SMI_ROWS"\nfi\n',
+        )
+        code, output = self.run_interactive(
+            b"rr", LLM_DIR / "qwen3.5_dense_bf16.sh", args=("all",),
+            overrides={"TEST_NPU_COUNT": "4"},
+        )
+        self.assertEqual(code, 0, output)
+        self.assertIn("需要 4 张卡，当前仅 2 张空闲", output)
+        self.assertIn("原选卡当前均已空闲", output)
+        self.assertEqual(self.contents(self.query_log), "query\nquery\nquery\n")
+        self.assertEqual(self.contents(self.kill_log), "")
+        self.assertIn("visible:0,1,2,3\n", self.contents(self.launch_log))
+        self.assert_parallel_size(LLM_DIR / "qwen3.5_dense_bf16.sh", self.contents(self.launch_log), 4)
+
+    def test_launch_selection_protocol_cancels_on_ctrl_c(self):
+        code, output = self.run_interactive(b"\x03", LLM_DIR / "qwen3.5_dense_bf16.sh")
+        self.assertNotEqual(code, 0, output)
+        self.assertEqual(self.contents(self.kill_log), "")
+        self.assertEqual(self.contents(self.launch_log), "")
+
+    def test_reassign_query_failures_do_not_launch_or_authorize_cleanup(self):
+        for overrides in (
+            {"TEST_DEVICE_STATUS": "1"},
+            {"TEST_NPU_COUNT": "0"},
+            {"TEST_NPU_COUNT": "invalid"},
+            {"TEST_SMI_STATUS_AFTER": "1"},
+        ):
+            with self.subTest(overrides=overrides):
+                code, output = self.run_interactive(
+                    b"r\x1b", LLM_DIR / "qwen3.5_dense_bf16.sh",
+                    overrides=overrides,
+                )
+                self.assertEqual(code, 130, output)
+                self.assertIn("无法换卡", output)
+                self.assertEqual(self.contents(self.kill_log), "")
+                self.assertEqual(self.contents(self.launch_log), "")
+
+    def test_reassign_zero_free_cards_and_unavailable_target_fail_closed(self):
+        script = LLM_DIR / "qwen3.5_dense_bf16.sh"
+        for args, overrides, message in (
+            (("0",), {"TEST_NPU_COUNT": "2"}, "需要 1 张卡，当前仅 0 张空闲"),
+            (("0", "7"), {"TEST_NPU_COUNT": "4"}, "卡号 7 不在当前可访问范围"),
+        ):
+            with self.subTest(args=args):
+                code, output = self.run_interactive(b"r\x1b", script, args=args, overrides=overrides)
+                self.assertEqual(code, 130, output)
+                self.assertIn(message, output)
+                self.assertEqual(self.contents(self.kill_log), "")
+                self.assertEqual(self.contents(self.launch_log), "")
+
+    def test_standalone_cleaner_does_not_offer_launch_only_reassignment(self):
+        code, output = self.run_interactive(b"r\x1b")
+        self.assertEqual(code, 130, output)
+        self.assertNotIn("R 换到空闲卡", output)
+        self.assertEqual(self.contents(self.kill_log), "")
+        self.assertEqual(self.contents(self.device_log), "")
 
     def test_every_launcher_single_same_uid_pid_requires_confirmation(self):
         for script in LAUNCHERS:

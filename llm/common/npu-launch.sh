@@ -35,7 +35,7 @@ npu_resolve_devices() {
 # 由模型启动脚本 source；参数为 DEFAULT_TP [-f|--force] [NPU_ID ... | all]。
 # 所有清理失败（含 Esc 取消）必须由调用方用 `|| exit $?` 中止启动。
 npu_prepare_launch() {
-    local default_tp=$1 arg cleaner_path status
+    local default_tp=$1 arg cleaner_path status selected_devices
     shift
     local -a devices=() cleaner_args=()
     for arg in "$@"; do
@@ -54,8 +54,18 @@ npu_prepare_launch() {
 
     cleaner_path="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../npu-cleaner.sh"
     if [[ -x "$cleaner_path" ]]; then
-        echo "🧹 [前置任务] 准备释放 NPU (${devices[*]}) 的资源..."
-        if "$cleaner_path" "${cleaner_args[@]}" "${devices[@]}"; then
+        # 传入已展开的卡号，stdout 专用于返回最终选择；清理器提示走 stderr/TTY。
+        IFS=, read -r -a devices <<< "$ASCEND_RT_VISIBLE_DEVICES"
+        echo "🧹 [前置任务] 检查 NPU (${devices[*]}) 的资源..."
+        if selected_devices=$("$cleaner_path" --select-devices "${cleaner_args[@]}" "${devices[@]}"); then
+            IFS=, read -r -a devices <<< "$selected_devices"
+            if [[ ${#devices[@]} -ne "$NPU_TP_SIZE" ]]; then
+                echo "取消模型启动：选卡结果不满足原定卡数 $NPU_TP_SIZE。" >&2
+                return 1
+            fi
+            if [[ "$selected_devices" != "$ASCEND_RT_VISIBLE_DEVICES" ]]; then
+                npu_resolve_devices "$default_tp" "${devices[@]}" || return $?
+            fi
             sleep 1
             echo "✅ [前置任务] 进程检查完成，继续启动！"
         else

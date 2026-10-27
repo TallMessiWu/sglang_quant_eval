@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -67,6 +68,223 @@ class TestPerfProbe(unittest.TestCase):
             state["calls"], ["a", "a", "b", "b"] + ["a"] * 3 + ["b"] * 6 + ["a"] * 3
         )
         self.assertEqual(len(results["a"]["wall_ms"]), 2)
+
+    def test_graph_unroll_amortizes_launch_and_reports_raw_times(self):
+        probe = load_probe()
+
+        def check_unroll(unroll):
+            with self.subTest(unroll=unroll):
+                state = {"ticks": 0, "capture": None, "calls": [], "replays": []}
+                streams, graphs = [], []
+
+                class Stream:
+                    def __init__(self):
+                        streams.append(self)
+
+                    def wait_stream(self, other):
+                        pass
+
+                current = [Stream()]
+
+                @contextmanager
+                def stream_context(stream):
+                    previous, current[0] = current[0], stream
+                    try:
+                        yield
+                    finally:
+                        current[0] = previous
+
+                class Graph:
+                    def __init__(self):
+                        self.cost = 0
+                        self.nodes = 0
+                        graphs.append(self)
+
+                    def replay(self):
+                        state["replays"].append(self)
+                        # Deterministic model of a fixed 160 us launch cost.
+                        state["ticks"] += 0.160 + self.cost
+
+                @contextmanager
+                def graph_context(graph, stream):
+                    with stream_context(stream):
+                        state["capture"] = graph
+                        yield
+                        state["capture"] = None
+
+                class Event:
+                    def __init__(self, **kwargs):
+                        pass
+
+                    def record(self):
+                        self.tick = state["ticks"]
+                        self.stream = current[0]
+
+                    def elapsed_time(self, other):
+                        self_check.assertIs(self.stream, other.stream)
+                        return other.tick - self.tick
+
+                def run(name, cost):
+                    state["calls"].append(name)
+                    if state["capture"] is not None:
+                        state["capture"].cost += cost
+                        state["capture"].nodes += 1
+                    else:
+                        state["ticks"] += cost
+                    return name
+
+                self_check = self
+                npu = SimpleNamespace(
+                    Stream=Stream,
+                    current_stream=lambda: current[0],
+                    stream=stream_context,
+                    NPUGraph=Graph,
+                    graph=graph_context,
+                    Event=Event,
+                    synchronize=lambda: None,
+                )
+                results = probe.measure_cases(
+                    {"a": lambda: run("a", 0.004), "b": lambda: run("b", 0.010)},
+                    npu,
+                    warmup=2,
+                    iterations=3,
+                    repeats=2,
+                    mode="graph",
+                    graph_unroll=unroll,
+                )
+                for name, cost in (("a", 0.004), ("b", 0.010)):
+                    values = results[name]
+                    self.assertEqual(values["calls_per_replay"], unroll)
+                    self.assertEqual(values["replays_per_round"], 3)
+                    for elapsed, raw in zip(
+                        values["stream_ms"], values["replay_stream_ms"]
+                    ):
+                        self.assertAlmostEqual(elapsed, cost + 0.160 / unroll)
+                        self.assertAlmostEqual(raw, elapsed * unroll)
+                    for wall, raw in zip(values["wall_ms"], values["replay_wall_ms"]):
+                        self.assertAlmostEqual(raw, wall * unroll)
+                    self.assertEqual(len(values["host_submit_ms_per_replay"]), 2)
+                    self.assertEqual(state["calls"].count(name), 2 + unroll)
+                self.assertEqual([g.nodes for g in graphs], [unroll, unroll])
+                # Reuse a capture stream, rather than one new stream per case.
+                self.assertEqual(len(streams), 2)
+                a, b = graphs
+                self.assertEqual(
+                    state["replays"], [a] * 2 + [b] * 2 + [a] * 3 + [b] * 6 + [a] * 3
+                )
+
+        for unroll in (1, 16, 64):
+            check_unroll(unroll)
+
+    def test_graph_replay_check_rejects_stale_output(self):
+        import torch
+
+        probe = load_probe()
+        zeros = torch.zeros
+        for stale in (False, True):
+            with self.subTest(stale=stale):
+
+                def capture(fn, npu, warmup, stale=stale, **kwargs):
+                    output = fn()
+
+                    def replay():
+                        if not stale:
+                            output.copy_(fn())
+                        return output
+
+                    return replay
+
+                with (
+                    patch.object(probe, "capture", side_effect=capture),
+                    patch.object(
+                        torch,
+                        "zeros",
+                        side_effect=lambda *a, **kw: zeros(
+                            *a, **{**kw, "device": "cpu"}
+                        ),
+                    ),
+                ):
+                    npu = SimpleNamespace(synchronize=lambda: None)
+                    if stale:
+                        with self.assertRaisesRegex(RuntimeError, "stale|incorrect"):
+                            probe.check_graph_replay(torch, npu)
+                    else:
+                        self.assertEqual(
+                            probe.check_graph_replay(torch, npu)[
+                                "changed_input_replays"
+                            ],
+                            2,
+                        )
+
+    def test_graph_unroll_cli_is_explicit_and_positive(self):
+        probe = load_probe()
+        args = probe.parser().parse_args(["--model-path", ".", "--mode", "graph"])
+        self.assertEqual(args.graph_unroll, [1, 16, 64])
+        args = probe.parser().parse_args(
+            ["--model-path", ".", "--graph-unroll", "8", "32"]
+        )
+        self.assertEqual(args.graph_unroll, [8, 32])
+        with self.assertRaises(SystemExit):
+            probe.parser().parse_args(["--model-path", ".", "--graph-unroll", "0"])
+
+    def test_graph_sweep_emits_control_and_unroll_without_requantizing_weights(self):
+        import torch
+
+        probe = load_probe()
+        records = []
+        args = SimpleNamespace(
+            sections=["gdn"],
+            tokens=[32],
+            mode="graph",
+            graph_unroll=[1, 16, 16, 64],
+            warmup=2,
+            iterations=3,
+            repeats=2,
+        )
+        plan = {"hidden_size": 64, "gdn_qkvz_n": 128, "gdn_ba_n": 8}
+        npu = SimpleNamespace(empty_cache=lambda: None)
+        zeros = torch.zeros
+        seen = []
+
+        def measure(cases, npu, **kwargs):
+            unroll = kwargs["graph_unroll"]
+            seen.append(unroll)
+            self.assertEqual(list(cases), ["graph_control_add", "example"])
+            self.assertTrue(torch.equal(cases["graph_control_add"](), torch.ones(4)))
+            return {
+                name: {
+                    "stream_ms": [0.16 / unroll] * 2,
+                    "wall_ms": [0.17 / unroll] * 2,
+                    "calls_per_replay": unroll,
+                    "replays_per_round": 3,
+                }
+                for name in cases
+            }
+
+        with (
+            patch.object(torch, "npu", npu, create=True),
+            patch.object(
+                torch,
+                "zeros",
+                side_effect=lambda *a, **kw: zeros(*a, **{**kw, "device": "cpu"}),
+            ),
+            patch.object(probe, "make_layers", return_value=None) as make_layers,
+            patch.object(
+                probe,
+                "gdn_cases",
+                return_value=({"example": lambda: None}, {"test": True}),
+            ),
+            patch.object(probe, "measure_cases", side_effect=measure),
+        ):
+            probe.run_sections(SimpleNamespace(torch=torch), args, plan, records.append)
+        self.assertEqual(make_layers.call_count, 2)
+        self.assertEqual(seen, [1, 16, 64])
+        self.assertEqual(records[0]["evaluation_mode"], "eager_before_timing")
+        self.assertEqual(
+            [r["calls_per_replay"] for r in records[1:]], [1, 1, 16, 16, 64, 64]
+        )
+        self.assertEqual(records[-1]["case"], "example")
+        self.assertAlmostEqual(records[-1]["median_stream_ms"], 0.16 / 64)
 
     def test_gdn_ablation_counts_only_activation_quant_in_timed_cases(self):
         import torch

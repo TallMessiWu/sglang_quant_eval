@@ -175,9 +175,11 @@ python3 llm/diagnostics/mxfp4_perf_probe.py --model-path "$MODEL_PATH" --tp 2 --
 ASCEND_RT_VISIBLE_DEVICES=6 python3 llm/diagnostics/mxfp4_perf_probe.py \
     --model-path "$MODEL_PATH" --tp 2 --device 0 --mode eager
 
-# 另一次运行：固定输入/路由的 NPU graph 微基准，不等于完整 serving graph。
+# 固定输入/路由的 NPU graph 微基准，不等于完整 serving graph。
+# 先缩小到 32/128 tokens；比较每张图内 1/16/64 次调用，检查 replay 开销是否被摊薄。
 ASCEND_RT_VISIBLE_DEVICES=6 python3 llm/diagnostics/mxfp4_perf_probe.py \
-    --model-path "$MODEL_PATH" --tp 2 --device 0 --mode graph
+    --model-path "$MODEL_PATH" --tp 2 --device 0 --mode graph \
+    --tokens 32 128 --graph-unroll 1 16 64
 ```
 
 默认 `--tokens 1 8 32 128 512`、`--warmup 10 --iterations 50 --repeats 3`；MoE 同时测均匀和热点路由，并保存每个 expert 的 token 数。**并发 32 不意味着每个 expert 的 M=32**，所以不能只测一个大矩阵。可用 `--sections gdn` 或 `--sections moe` 缩小范围；不会为了省显存擅自减少 expert 数。`--max-weight-gib 4` 限制单 rank BF16 专家权重大小，不是峰值显存上限；BF16/FP4 双份权重、转换临时张量、图池与 workspace 还需额外空间。
@@ -192,7 +194,13 @@ ASCEND_RT_VISIBLE_DEVICES=6 python3 llm/diagnostics/mxfp4_perf_probe.py \
 | MoE 融合路由是否有收益 | `moe_rank_w4_unfused_route` / `moe_rank_w4_fused_route` / `moe_rank_bf16` | 都包含路由、GMM1/激活、GMM2、combine；不含 router logits 和跨卡通信 |
 | GMM1/GMM2 是否拖慢 | `gmm1_bf16_swiglu` / `gmm1_w4_fused`；`gmm2_bf16` / `gmm2_w4` | 使用已路由/已量化的输入；GMM1 已含激活，不是纯矩阵乘 |
 
-结果默认在当前目录 `artifacts/mxfp4-perf/<唯一运行目录>/results.jsonl`。保存 config hash、实际导入的量化源码路径/hash/git SHA、torch/torch_npu/设备信息、每轮 stream/wall 时间与中位数。Event 的 stream 时间也可能包含 host 发射空隙，**不是纯 kernel 时间**。重复运行同一层是热缓存微基准，不能直接预测整模型收益。合成输出误差仅作有限值/接线 sanity，不是模型精度验收。
+结果默认在当前目录 `artifacts/mxfp4-perf/<唯一运行目录>/results.jsonl`。保存 config hash、实际导入的量化源码与探针路径/hash/git SHA、torch/torch_npu/设备信息，以及影响同步/队列的环境变量白名单（只记录，不修改）。Event 的 stream 时间也可能包含 host 发射空隙，**不是纯 kernel 时间**。重复运行同一层是热缓存微基准，不能直接预测整模型收益。
+
+Graph 计时版本 `timing_version=2` 默认逐个测试 `--graph-unroll 1 16 64`：在一张图内捕获 U 次调用，每轮 replay `--iterations` 次，`stream_ms` / `wall_ms` 及中位数按 **iterations × U** 归一化为每次调用；`replay_stream_ms` / `replay_wall_ms` 保留每次整图 replay 的原始均值。每行有 `calls_per_replay`、`replays_per_round`，不可把不同 U 的行混为重复样本。`host_submit_ms_per_replay` 是主机发射循环均值，可能包含阻塞等待，不是纯 CPU 或纯 kernel 成本。Eager 不使用图内重复，始终 U=1。
+
+每组 graph 增加 `graph_control_add`（4 元素加法）显示短图的固定开销下限，**不将它从其他时间里直接相减**。若 U=16→64 时每次调用耗时仍明显下降，说明尚未稳定，不据此决定生产优化；图内重复也可能改变缓存、内存复用和调度。U 越大图池/捕获成本可能越高，OOM 保留错误，不自动缩小 U。旧版一张图只捕获一次操作；若各小操作时间都挤在同一平台，只能作为 replay 调用现象，不能据此判断算子持平。
+
+`graph_replay_check` 在计时外修改输入并重放两次，检查简单加法图确实更新输出；它不代表全部 GDN/MoE 图数值验收。各组 `sanity` 明确标记 `evaluation_mode=eager_before_timing`，只是捕获前合成输出的有限值/接线检查，不是 replay 输出或模型精度验收。
 
 可用 `--output-dir ./artifacts/my-probe` 指定未存在的目录；脚本拒绝覆盖，失败退出非零并保留部分 JSONL/error.log，graph 失败不会偷偷退到 eager。临时目录和可配置缓存也放在该运行目录下。
 

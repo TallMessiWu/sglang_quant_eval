@@ -75,8 +75,10 @@ def make_plan(model_path, tp):
     }
 
 
-def capture(fn, npu, warmup):
-    stream = npu.Stream()
+def capture(fn, npu, warmup, *, unroll=1, stream=None):
+    # Multiple calls inside ONE graph amortize replay/host submission overhead.
+    # This is not equivalent to issuing more one-call replays from Python.
+    stream = npu.Stream() if stream is None else stream
     stream.wait_stream(npu.current_stream())
     with npu.stream(stream):
         for _ in range(warmup):
@@ -84,7 +86,8 @@ def capture(fn, npu, warmup):
     npu.synchronize()
     graph = npu.NPUGraph()
     with npu.graph(graph, stream=stream):
-        output = fn()
+        for _ in range(unroll):
+            output = fn()
     npu.current_stream().wait_stream(stream)
     npu.synchronize()
 
@@ -95,19 +98,53 @@ def capture(fn, npu, warmup):
     return replay
 
 
-def measure_cases(cases, npu, *, warmup, iterations, repeats, mode):
+def check_graph_replay(torch, npu):
+    """Check changed-input replay, outside timing; not model/operator validation."""
+    x = torch.zeros(4, device="npu", dtype=torch.float32)
+    replay = capture(lambda: x + 1, npu, warmup=1)
+    for value in (2, 5):
+        x.fill_(value)
+        npu.synchronize()
+        output = replay()
+        npu.synchronize()
+        if not torch.equal(
+            output.cpu(), torch.full((4,), value + 1, dtype=torch.float32)
+        ):
+            raise RuntimeError("NPU graph replay returned stale or incorrect output")
+    return {"changed_input_replays": 2, "status": "passed", "scope": "float32 add only"}
+
+
+def measure_cases(cases, npu, *, warmup, iterations, repeats, mode, graph_unroll=1):
     """Stream elapsed includes launch gaps; wall elapsed also includes draining.
 
     Neither is summed kernel time. Real overlap/occupancy requires a profiler.
     Alternate variant order between repeats; exclude preparation, warmup and capture.
     """
+    calls_per_replay = graph_unroll if mode == "graph" else 1
+    if calls_per_replay < 1:
+        raise ValueError("graph_unroll must be positive")
     if mode == "graph":
-        cases = {name: capture(fn, npu, warmup) for name, fn in cases.items()}
+        stream = npu.Stream()
+        cases = {
+            name: capture(fn, npu, warmup, unroll=graph_unroll, stream=stream)
+            for name, fn in cases.items()
+        }
     for fn in cases.values():
         for _ in range(warmup):
             fn()
     npu.synchronize()
-    results = {name: {"stream_ms": [], "wall_ms": []} for name in cases}
+    results = {
+        name: {
+            "calls_per_replay": calls_per_replay,
+            "replays_per_round": iterations,
+            "stream_ms": [],
+            "wall_ms": [],
+            "replay_stream_ms": [],
+            "replay_wall_ms": [],
+            "host_submit_ms_per_replay": [],
+        }
+        for name in cases
+    }
     names = list(cases)
     for repeat in range(repeats):
         order = names if repeat % 2 == 0 else list(reversed(names))
@@ -116,19 +153,23 @@ def measure_cases(cases, npu, *, warmup, iterations, repeats, mode):
             npu.synchronize()
             before = time.perf_counter()
             start.record()
+            submit_start = time.perf_counter()
             for _ in range(iterations):
                 cases[name]()
+            submit_ms = (time.perf_counter() - submit_start) * 1000 / iterations
             end.record()
             npu.synchronize()
-            results[name]["wall_ms"].append(
-                (time.perf_counter() - before) * 1000 / iterations
-            )
+            wall = (time.perf_counter() - before) * 1000 / iterations
             elapsed = start.elapsed_time(end) / iterations
             if elapsed <= 0:
                 raise RuntimeError(
                     f"Nonpositive event time for {name}; increase iterations"
                 )
-            results[name]["stream_ms"].append(elapsed)
+            results[name]["replay_stream_ms"].append(elapsed)
+            results[name]["replay_wall_ms"].append(wall)
+            results[name]["host_submit_ms_per_replay"].append(submit_ms)
+            results[name]["stream_ms"].append(elapsed / calls_per_replay)
+            results[name]["wall_ms"].append(wall / calls_per_replay)
     return results
 
 
@@ -342,9 +383,21 @@ def run_probe(args, plan, emit):
             "sources": rt.sources,
             "cann_home": os.getenv("ASCEND_HOME_PATH"),
             "dtype": str(dtype),
+            "timing_version": 2,
+            "probe_source": source_identity(__file__),
+            "execution_environment": {
+                key: os.getenv(key)
+                for key in (
+                    "ASCEND_LAUNCH_BLOCKING",
+                    "TASK_QUEUE_ENABLE",
+                    "PYTORCH_NO_NPU_MEMORY_CACHING",
+                )
+            },
         }
     )
     with torch.inference_mode():
+        if args.mode == "graph":
+            emit({"kind": "graph_replay_check", **check_graph_replay(torch, torch.npu)})
         run_sections(rt, args, plan, emit)
 
 
@@ -381,36 +434,45 @@ def run_sections(rt, args, plan, emit):
                         "tokens": tokens,
                         "routing": distribution,
                         "checks": checks,
-                        "note": "Synthetic checks, not model accuracy or bitwise-equivalence acceptance",
+                        "evaluation_mode": "eager_before_timing",
+                        "note": "Synthetic checks, not graph replay, model accuracy or bitwise-equivalence acceptance",
                     }
                 )
-                results = measure_cases(
-                    cases,
-                    torch.npu,
-                    warmup=args.warmup,
-                    iterations=args.iterations,
-                    repeats=args.repeats,
-                    mode=args.mode,
-                )
-                for name, values in results.items():
-                    median = statistics.median(values["stream_ms"])
-                    emit(
-                        {
-                            "kind": "timing",
-                            "section": section,
-                            "tokens": tokens,
-                            "routing": distribution,
-                            "mode": args.mode,
-                            "case": name,
-                            "median_stream_ms": median,
-                            "median_wall_ms": statistics.median(values["wall_ms"]),
-                            **values,
-                        }
+                if args.mode == "graph":
+                    control = torch.zeros(4, device="npu", dtype=torch.float32)
+                    # A tiny nonempty graph exposes the replay floor; never subtract it.
+                    cases = {"graph_control_add": lambda x=control: x + 1, **cases}
+                for unroll in dict.fromkeys(
+                    args.graph_unroll if args.mode == "graph" else [1]
+                ):
+                    results = measure_cases(
+                        cases,
+                        torch.npu,
+                        warmup=args.warmup,
+                        iterations=args.iterations,
+                        repeats=args.repeats,
+                        mode=args.mode,
+                        graph_unroll=unroll,
                     )
-                    print(
-                        f"{section:3} M={tokens:4} {distribution:7} {name:28} {median:10.4f} ms",
-                        flush=True,
-                    )
+                    for name, values in results.items():
+                        median = statistics.median(values["stream_ms"])
+                        emit(
+                            {
+                                "kind": "timing",
+                                "section": section,
+                                "tokens": tokens,
+                                "routing": distribution,
+                                "mode": args.mode,
+                                "case": name,
+                                "median_stream_ms": median,
+                                "median_wall_ms": statistics.median(values["wall_ms"]),
+                                **values,
+                            }
+                        )
+                        print(
+                            f"{section:3} M={tokens:4} {distribution:7} U={unroll:2} {name:28} {median:10.4f} ms/call",
+                            flush=True,
+                        )
                 del cases
         del layers
         torch.npu.empty_cache()
@@ -444,6 +506,13 @@ def parser():
         default=["uniform", "skewed"],
     )
     result.add_argument("--mode", choices=["eager", "graph"], default="eager")
+    result.add_argument(
+        "--graph-unroll",
+        nargs="+",
+        type=positive,
+        default=[1, 16, 64],
+        help="Calls captured in each graph; compare amortization across sizes (graph only)",
+    )
     result.add_argument("--warmup", type=positive, default=10)
     result.add_argument("--iterations", type=positive, default=50)
     result.add_argument("--repeats", type=positive, default=3)

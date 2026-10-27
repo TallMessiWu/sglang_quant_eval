@@ -223,7 +223,7 @@ def load_runtime(device):
         w4=moe_methods.NPUW4A8MXFP4MoEMethod(),
         bf=moe_methods.NPUUnquantMoEMethod(),
         routing=NPUMoEInitRouting_v2,
-        finalize=NPUFinalizeRouting(),
+        finalize=NPUFinalizeRouting(drop_pad_mode=2),
         sources={
             "linear": source_identity(linear_method_npu.__file__),
             "moe": source_identity(moe_methods.__file__),
@@ -303,7 +303,113 @@ def gdn_cases(rt, plan, layers, tokens, dtype):
     }, checks
 
 
-def moe_cases(rt, plan, layers, tokens, dtype, distribution):
+def route_prequantized(rt, prepared, ids, experts, top_k):
+    """Experimental probe path; production's BF16 wrapper discards these scales."""
+    torch = rt.torch
+    payload, row_map, counts, scales = torch.ops.npu.npu_moe_init_routing_v2(
+        prepared.quantized,
+        ids,
+        scale=prepared.scale,
+        active_num=ids.shape[0] * top_k,
+        expert_num=experts,
+        expert_tokens_num_type=1,
+        expert_tokens_num_flag=True,
+        active_expert_range=[0, experts],
+        quant_mode=-1,
+        row_idx_type=0,
+        x_dtype=torch.float8_e4m3fn,
+    )
+    return (
+        payload,
+        row_map,
+        counts.to(torch.int64),
+        scales.reshape(payload.shape[0], payload.shape[1] // 64, 2),
+    )
+
+
+def check_prequantized_routing(torch, prepared, routed, ids, experts):
+    """Verify byte preservation and source-to-destination mapping on CPU, untimed."""
+    payload, row_map, counts, scales = routed
+    ids = ids.cpu().long().flatten()
+    row_map = row_map.cpu().long()
+    counts = counts.cpu().long()
+    rows = ids.numel()
+    top_k = rows // prepared.quantized.shape[0]
+    if not torch.equal(counts, torch.bincount(ids, minlength=experts)):
+        raise RuntimeError("Prequantized routing returned incorrect expert counts")
+    if not torch.equal(row_map.sort().values, torch.arange(rows)):
+        raise RuntimeError("Prequantized routing did not return a row permutation")
+    if not torch.equal(
+        ids[row_map.argsort()], torch.arange(experts).repeat_interleave(counts)
+    ):
+        raise RuntimeError("Prequantized routing row map does not match expert groups")
+    for name, actual, source in (
+        ("FP8 payload", payload, prepared.quantized),
+        ("MX scales", scales, prepared.scale),
+    ):
+        actual = actual.cpu().contiguous().view(torch.uint8).reshape(rows, -1)
+        expected = (
+            source.cpu()
+            .contiguous()
+            .view(torch.uint8)
+            .reshape(source.shape[0], -1)
+            .repeat_interleave(top_k, dim=0)
+        )
+        if not torch.equal(actual[row_map], expected):
+            raise RuntimeError(f"Prequantized routing changed or misordered {name}")
+    return {"status": "passed", "expanded_rows": rows, "comparison": "exact bytes"}
+
+
+def check_moe_route_replay(rt, cases, x, ids, experts, unrolls=(1,)):
+    """Check each W4 chain's replay against its own eager output, outside timing."""
+    torch = rt.torch
+    original_x, original_ids = x.clone(), ids.clone()
+    result = {"status": "passed", "rtol": 1.6e-2, "atol": 1e-5, "cases": {}}
+    for name, fn in cases.items():
+        result["cases"][name] = []
+        for unroll in dict.fromkeys(unrolls):
+            try:
+                replay = capture(fn, torch.npu, warmup=1, unroll=unroll)
+                for factor, shift in ((0.5, 1), (-1.25, 2)):
+                    x.copy_(original_x * factor)
+                    ids.copy_((original_ids + shift) % experts)
+                    reference = fn()
+                    torch.npu.synchronize()
+                    actual = replay()
+                    torch.npu.synchronize()
+                    torch.testing.assert_close(
+                        actual.cpu(),
+                        reference.cpu(),
+                        rtol=result["rtol"],
+                        atol=result["atol"],
+                    )
+                    result["cases"][name].append(
+                        {
+                            "calls_per_replay": unroll,
+                            "input_multiplier": factor,
+                            "expert_id_shift": shift,
+                            **difference(torch, actual, reference),
+                        }
+                    )
+                del replay
+            finally:
+                x.copy_(original_x)
+                ids.copy_(original_ids)
+                torch.npu.synchronize()
+    return result
+
+
+def moe_cases(
+    rt,
+    plan,
+    layers,
+    tokens,
+    dtype,
+    distribution,
+    *,
+    route_ablation=False,
+    graph_unroll=None,
+):
     torch = rt.torch
     bf, w4 = layers
     e, k, h = plan["num_experts"], plan["top_k"], plan["hidden_size"]
@@ -318,6 +424,9 @@ def moe_cases(rt, plan, layers, tokens, dtype, distribution):
     routers = [rt.routing(quant_mode=mode) for mode in (-1, 3)]
 
     def route(index):
+        if index == 2:
+            # Quantize T original rows on every invocation, before top-k expansion.
+            return route_prequantized(rt, rt.dense.prepare_input(x), ids, e, k)
         return routers[index]._init_routing(x, ids, e, k)
 
     def bf_first(routed):
@@ -333,8 +442,8 @@ def moe_cases(rt, plan, layers, tokens, dtype, distribution):
     def w4_second(value, counts):
         return rt.w4.apply(w4, value[0], counts, value[1], dtype, "w2", 1)
 
-    def chain(quantized, fused):
-        routed = route(int(fused))
+    def chain(quantized, route_index):
+        routed = route(int(route_index))
         output = (
             w4_second(w4_first(routed), routed[2])
             if quantized
@@ -352,6 +461,34 @@ def moe_cases(rt, plan, layers, tokens, dtype, distribution):
         "expert_token_counts": counts,
         "mean_rows_per_expert": tokens * k / e,
     }
+    if route_ablation:
+        prepared = rt.dense.prepare_input(x)
+        checks["prequantized_routing"] = check_prequantized_routing(
+            torch, prepared, route_prequantized(rt, prepared, ids, e, k), ids, e
+        )
+        prequantized = lambda: chain(True, 2)
+        checks["prequantized_vs_unfused_route"] = difference(
+            torch, prequantized(), chain(True, False)
+        )
+        checks["prequantized_vs_fused_route"] = difference(
+            torch, prequantized(), q_output
+        )
+        cases = {
+            "moe_rank_bf16": lambda: chain(False, False),
+            "moe_rank_w4_fused_route": lambda: chain(True, True),
+            "moe_rank_w4_unfused_route": lambda: chain(True, False),
+            "moe_rank_w4_prequantized_route": prequantized,
+        }
+        if graph_unroll is not None:
+            checks["graph_replay"] = check_moe_route_replay(
+                rt,
+                {name: fn for name, fn in cases.items() if name != "moe_rank_bf16"},
+                x,
+                ids,
+                e,
+                unrolls=graph_unroll,
+            )
+        return cases, checks
     return {
         "route_bf16": lambda: route(0),
         "route_mxfp8": lambda: route(1),
@@ -384,6 +521,7 @@ def run_probe(args, plan, emit):
             "cann_home": os.getenv("ASCEND_HOME_PATH"),
             "dtype": str(dtype),
             "timing_version": 2,
+            "finalize_drop_pad_mode": rt.finalize.drop_pad_mode,
             "probe_source": source_identity(__file__),
             "execution_environment": {
                 key: os.getenv(key)
@@ -421,12 +559,26 @@ def run_sections(rt, args, plan, emit):
                 rt, {"w13_weight": (e, 2 * n, h), "w2_weight": (e, h, n)}, dtype
             )
         for tokens in args.tokens:
-            for distribution in args.routing if section == "moe" else ["none"]:
+            for distribution in args.routing if section != "gdn" else ["none"]:
                 cases, checks = (
                     gdn_cases(rt, plan, layers, tokens, dtype)
                     if section == "gdn"
-                    else moe_cases(rt, plan, layers, tokens, dtype, distribution)
+                    else moe_cases(
+                        rt,
+                        plan,
+                        layers,
+                        tokens,
+                        dtype,
+                        distribution,
+                        route_ablation=section == "moe-route",
+                        graph_unroll=(
+                            args.graph_unroll
+                            if section == "moe-route" and args.mode == "graph"
+                            else None
+                        ),
+                    )
                 )
+                replay_checks = checks.pop("graph_replay", None)
                 emit(
                     {
                         "kind": "sanity",
@@ -438,6 +590,17 @@ def run_sections(rt, args, plan, emit):
                         "note": "Synthetic checks, not graph replay, model accuracy or bitwise-equivalence acceptance",
                     }
                 )
+                if replay_checks is not None:
+                    emit(
+                        {
+                            "kind": "moe_route_graph_replay_check",
+                            "section": section,
+                            "tokens": tokens,
+                            "routing": distribution,
+                            "checks": replay_checks,
+                            "note": "Changed input and routing; each W4 graph vs its own eager path, not model accuracy",
+                        }
+                    )
                 if args.mode == "graph":
                     control = torch.zeros(4, device="npu", dtype=torch.float32)
                     # A tiny nonempty graph exposes the replay floor; never subtract it.
@@ -497,7 +660,11 @@ def parser():
         "--tokens", nargs="+", type=positive, default=[1, 8, 32, 128, 512]
     )
     result.add_argument(
-        "--sections", nargs="+", choices=["gdn", "moe"], default=["gdn", "moe"]
+        "--sections",
+        nargs="+",
+        choices=["gdn", "moe", "moe-route"],
+        default=["gdn", "moe"],
+        help="moe-route selects only BF16 and three complete W4 routing chains",
     )
     result.add_argument(
         "--routing",

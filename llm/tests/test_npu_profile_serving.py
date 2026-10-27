@@ -25,10 +25,14 @@ class TestProfileServing(unittest.TestCase):
             "launch_command": "secret",
             "dtype": "bfloat16",
             "exec": {"moe": {"moe_runner_backend": "ascend"}, "token": "secret"},
+            "schedule": {"max_prefill_tokens": 8192, "enable_mixed_chunk": False},
+            "graph": {"disable_cuda_graph_padding": False},
         }
         filtered = module.filtered_info(info)
         self.assertNotIn("secret", json.dumps(filtered))
         self.assertEqual(filtered["exec"]["moe"]["moe_runner_backend"], "ascend")
+        self.assertEqual(filtered["schedule"], info["schedule"])
+        self.assertEqual(filtered["graph"], info["graph"])
 
     def test_local_capture_and_failure_handling(self):
         state = {"quantization": "mxfp_w4a8", "stops": 0}

@@ -204,6 +204,33 @@ Graph 计时版本 `timing_version=2` 默认逐个测试 `--graph-unroll 1 16 64
 
 可用 `--output-dir ./artifacts/my-probe` 指定未存在的目录；脚本拒绝覆盖，失败退出非零并保留部分 JSONL/error.log，graph 失败不会偷偷退到 eager。临时目录和可配置缓存也放在该运行目录下。
 
+### 1a. 普通 TP 路由三路对照
+
+`--sections moe-route` 只测同一组输入、路由和权重下的四条完整链路：BF16 参照，以及 W4A8 的 A/B/C；另保留 graph 的小加法 control。它不重跑 GDN 和所有孤立 GMM，不改已安装的 SGLang，也不改变服务默认策略。
+
+| 路径 | case | 顺序 |
+| --- | --- | --- |
+| A | `moe_rank_w4_fused_route` | BF16 输入 → 路由融合 MXFP8 量化 → 专家计算 → combine |
+| B | `moe_rank_w4_unfused_route` | BF16 输入 → 路由展开 → MXFP8 量化 → 专家计算 → combine |
+| C | `moe_rank_w4_prequantized_route` | 原始 token 先做 MXFP8 量化 → FP8 与 scale 一起路由 → 专家计算 → combine |
+
+三条 W4 链路都保留 FP4 权重、GMM1/SwiGLU/requant 融合和 GMM2 COUNT 契约，**C 的输入量化在每次计时调用内**。C 直接调用 `npu_moe_init_routing_v2(quant_mode=-1, scale=..., x_dtype=float8_e4m3fn)`；现有生产 BF16 routing wrapper 不传入并保留这组 scale，不能拿它直接替代。安装环境不支持该接口时保留报错并退出，不自动升级或回退。
+
+```bash
+MODEL_PATH=/mnt/share/weight/Qwen3.6-35B-A3B
+# 物理卡 6 必须空闲；TP2 仅表示单 rank 形状，实际只占一张卡。
+ASCEND_RT_VISIBLE_DEVICES=6 python3 llm/diagnostics/mxfp4_perf_probe.py \
+    --model-path "$MODEL_PATH" --tp 2 --device 0 \
+    --sections moe-route --tokens 32 128 --routing uniform skewed \
+    --mode graph --graph-unroll 16 64
+```
+
+先运行这一条并回传打印出的 `results.jsonl`。若有错误，同时回传同目录 `error.log`。需要 eager 对照时才用相同参数改为 `--mode eager`；无需默认重跑全量探针。
+
+计时外，C 会按 `row_idx_type=0` 的源→目标映射逐字节检查 FP8 payload、scale，并核对专家分组。`sanity` 还记录 C/B、C/A 完整输出误差，这些跨路径误差仅报告，不自动宣布数值等价。graph 模式另输出 `moe_route_graph_replay_check`：对每个指定 U、三条 W4 链路分别改变输入和 expert IDs 两次，对照各自 eager 输出（BF16 `rtol=0.016, atol=1e-5`），结束后恢复原 fixture 再计时。它覆盖合成链路的重放，不代表模型精度验收。
+
+**本次探针将 MoE finalize 从旧默认 `drop_pad_mode=0` 对齐为生产普通 TP 使用的 `2`**，在 runtime 行记录 `finalize_drop_pad_mode`。加上 section/token 选择影响 RNG 推进，新旧批次的绝对耗时不能直接归因于 C；比较本次同 fixture 的 A/B/C，检查 U16→64 是否稳定。
+
 ### 2. 双卡真实服务 profile
 
 仍用现有启动脚本，用户手动选择、更新并重启目标分支。下面采集器必须在服务所在机器运行；两次服务模型、TP、数据集、并发一致，**依次启动 BF16 和 W4A8 服务，不同时占用同一组卡**。采集会清空 prefix cache；不要与其他压测或 profiler 同时运行。
@@ -221,6 +248,8 @@ python3 llm/diagnostics/npu_profile_serving.py \
 默认沿用 ShareGPT 路径、并发 32、500 请求，启用 `--flush-cache`，每阶段采集 5 步；`--dataset-path`、`--concurrency`、`--num-prompts`、`--steps` 可调。使用 SGLang 原生 `--profile-by-stage`；prefill/decode 的实际覆盖和 batch 形状以 trace/服务日志为准，短请求或过小负载未必覆盖目标步数。NPU 后端将 API 的 `CPU GPU` 活动映射为 CPU/NPU，不需要修改启动器。不要将该运行输出的吞吐加入正式性能表。
 
 默认产物在当前目录 `artifacts/npu-profile/<标签-唯一运行目录>/`：`metadata.json`（服务配置白名单，不保存 API key/原始启动命令）、`benchmark.log`、`traces.json` 与 `traces/`。检查 benchmark 确认 profiler 启动且确有 trace 文件；失败非零退出并保留证据。实际 SHA 不能由客户端 checkout 推断，因此可补 `--server-revision` 或随服务启动日志提供。
+
+本轮对照沿用上述两条 profile 命令；服务依次使用 `llm/qwen3.5_moe_bf16.sh`、`llm/qwen3.5_moe_online_w4a8.sh`，由用户手动选择相同 TP 和实际运行版本。元数据补充保留服务返回的 `max_prefill_tokens`、`enable_mixed_chunk`、`disable_cuda_graph_padding`，便于核对调度与 graph 设置。回传两组 `metadata.json`、`benchmark.log`、`traces.json` 和 `traces/`，并附服务启动及采集期间日志。原生 serving benchmark 未请求 `record_shapes`，当前服务默认关闭它；trace 不保证包含输入 shape 或明确的 graph 命中标记，不从缺失字段推断 batch 或未命中原因。短窗口也不保证捕获 P95/P99 对应的慢步骤。
 
 **先回传算子探针的 results.jsonl**；需要定位整模型占比时，再回传两组 profile 的 metadata.json 与 traces/。重点比较 quant、GMM/Linear、GDN、attention 和 HCCL 的次数/shape/耗时及时间线。不同 stream/rank 可能重叠，不可简单求和当作 wall time；只凭微基准不决定修改生产路径。
 

@@ -148,12 +148,79 @@ AIS Bench 的公共逻辑在 `ais_bench/run_ais_bench.sh`。生成的配置仍�
 | `diagnostics/gdn_prefill_batch_stress.py` | 多序列、变长、chunk_state 和真实头数的并发压力 |
 | `diagnostics/cache_loc_update_oob_check.py` | cache_loc 的 roomy/tight 容量对照与越界复现 |
 | `diagnostics/modelslim_w4a8_check.py` | 离线 W4A8 Linear 与 FP4/UE8M0 软件参考对照；不覆盖整模型或完整 graph，也不替代两入口的重构等价对照 |
+| `diagnostics/mxfp4_perf_probe.py` | 在线 W4A8 的 GDN 投影、MoE 路由/GMM 单 rank 微基准；区分激活量化与计算，比较融合前后 |
+| `diagnostics/npu_profile_serving.py` | 复用原生 benchmark 采集正在运行的 BF16/W4A8 服务 trace，记录实际服务配置；不启动或修改服务 |
 
 ```bash
 python3 llm/diagnostics/mtp_env_doctor.py
 ./llm/diagnostics/npu_fault_kernel.sh <scheduler-PID>
 python3 llm/diagnostics/recurrent_gated_delta_rule_check.py --dry-run
 ./llm/benchmarks/a5_fia_mixed_split_bench.sh compare
+```
+
+## W4A8 性能瓶颈诊断
+
+先做算子级 A/B，再用真实服务 profile 确认占比。两者都只是内部诊断，**不能把微基准或开启 profiler 的吞吐当作正式 benchmark**；脚本不会更新 PR、修改 SGLang、切分支、安装依赖或设置 PYTHONPATH。
+
+### 1. 单 rank 算子探针
+
+在与服务相同、已包含 GDN 共享输入改动的 Python/SGLang 环境运行。探针要求在线 W4A8 方法提供 `prepare_input`，并记录真实导入的源码来源。`--model-path` **只读取 config.json，不读取 checkpoint 权重**，从实际 Qwen GDN/MoE 配置推导形状；合成 BF16 输入/权重，FP4 权重使用安装环境里的生产方法准备，转换在计时之外。当前面向普通 SwiGLU、EP=1、attention TP 与 MoE TP 相同的配置；不模拟 DP/EP、LoRA 或自定义激活。
+
+```bash
+MODEL_PATH=/mnt/share/weight/Qwen3.6-35B-A3B  # 改为本次测试的实际模型
+python3 llm/diagnostics/mxfp4_perf_probe.py --model-path "$MODEL_PATH" --tp 2 --dry-run
+
+# 示例物理卡 6：必须空闲；不清理进程，不要与服务在同一卡上同时跑。
+# --tp 2 仅生成 TP2 下一个 rank 的形状，实际只用一张卡，无 TP 通信。
+ASCEND_RT_VISIBLE_DEVICES=6 python3 llm/diagnostics/mxfp4_perf_probe.py \
+    --model-path "$MODEL_PATH" --tp 2 --device 0 --mode eager
+
+# 另一次运行：固定输入/路由的 NPU graph 微基准，不等于完整 serving graph。
+ASCEND_RT_VISIBLE_DEVICES=6 python3 llm/diagnostics/mxfp4_perf_probe.py \
+    --model-path "$MODEL_PATH" --tp 2 --device 0 --mode graph
+```
+
+默认 `--tokens 1 8 32 128 512`、`--warmup 10 --iterations 50 --repeats 3`；MoE 同时测均匀和热点路由，并保存每个 expert 的 token 数。**并发 32 不意味着每个 expert 的 M=32**，所以不能只测一个大矩阵。可用 `--sections gdn` 或 `--sections moe` 缩小范围；不会为了省显存擅自减少 expert 数。`--max-weight-gib 4` 限制单 rank BF16 专家权重大小，不是峰值显存上限；BF16/FP4 双份权重、转换临时张量、图池与 workspace 还需额外空间。
+
+主要看同一 token 数/路由分布下的这些对照：
+
+| 疑点 | 对照 case | 如何解释 |
+| --- | --- | --- |
+| 小矩阵 W4 是否更慢 | `qkvz_bf16` / `qkvz_w4_matmul_only`；`ba_bf16` / `ba_w4_matmul_only` | 去掉激活量化后的算子对比；再看不同 M 的变化 |
+| 激活量化成本 | `*_w4_matmul_only` / `*_w4_total`；`activation_quant` | 比较完整调用与预量化调用，不把孤立耗时相加当模型总耗时 |
+| GDN 输入复用是否有收益 | `pair_w4_separate` / `pair_w4_shared` / `pair_bf16` | 前两者都包含量化；`pair_w4_qkvz_bf16_ba` 是仅 BA 保留 BF16 的消融 |
+| MoE 融合路由是否有收益 | `moe_rank_w4_unfused_route` / `moe_rank_w4_fused_route` / `moe_rank_bf16` | 都包含路由、GMM1/激活、GMM2、combine；不含 router logits 和跨卡通信 |
+| GMM1/GMM2 是否拖慢 | `gmm1_bf16_swiglu` / `gmm1_w4_fused`；`gmm2_bf16` / `gmm2_w4` | 使用已路由/已量化的输入；GMM1 已含激活，不是纯矩阵乘 |
+
+结果默认在当前目录 `artifacts/mxfp4-perf/<唯一运行目录>/results.jsonl`。保存 config hash、实际导入的量化源码路径/hash/git SHA、torch/torch_npu/设备信息、每轮 stream/wall 时间与中位数。Event 的 stream 时间也可能包含 host 发射空隙，**不是纯 kernel 时间**。重复运行同一层是热缓存微基准，不能直接预测整模型收益。合成输出误差仅作有限值/接线 sanity，不是模型精度验收。
+
+可用 `--output-dir ./artifacts/my-probe` 指定未存在的目录；脚本拒绝覆盖，失败退出非零并保留部分 JSONL/error.log，graph 失败不会偷偷退到 eager。临时目录和可配置缓存也放在该运行目录下。
+
+### 2. 双卡真实服务 profile
+
+仍用现有启动脚本，用户手动选择、更新并重启目标分支。下面采集器必须在服务所在机器运行；两次服务模型、TP、数据集、并发一致，**依次启动 BF16 和 W4A8 服务，不同时占用同一组卡**。采集会清空 prefix cache；不要与其他压测或 profiler 同时运行。
+
+```bash
+# BF16 服务启动后；--server-revision 可选，填写实际运行服务的 SHA，不是客户端 SHA。
+python3 llm/diagnostics/npu_profile_serving.py \
+    --label bf16 --model-path "$MODEL_PATH" --server-url http://127.0.0.1:6969
+
+# 换为 W4A8 服务并完成启动后。
+python3 llm/diagnostics/npu_profile_serving.py \
+    --label w4a8 --model-path "$MODEL_PATH" --server-url http://127.0.0.1:6969
+```
+
+默认沿用 ShareGPT 路径、并发 32、500 请求，启用 `--flush-cache`，每阶段采集 5 步；`--dataset-path`、`--concurrency`、`--num-prompts`、`--steps` 可调。使用 SGLang 原生 `--profile-by-stage`；prefill/decode 的实际覆盖和 batch 形状以 trace/服务日志为准，短请求或过小负载未必覆盖目标步数。NPU 后端将 API 的 `CPU GPU` 活动映射为 CPU/NPU，不需要修改启动器。不要将该运行输出的吞吐加入正式性能表。
+
+默认产物在当前目录 `artifacts/npu-profile/<标签-唯一运行目录>/`：`metadata.json`（服务配置白名单，不保存 API key/原始启动命令）、`benchmark.log`、`traces.json` 与 `traces/`。检查 benchmark 确认 profiler 启动且确有 trace 文件；失败非零退出并保留证据。实际 SHA 不能由客户端 checkout 推断，因此可补 `--server-revision` 或随服务启动日志提供。
+
+**先回传算子探针的 results.jsonl**；需要定位整模型占比时，再回传两组 profile 的 metadata.json 与 traces/。重点比较 quant、GMM/Linear、GDN、attention 和 HCCL 的次数/shape/耗时及时间线。不同 stream/rank 可能重叠，不可简单求和当作 wall time；只凭微基准不决定修改生产路径。
+
+CPU/模拟边界回归（不执行 NPU）：
+
+```bash
+python3 -m unittest discover -s llm/tests -p 'test_mxfp4_perf_probe.py' -v
+python3 -m unittest discover -s llm/tests -p 'test_npu_profile_serving.py' -v
 ```
 
 ## 需要保留的诊断补丁

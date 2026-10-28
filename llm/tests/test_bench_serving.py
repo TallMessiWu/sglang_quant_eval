@@ -5,8 +5,10 @@ import os
 import pty
 import re
 import select
+import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import termios
 import time
@@ -26,6 +28,11 @@ class BenchServingTests(unittest.TestCase):
         self.llm.mkdir()
         self.script = self.llm / SCRIPT.name
         shutil.copy2(SCRIPT, self.script)
+        (self.llm / "diagnostics").mkdir()
+        shutil.copy2(
+            LLM_DIR / "diagnostics/summarize_serving_tails.py",
+            self.llm / "diagnostics/summarize_serving_tails.py",
+        )
         self.models = []
         for source in sorted(LLM_DIR.glob("*_bf16.sh")):
             text = source.read_text()
@@ -39,11 +46,16 @@ class BenchServingTests(unittest.TestCase):
         python = self.bin / "python3"
         python.write_text(
             "#!/bin/bash\n"
+            f'if [[ $1 != -m ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\n'
             'printf "%s\\0" "$@" > "$TEST_ARGV"\n'
             'printf "%s\\0" "$TMPDIR" "$XDG_CACHE_HOME" "$HF_HOME" "$HF_HUB_CACHE" > "$TEST_CACHE_ENV"\n'
             'previous=""\n'
             'for arg in "$@"; do\n'
-            '    if [[ $previous == --output-file ]]; then printf "{}\\n" > "$arg"; fi\n'
+            "    if [[ $previous == --output-file ]]; then\n"
+            "        printf '%s\\n' "
+            '\'{"completed":1,"errors":[""],"itls":[[0.01,4.8]],"ttfts":[0.2],'
+            '"generated_texts":["private-generated-text"]}\' > "$arg"\n'
+            "    fi\n"
             "    previous=$arg\n"
             "done\n"
             'echo "mock benchmark stdout"\n'
@@ -59,6 +71,7 @@ class BenchServingTests(unittest.TestCase):
             "MAX_CONCURRENCY",
             "NUM_PROMPTS",
             "FLUSH_CACHE",
+            "OUTPUT_DETAILS",
             "BENCH_ROOT",
             "NO_COLOR",
             "BASH_ENV",
@@ -194,6 +207,21 @@ class BenchServingTests(unittest.TestCase):
         result = self.noninteractive()
         self.assertEqual(result.returncode, 2)
         self.assertIn("FLUSH_CACHE", result.stdout)
+
+    def test_optional_details_print_short_summary_without_request_text(self):
+        code, text = self.interactive(b"\r", {"OUTPUT_DETAILS": "1"})
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.args().count("--output-details"), 1)
+        self.assertNotIn("--profile", self.args())
+        self.assertIn("max_itl_ms=4800.00", text)
+        self.assertIn(">3000ms: itl_samples=1/2 itl_requests=1/1", text)
+        self.assertNotIn("private-generated-text", text)
+        result = Path(self.args()[self.args().index("--output-file") + 1])
+        self.assertTrue(result.with_name("summary.txt").is_file())
+        self.env["OUTPUT_DETAILS"] = "bad"
+        result = self.noninteractive()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("OUTPUT_DETAILS", result.stdout)
 
     def test_overrides_and_no_color_preserve_argument_boundaries(self):
         dataset = str(self.root / "data with spaces.json")

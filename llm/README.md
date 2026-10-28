@@ -302,6 +302,31 @@ FLUSH_CACHE=1 BENCH_ROOT="$PWD/artifacts/mamba-clear-on" bash llm/bench_serving.
 
 回传实际服务 SHA、两项开关打印值，以及测量轮末尾的吞吐 / TTFT / TPOT / ITL 摘要；无需原始 trace 或逐请求结果。若无 profiler 的服务吞吐改善不明显，再用已有 profile 工具确认清零算子和调用频次，不能将单算子加速倍数直接外推为服务收益。
 
+若吞吐改善但最大 ITL 变差，先固定所有配置做反向对照，检查运行顺序影响。当前开启服务已完成完整 workload 预热时，可直接测一轮；然后手动停止并改为关闭清零优化，完整预热一次，再测一轮。两侧都使用 `OUTPUT_DETAILS=1`：
+
+```bash
+# 当前清零开启服务，实际开关仍由服务器启动命令决定。
+OUTPUT_DETAILS=1 FLUSH_CACHE=1 BENCH_ROOT="$PWD/artifacts/mamba-clear-on-recheck" \
+    bash llm/bench_serving.sh
+
+# 手动重启为上文的清零关闭服务后，同一命令运行两次：完整预热、测量。
+OUTPUT_DETAILS=1 FLUSH_CACHE=1 BENCH_ROOT="$PWD/artifacts/mamba-clear-off-recheck" \
+    bash llm/bench_serving.sh
+```
+
+`OUTPUT_DETAILS=1` 只给原生 benchmark 增加 `--output-details`，保存发生在计时结束后；不启用 profiler。它会将逐请求 ITL/TTFT、生成文本和错误内容保存在本地 `results.jsonl`，随后自动打印并保存 `summary.txt`。**只回传测量轮的 `=== SERVING TAIL SUMMARY v1 ===` 至结束之间的短摘要**；不要回传完整 JSONL。摘要仅打印选定配置和统计，不包含生成文本、错误正文、密钥或启动命令。
+
+短摘要分别统计大于 500/1000/3000 ms 的 ITL 样本数、受影响请求数和 TTFT 请求数，失败请求单独计数并排除。原生 `sglang` 客户端可能把一个流式块的间隔平摊到多个 token，所以这些数值是客户端 ITL 样本，不是独立服务器停顿次数。明细没有请求起始时间，不能据此判断跨请求同时卡顿，也不能归因于 prefill、通信或分配。缺少明细显示 `unknown`，不会补成零；同样不把不同轮次的分位数合成总体分位数。
+
+已有压测结果可离线提取配置及指标；`--last 2` 按目录路径排序选每组最后两个文件，用户须确认它们确为测量轮，脚本不自动识别预热。旧结果没有明细时仍可比较配置，但无法恢复长间隔次数：
+
+```bash
+python3 llm/diagnostics/summarize_serving_tails.py --last 2 \
+    ./artifacts/mamba-clear-off ./artifacts/mamba-clear-on
+```
+
+更改 prefill 配置的实验放在这轮之后。`chunked_prefill_size` 会参与默认 `mem_fraction_static` 计算；做单变量对照时还需核对实际池容量，避免同时改变调度和状态池预算。保留服务器实际 SHA 和两项开关打印值；不能从客户端环境或结果目录名推断服务端开关。
+
 ### 2. 双卡真实服务 profile
 
 仍用现有启动脚本，用户手动选择、更新并重启目标分支。下面采集器必须在服务所在机器运行；两次服务模型、TP、数据集、并发一致，**依次启动 BF16 和 W4A8 服务，不同时占用同一组卡**。采集会清空 prefix cache；不要与其他压测或 profiler 同时运行。

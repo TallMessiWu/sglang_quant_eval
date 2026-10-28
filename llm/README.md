@@ -150,6 +150,7 @@ AIS Bench 的公共逻辑在 `ais_bench/run_ais_bench.sh`。生成的配置仍�
 | `diagnostics/modelslim_w4a8_check.py` | 离线 W4A8 Linear 与 FP4/UE8M0 软件参考对照；不覆盖整模型或完整 graph，也不替代两入口的重构等价对照 |
 | `diagnostics/mxfp4_perf_probe.py` | 在线 W4A8 的 GDN 投影、MoE 路由/GMM 单 rank 微基准；区分激活量化与计算，比较融合前后 |
 | `diagnostics/npu_profile_serving.py` | 复用原生 benchmark 采集正在运行的 BF16/W4A8 服务 trace，记录实际服务配置；不启动或修改服务 |
+| `diagnostics/summarize_npu_profile.py` | 在服务器本地汇总 NPU Text 导出，只需复制短摘要；也可处理已经采集的目录 |
 
 ```bash
 python3 llm/diagnostics/mtp_env_doctor.py
@@ -247,17 +248,28 @@ python3 llm/diagnostics/npu_profile_serving.py \
 
 默认沿用 ShareGPT 路径、并发 32、500 请求，启用 `--flush-cache`，每阶段采集 5 步；`--dataset-path`、`--concurrency`、`--num-prompts`、`--steps` 可调。使用 SGLang 原生 `--profile-by-stage`；prefill/decode 的实际覆盖和 batch 形状以 trace/服务日志为准，短请求或过小负载未必覆盖目标步数。NPU 后端将 API 的 `CPU GPU` 活动映射为 CPU/NPU，不需要修改启动器。不要将该运行输出的吞吐加入正式性能表。
 
-默认产物在当前目录 `artifacts/npu-profile/<标签-唯一运行目录>/`：`metadata.json`（服务配置白名单，不保存 API key/原始启动命令）、`benchmark.log`、`traces.json` 与 `traces/`。检查 benchmark 确认 profiler 启动且确有 trace 文件；失败非零退出并保留证据。实际 SHA 不能由客户端 checkout 推断，因此可补 `--server-revision` 或随服务启动日志提供。
+默认产物在当前目录 `artifacts/npu-profile/<标签-唯一运行目录>/`：`metadata.json`（服务配置白名单，不保存 API key/原始启动命令）、`benchmark.log`、`traces.json`、`traces/`，以及自动生成的 `summary.txt` / `summary.json`。检查 benchmark 确认 profiler 启动且确有 trace 文件；失败非零退出并保留证据。实际 SHA 不能由客户端 checkout 推断，因此可补 `--server-revision`。
 
-本轮对照沿用上述两条 profile 命令；服务依次使用 `llm/qwen3.5_moe_bf16.sh`、`llm/qwen3.5_moe_online_w4a8.sh`，由用户手动选择相同 TP 和实际运行版本。元数据补充保留服务返回的 `max_prefill_tokens`、`enable_mixed_chunk`、`disable_cuda_graph_padding`，便于核对调度与 graph 设置。回传两组 `metadata.json`、`benchmark.log`、`traces.json` 和 `traces/`，并附服务启动及采集期间日志。原生 serving benchmark 未请求 `record_shapes`，当前服务默认关闭它；trace 不保证包含输入 shape 或明确的 graph 命中标记，不从缺失字段推断 batch 或未命中原因。短窗口也不保证捕获 P95/P99 对应的慢步骤。
+本轮对照沿用上述两条 profile 命令；服务依次使用 `llm/qwen3.5_moe_bf16.sh`、`llm/qwen3.5_moe_online_w4a8.sh`，由用户手动选择相同 TP 和实际运行版本。元数据补充保留服务返回的 `max_prefill_tokens`、`enable_mixed_chunk`、`disable_cuda_graph_padding`，便于核对调度与 graph 设置。
 
-**先回传算子探针的 results.jsonl**；需要定位整模型占比时，再回传两组 profile 的 metadata.json 与 traces/。重点比较 quant、GMM/Linear、GDN、attention 和 HCCL 的次数/shape/耗时及时间线。不同 stream/rank 可能重叠，不可简单求和当作 wall time；只凭微基准不决定修改生产路径。
+**只需复制两次运行末尾 `=== NPU PROFILE SUMMARY ... ===` 到 `=== END NPU PROFILE SUMMARY ===` 之间的文字**，或各自的 `summary.txt`；每份不超过 6500 字符。原始 traces、日志、metadata 留在服务器，不需要传出。已采集过的目录无需重跑服务，直接执行：
+
+```bash
+python3 llm/diagnostics/summarize_npu_profile.py ./artifacts/npu-profile/实际运行目录
+```
+
+摘要使用 `kernel_details.csv` 按采集窗口、设备分别汇总算子类型、次数、累计耗时和前 6 项；不会再从 trace 重复累计 kernel。`name_hints_ms` 仅按算子名分类，融合算子的耗时不拆分。`CANN_ms` 来自 `step_trace_time.csv` 的 Computing、Communication、Communication(Not Overlapped)、Overlapped 等字段（原始单位 µs，摘要转为 ms），这些列不能相加；缺少时明确显示通信覆盖未知。字段依据 [torch_npu CSV 定义](https://github.com/Ascend/pytorch/blob/master/torch_npu/profiler/analysis/prof_common_func/_csv_headers.py)和 [step 时间导出实现](https://github.com/Ascend/pytorch/blob/master/torch_npu/profiler/analysis/prof_view/_trace_step_time_parser.py)。
+
+NPU 原生目录名未必包含 TP rank 或阶段，脚本流式读取 `trace_view.json`（也支持 `.gz`），只根据显式 `step[EXTEND/DECODE ...]` 标记报告阶段及 batch/token 范围；没有标记就显示 `unknown`。设备编号不当作 TP rank，也不按目录排序猜阶段。`summary.json` 保留完整聚合结果和本地来源映射；若文本标记 `omitted>0`，可追加 `--capture C01` 等参数只打印某一窗口。没有有效 kernel CSV 或部分 kernel CSV 解析失败时退出非零，保留短诊断，不需要先传原始文件。
+
+原生 serving benchmark 未请求 `record_shapes`，当前服务默认关闭它；trace 不保证包含输入 shape 或明确的 graph 命中标记，不从缺失字段推断 batch 或未命中原因。摘要只是 profile 窗口的算子累计耗时，重叠 stream/rank 不可相加当作 wall time；短窗口也不保证捕获 P95/P99 对应的慢步骤。只凭微基准不决定修改生产路径。
 
 CPU/模拟边界回归（不执行 NPU）：
 
 ```bash
 python3 -m unittest discover -s llm/tests -p 'test_mxfp4_perf_probe.py' -v
 python3 -m unittest discover -s llm/tests -p 'test_npu_profile_serving.py' -v
+python3 -m unittest discover -s llm/tests -p 'test_summarize_npu_profile.py' -v
 ```
 
 ## 需要保留的诊断补丁

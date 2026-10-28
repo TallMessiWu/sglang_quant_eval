@@ -266,9 +266,16 @@ def main():
             )
         started = False
         (output / "traces.json").write_text(json.dumps(traces, indent=2))
-        print(
-            f"Collected {len(traces)} trace files; send metadata.json and the traces/ directory."
-        )
+        # Import here also keeps dry-run and metadata inspection dependency-free.
+        from summarize_npu_profile import write_summary
+
+        summary, summary_text = write_summary(output)
+        print(summary_text, end="", flush=True)
+        print(f"Copy only {output / 'summary.txt'}; raw traces stay on this server.")
+        if summary["errors"] or not summary["captures"]:
+            raise RuntimeError(
+                "Capture collected but kernel summary incomplete; copy summary.txt for diagnosis"
+            )
         return 0
     except (Exception, KeyboardInterrupt) as error:  # noqa: BLE001 -- preserve diagnostics and stop owned profiler
         (output / "error.txt").write_text(str(error) or "Interrupted")

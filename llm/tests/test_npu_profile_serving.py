@@ -79,12 +79,21 @@ if mode != 'no_ack':
 if mode == 'fail':
     raise SystemExit(13)
 if mode != 'no_trace':
-    trace = Path(args[args.index('--profile-output-dir') + 1]) / 'TP0' / 'trace.json'
+    trace = Path(args[args.index('--profile-output-dir') + 1]) / 'TP0' / 'trace_view.json'
     trace.parent.mkdir(parents=True)
-    trace.write_text('{}')
+    trace.write_text(json.dumps([{'ph': 'X', 'name': 'step[DECODE bs=32]'}]))
+    if mode != 'no_kernel_export':
+        (trace.parent / 'kernel_details.csv').write_text('Device_id,Name,Type,Duration(us)\\n0,gmm,GroupedMatmul,100\\n')
 Path('env.json').write_text(json.dumps({k: os.environ[k] for k in ('TMPDIR', 'XDG_CACHE_HOME', 'HF_HOME')}))
 """)
-                for mode in ("ok", "no_ack", "no_trace", "fail", "mismatch"):
+                for mode in (
+                    "ok",
+                    "no_ack",
+                    "no_trace",
+                    "fail",
+                    "mismatch",
+                    "no_kernel_export",
+                ):
                     with self.subTest(mode=mode):
                         output = root / mode
                         state["quantization"] = (
@@ -117,6 +126,9 @@ Path('env.json').write_text(json.dumps({k: os.environ[k] for k in ('TMPDIR', 'XD
                         if mode == "ok":
                             self.assertEqual(result.returncode, 0, result.stderr)
                             self.assertTrue((output / "traces.json").exists())
+                            self.assertTrue((output / "summary.txt").is_file())
+                            self.assertIn("GroupedMatmul", result.stdout)
+                            self.assertIn("Copy only", result.stdout)
                             settings = json.loads((output / "env.json").read_text())
                             self.assertTrue(
                                 all(
@@ -127,6 +139,8 @@ Path('env.json').write_text(json.dumps({k: os.environ[k] for k in ('TMPDIR', 'XD
                         else:
                             self.assertEqual(result.returncode, 2, result.stdout)
                             self.assertTrue((output / "error.txt").exists())
+                            if mode == "no_kernel_export":
+                                self.assertIn("No kernel_details.csv", result.stdout)
                         self.assertNotIn(
                             "secret", (output / "metadata.json").read_text()
                         )

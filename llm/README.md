@@ -274,7 +274,7 @@ ASCEND_RT_VISIBLE_DEVICES=6 python3 llm/diagnostics/npu_mamba_clear_probe.py \
 
 验证分支为 `junlin/npu-mamba-clear-index-copy`，从当前在线 W4A8 正式分支派生；映射见 [分支表](../docs/branches.md)。用户在服务器手动选择该分支并确认安装指向它，启动器不 fetch、切分支或修改 PYTHONPATH。显式指定下列开关时，启动器会在清理 NPU / 启动服务前检查当前安装是否支持，避免旧代码忽略开关。
 
-`SGLANG_NPU_MAMBA_CLEAR_USE_INDEX_COPY` 默认 `1`：仅连续 BF16 NPU conv/temporal 状态使用 dim=1 `index_copy_` 写零，每次创建与选中槽位匹配的零张量。它不改变状态池容量、dtype、槽位映射或关联状态的 reset；其他 dtype、布局和设备保留原路径。设 `0` 恢复 `index_fill_`，选择按池缓存，修改开关需重启服务。此分支尚待真实模型清零生命周期及性能复测，单算子探针通过不等于服务验收。
+`SGLANG_NPU_MAMBA_CLEAR_USE_INDEX_COPY` 在当前验证分支默认 `0`，保留 `index_fill_`；候选仍需服务长尾验证。显式设 `1` 时，仅连续 BF16 NPU conv/temporal 状态使用 dim=1 `index_copy_` 写零，每次创建与选中槽位匹配的零张量。它不改变状态池容量、dtype、槽位映射或关联状态的 reset；其他 dtype、布局和设备保留原路径。选择按池缓存，修改开关需重启服务；单算子探针通过不等于服务验收。
 
 两组固定相同版本、模型、TP、池配置和路由开关；此处路由固定为 `0`，只比较清零操作。先启动基线：
 
@@ -314,7 +314,7 @@ OUTPUT_DETAILS=1 FLUSH_CACHE=1 BENCH_ROOT="$PWD/artifacts/mamba-clear-off-rechec
     bash llm/bench_serving.sh
 ```
 
-`OUTPUT_DETAILS=1` 只给原生 benchmark 增加 `--output-details`，保存发生在计时结束后；不启用 profiler。它会将逐请求 ITL/TTFT、生成文本和错误内容保存在本地 `results.jsonl`，随后自动打印并保存 `summary.txt`。**只回传测量轮的 `=== SERVING TAIL SUMMARY v1 ===` 至结束之间的短摘要**；不要回传完整 JSONL。摘要仅打印选定配置和统计，不包含生成文本、错误正文、密钥或启动命令。
+`OUTPUT_DETAILS=1` 只给原生 benchmark 增加 `--output-details`，保存发生在计时结束后；不启用 profiler。它会将逐请求 ITL/TTFT、生成文本和错误内容保存在本地 `results.jsonl`，随后自动打印并保存 `summary.txt`。**只回传测量轮的 `=== SERVING TAIL SUMMARY ... ===` 至结束之间的短摘要**；不要回传完整 JSONL。摘要仅打印选定配置和统计，不包含生成文本、错误正文、密钥或启动命令。
 
 短摘要分别统计大于 500/1000/3000 ms 的 ITL 样本数、受影响请求数和 TTFT 请求数，失败请求单独计数并排除。原生 `sglang` 客户端可能把一个流式块的间隔平摊到多个 token，所以这些数值是客户端 ITL 样本，不是独立服务器停顿次数。明细没有请求起始时间，不能据此判断跨请求同时卡顿，也不能归因于 prefill、通信或分配。缺少明细显示 `unknown`，不会补成零；同样不把不同轮次的分位数合成总体分位数。
 
@@ -326,6 +326,45 @@ python3 llm/diagnostics/summarize_serving_tails.py --last 2 \
 ```
 
 更改 prefill 配置的实验放在这轮之后。`chunked_prefill_size` 会参与默认 `mem_fraction_static` 计算；做单变量对照时还需核对实际池容量，避免同时改变调度和状态池预算。保留服务器实际 SHA 和两项开关打印值；不能从客户端环境或结果目录名推断服务端开关。
+
+### 1e. 清零长停顿时间关联
+
+需要定位长停顿时，服务端和客户端都手动更新到 `junlin/npu-mamba-clear-index-copy` 的诊断版本。`SGLANG_NPU_MAMBA_CLEAR_TRACE=1` 在每次非空 NPU 状态清零前后读取分配器计数并打印带 `[NPU_MAMBA_CLEAR_TRACE]` 的结构化记录。它记录创建零张量及整个清零调用的**主机**耗时，没有显式设备同步；异步算子的设备完成时间不在测量范围内。计数读取本身的时间另记，缺失计数显示 unknown。`num_alloc_retries` 的含义是分配失败后清理缓存并重试，见 [torch_npu memory_stats 实现](https://github.com/Ascend/pytorch/blob/v2.10.0/torch_npu/npu/memory.py)。
+
+以下命令在 `llm/` 目录运行，使用现有启动器；目录可自行更换。服务日志、缓存和临时文件留在当前目录下：
+
+```bash
+mkdir -p artifacts/mamba-stall/{tmp,cache/hf/hub,cache/triton,cache/inductor,cache/pycache,ascend-logs}
+set -o pipefail
+TMPDIR="$PWD/artifacts/mamba-stall/tmp" \
+XDG_CACHE_HOME="$PWD/artifacts/mamba-stall/cache" \
+HF_HOME="$PWD/artifacts/mamba-stall/cache/hf" \
+HF_HUB_CACHE="$PWD/artifacts/mamba-stall/cache/hf/hub" \
+TRITON_CACHE_DIR="$PWD/artifacts/mamba-stall/cache/triton" \
+TORCHINDUCTOR_CACHE_DIR="$PWD/artifacts/mamba-stall/cache/inductor" \
+PYTHONPYCACHEPREFIX="$PWD/artifacts/mamba-stall/cache/pycache" \
+ASCEND_PROCESS_LOG_PATH="$PWD/artifacts/mamba-stall/ascend-logs" \
+SGLANG_NPU_W4A8_MOE_FUSE_ROUTING_QUANT=0 \
+SGLANG_NPU_MAMBA_CLEAR_USE_INDEX_COPY=1 \
+SGLANG_NPU_MAMBA_CLEAR_TRACE=1 \
+    bash qwen3.5_moe_online_w4a8.sh 6 7 2>&1 | tee artifacts/mamba-stall/server.log
+```
+
+服务就绪后，在同一机器的另一终端、同一 `llm/` 目录，将下面命令运行两次：完整 workload 预热一次，再采集一次。保持同一服务、prefill、池预算和路由设置。`TRACE_STALLS=1` 要求 `OUTPUT_DETAILS=1`，只支持原生 Python `sglang` 流式客户端；旧版本不支持 `--trace-stalls` 时会报错，不应移除此选项当作完成采集。
+
+```bash
+TRACE_STALLS=1 OUTPUT_DETAILS=1 FLUSH_CACHE=1 \
+BENCH_ROOT="$PWD/artifacts/mamba-stall/bench" bash bench_serving.sh
+
+# 第二次测量结束后，读取最近一轮结果，与服务日志做本地时间关联。
+python3 diagnostics/summarize_serving_tails.py \
+    artifacts/mamba-stall/bench --last 1 \
+    --server-log artifacts/mamba-stall/server.log
+```
+
+客户端保存真实收流块间隔（超过 500 ms）和请求开始/首 token 时间，不从平摊 ITL 反推；还通过 50 ms 定时任务记录超过 100 ms 的事件循环迟到。摘要显示超过 1 秒的收流间隔/TTFT 的重叠组、峰值共同区间、该区间内的清零主机耗时及重试增量，以及客户端事件循环迟到。最多打印四组，余量有计数。它检查主机名并按 benchmark 时间窗排除预热日志；**客户端和服务端必须处于同一主机、同一时间命名空间**，仅主机名相同不能证明时钟相同。
+
+只回传最后一条命令的 `SERVING TAIL SUMMARY v2` 短摘要及启动开关值。重叠组只是时间相关，不证明共同根因；主机耗时短不能排除异步设备执行等待，计数为零也不能排除清零之外的分配行为。日志和采样都有额外开销，**此轮吞吐不作性能验收**。普通服务关闭 `SGLANG_NPU_MAMBA_CLEAR_TRACE` 和 `TRACE_STALLS`；在长尾验证完成前使用清零开关 `0`。
 
 ### 2. 双卡真实服务 profile
 

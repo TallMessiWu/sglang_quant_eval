@@ -72,6 +72,7 @@ class BenchServingTests(unittest.TestCase):
             "NUM_PROMPTS",
             "FLUSH_CACHE",
             "OUTPUT_DETAILS",
+            "TRACE_STALLS",
             "BENCH_ROOT",
             "NO_COLOR",
             "BASH_ENV",
@@ -222,6 +223,16 @@ class BenchServingTests(unittest.TestCase):
         result = self.noninteractive()
         self.assertEqual(result.returncode, 2)
         self.assertIn("OUTPUT_DETAILS", result.stdout)
+
+    def test_stall_trace_is_explicit_and_requires_details(self):
+        self.env["TRACE_STALLS"] = "1"
+        result = self.noninteractive()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("OUTPUT_DETAILS=1", result.stdout)
+        code, text = self.interactive(b"\r", {"OUTPUT_DETAILS": "1"})
+        self.assertEqual(code, 0, text)
+        self.assertIn("--trace-stalls", self.args())
+        self.assertNotIn("--profile", self.args())
 
     def test_overrides_and_no_color_preserve_argument_boundaries(self):
         dataset = str(self.root / "data with spaces.json")

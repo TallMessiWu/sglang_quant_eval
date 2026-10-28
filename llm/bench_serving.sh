@@ -18,6 +18,7 @@ usage() {
   NUM_PROMPTS      请求数，默认 500
   FLUSH_CACHE      设为 1 时在压测前清空服务 prefix cache，默认 0
   OUTPUT_DETAILS   设为 1 保存原生逐请求明细并打印短摘要，默认 0
+  TRACE_STALLS     设为 1 记录收流时间轴和客户端停顿，要求 OUTPUT_DETAILS=1
   BENCH_ROOT       结果目录，默认 当前工作目录/artifacts/bench-serving
   NO_COLOR         非空时不强调模型名或淡化路径
 
@@ -45,6 +46,17 @@ case ${OUTPUT_DETAILS:-0} in
     0) ;;
     1) detail_args+=(--output-details) ;;
     *) printf 'OUTPUT_DETAILS 只支持 0 或 1。\n' >&2; exit 2 ;;
+esac
+case ${TRACE_STALLS:-0} in
+    0) ;;
+    1)
+        if [[ ${OUTPUT_DETAILS:-0} != 1 ]]; then
+            printf 'TRACE_STALLS=1 要求 OUTPUT_DETAILS=1。\n' >&2
+            exit 2
+        fi
+        detail_args+=(--trace-stalls)
+        ;;
+    *) printf 'TRACE_STALLS 只支持 0 或 1。\n' >&2; exit 2 ;;
 esac
 
 script_dir=$(dirname "$(readlink -f "$0")")

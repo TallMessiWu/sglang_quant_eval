@@ -4,7 +4,7 @@
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 source "$SCRIPT_DIR/common/npu-launch.sh" || exit $?
 # 显式做 A/B 时检查已安装的 SGLang，避免旧版本静默忽略开关。
-if [[ -n "${SGLANG_NPU_W4A8_MOE_FUSE_ROUTING_QUANT+x}${SGLANG_NPU_MAMBA_CLEAR_USE_INDEX_COPY+x}" ]]; then
+if [[ -n "${SGLANG_NPU_W4A8_MOE_FUSE_ROUTING_QUANT+x}${SGLANG_NPU_MAMBA_CLEAR_USE_INDEX_COPY+x}${SGLANG_NPU_MAMBA_CLEAR_TRACE+x}" ]]; then
     python3 - <<'PY' || exit $?
 import os
 
@@ -13,6 +13,7 @@ from sglang.srt.environ import envs
 for name in (
     "SGLANG_NPU_W4A8_MOE_FUSE_ROUTING_QUANT",
     "SGLANG_NPU_MAMBA_CLEAR_USE_INDEX_COPY",
+    "SGLANG_NPU_MAMBA_CLEAR_TRACE",
 ):
     if name not in os.environ:
         continue

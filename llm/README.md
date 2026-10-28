@@ -270,6 +270,38 @@ ASCEND_RT_VISIBLE_DEVICES=6 python3 llm/diagnostics/npu_mamba_clear_probe.py \
 
 结果及临时/缓存目录位于当前目录 `artifacts/npu-mamba-clear/<唯一运行目录>/`。只回传终端 `=== NPU MAMBA CLEAR SUMMARY v1 ===` 到结尾之间的短表（默认不足 3000 字符），或 `summary.txt`；原始计时保存在本地 `results.jsonl`。出现错误时先贴终端的短错误，完整 traceback 在该目录的 `error.log`。这是单算子、单卡 eager 探针，不覆盖真实状态生命周期、模型精度、graph 或服务吞吐。
 
+### 1d. 状态池清零服务 A/B
+
+验证分支为 `junlin/npu-mamba-clear-index-copy`，从当前在线 W4A8 正式分支派生；映射见 [分支表](../docs/branches.md)。用户在服务器手动选择该分支并确认安装指向它，启动器不 fetch、切分支或修改 PYTHONPATH。显式指定下列开关时，启动器会在清理 NPU / 启动服务前检查当前安装是否支持，避免旧代码忽略开关。
+
+`SGLANG_NPU_MAMBA_CLEAR_USE_INDEX_COPY` 默认 `1`：仅连续 BF16 NPU conv/temporal 状态使用 dim=1 `index_copy_` 写零，每次创建与选中槽位匹配的零张量。它不改变状态池容量、dtype、槽位映射或关联状态的 reset；其他 dtype、布局和设备保留原路径。设 `0` 恢复 `index_fill_`，选择按池缓存，修改开关需重启服务。此分支尚待真实模型清零生命周期及性能复测，单算子探针通过不等于服务验收。
+
+两组固定相同版本、模型、TP、池配置和路由开关；此处路由固定为 `0`，只比较清零操作。先启动基线：
+
+```bash
+SGLANG_NPU_W4A8_MOE_FUSE_ROUTING_QUANT=0 \
+SGLANG_NPU_MAMBA_CLEAR_USE_INDEX_COPY=0 \
+    bash llm/qwen3.5_moe_online_w4a8.sh 6 7
+```
+
+服务就绪后，在另一终端运行已有压测，菜单选择 Qwen3.6-35B-A3B。第一次完整 workload 用作预热，保留记录，再运行同一命令两次作测量；不启用 profiler：
+
+```bash
+FLUSH_CACHE=1 BENCH_ROOT="$PWD/artifacts/mamba-clear-off" bash llm/bench_serving.sh
+```
+
+完成并手动停止基线服务后，保持相同分支和路由配置，只将清零开关改为 `1`：
+
+```bash
+SGLANG_NPU_W4A8_MOE_FUSE_ROUTING_QUANT=0 \
+SGLANG_NPU_MAMBA_CLEAR_USE_INDEX_COPY=1 \
+    bash llm/qwen3.5_moe_online_w4a8.sh 6 7
+# 服务就绪后在另一终端运行；同样预热一次、测量两次。
+FLUSH_CACHE=1 BENCH_ROOT="$PWD/artifacts/mamba-clear-on" bash llm/bench_serving.sh
+```
+
+回传实际服务 SHA、两项开关打印值，以及测量轮末尾的吞吐 / TTFT / TPOT / ITL 摘要；无需原始 trace 或逐请求结果。若无 profiler 的服务吞吐改善不明显，再用已有 profile 工具确认清零算子和调用频次，不能将单算子加速倍数直接外推为服务收益。
+
 ### 2. 双卡真实服务 profile
 
 仍用现有启动脚本，用户手动选择、更新并重启目标分支。下面采集器必须在服务所在机器运行；两次服务模型、TP、数据集、并发一致，**依次启动 BF16 和 W4A8 服务，不同时占用同一组卡**。采集会清空 prefix cache；不要与其他压测或 profiler 同时运行。

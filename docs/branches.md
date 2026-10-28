@@ -16,6 +16,7 @@
 | [SGLang #32745](https://github.com/sgl-project/sglang/pull/32745) | `junlin_qwen3.5_dense_w8a8` | `c89095b6e5` | `sglang/qwen3.5_dense_w8a8/` |
 | [SGLang #40419](https://github.com/sgl-project/sglang/pull/40419) | `junlin_npu_mamba_ssm_dtype` | `756dac5a66` | `sglang/npu_mamba_ssm_dtype/` |
 | [SGLang #43739](https://github.com/sgl-project/sglang/pull/43739)（原 [#32601](https://github.com/sgl-project/sglang/pull/32601)） | `junlin_qwen3.5_moe_w4a8` | `bacf338c55` | `sglang/qwen3.5_moe_w4a8/` |
+| NPU Mamba 清零验证（基于 #43739，无 PR） | `junlin/npu-mamba-clear-index-copy` | `40d36cccc1` | `sglang/npu_mamba_clear_index_copy/` |
 | [SGLang #32602](https://github.com/sgl-project/sglang/pull/32602) | `junlin_qwen3.5_moe_w4a4` | `9c40660a60` | `sglang/qwen3.5_moe_w4a4/` |
 | [SGLang #43740](https://github.com/sgl-project/sglang/pull/43740)（原 [#34387](https://github.com/sgl-project/sglang/pull/34387)） | `junlin_a5_fia_mixed_split` | `01bb8dc685` | `sglang/a5_fia_mixed_split/` |
 | G2.1：Dense W4A8 公共执行 | `junlin/w4a8-shared-execution` | `24e100f1e8` | `sglang/w4a8_shared_execution/` |

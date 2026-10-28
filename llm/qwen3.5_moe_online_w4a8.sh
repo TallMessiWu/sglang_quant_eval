@@ -3,15 +3,23 @@
 # 用法: $0 [-f|--force] [NPU_ID ... | all]
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 source "$SCRIPT_DIR/common/npu-launch.sh" || exit $?
-# 显式做路由 A/B 时检查已安装的 SGLang，避免旧版本静默忽略开关。
-if [[ -n "${SGLANG_NPU_W4A8_MOE_FUSE_ROUTING_QUANT+x}" ]]; then
+# 显式做 A/B 时检查已安装的 SGLang，避免旧版本静默忽略开关。
+if [[ -n "${SGLANG_NPU_W4A8_MOE_FUSE_ROUTING_QUANT+x}${SGLANG_NPU_MAMBA_CLEAR_USE_INDEX_COPY+x}" ]]; then
     python3 - <<'PY' || exit $?
+import os
+
 from sglang.srt.environ import envs
 
-option = getattr(envs, "SGLANG_NPU_W4A8_MOE_FUSE_ROUTING_QUANT", None)
-if option is None:
-    raise SystemExit("当前 SGLang 不支持路由 A/B 开关，请先更新所选 W4A8 分支并确认安装路径。")
-print(f"W4A8 TP routing quantization fusion={option.get()} (resolved at server startup)")
+for name in (
+    "SGLANG_NPU_W4A8_MOE_FUSE_ROUTING_QUANT",
+    "SGLANG_NPU_MAMBA_CLEAR_USE_INDEX_COPY",
+):
+    if name not in os.environ:
+        continue
+    option = getattr(envs, name, None)
+    if option is None:
+        raise SystemExit(f"当前 SGLang 不支持 {name}，请先选择对应验证分支并确认安装路径。")
+    print(f"{name}={option.get()} (set before server startup)")
 PY
 fi
 npu_prepare_launch 1 "$@" || exit $?

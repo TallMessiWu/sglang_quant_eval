@@ -37,7 +37,7 @@ MAX_CONCURRENCY=16 NUM_PROMPTS=100 VLLM_PORT=7979 ./llm/bench_serving.sh
 ./llm/bench_serving.sh --help
 ```
 
-`SERVER_HOST`、`DATASET_PATH` 可覆盖地址和数据集；`NO_COLOR=1` 关闭强调/淡化效果。结果默认写入**执行时当前目录**的 `artifacts/bench-serving/<时间戳>-<随机后缀>/`，包含 `bench.log`、`results.jsonl`，临时文件与 tokenizer 缓存也位于该目录下；`BENCH_ROOT` 可改结果根目录。压测进程失败时脚本保留非零退出码。脚本需要交互终端，不依赖额外 TUI 工具。
+`SERVER_HOST`、`DATASET_PATH` 可覆盖地址和数据集；`NO_COLOR=1` 关闭强调/淡化效果。`FLUSH_CACHE=1` 在每次压测前清空服务 prefix cache，默认 `0` 保持原行为；用于 A/B 时两组取值应一致。结果默认写入**执行时当前目录**的 `artifacts/bench-serving/<时间戳>-<随机后缀>/`，包含 `bench.log`、`results.jsonl`，临时文件与 tokenizer 缓存也位于该目录下；`BENCH_ROOT` 可改结果根目录。压测进程失败时脚本保留非零退出码。脚本需要交互终端，不依赖额外 TUI 工具。
 
 隔离菜单回归（真实 PTY、模拟 benchmark，不访问模型服务）：
 
@@ -232,6 +232,23 @@ ASCEND_RT_VISIBLE_DEVICES=6 python3 llm/diagnostics/mxfp4_perf_probe.py \
 
 **本次探针将 MoE finalize 从旧默认 `drop_pad_mode=0` 对齐为生产普通 TP 使用的 `2`**，在 runtime 行记录 `finalize_drop_pad_mode`。加上 section/token 选择影响 RNG 推进，新旧批次的绝对耗时不能直接归因于 C；比较本次同 fixture 的 A/B/C，检查 U16→64 是否稳定。
 
+### 1b. 同版本 W4A8 服务路由 A/B
+
+目标仍为已有 `junlin_qwen3.5_moe_w4a8`，或其 `junlin_qwen3.5_moe_w4a8_pr36426` 组合分支；由用户在服务器对应 checkout 手动更新并确认当前安装指向它。两组必须使用同一个新 SHA。`SGLANG_NPU_W4A8_MOE_FUSE_ROUTING_QUANT` 在权重加载时解析，默认 `1` 为当前融合路径 A，`0` 为先路由再量化的 B，需要重启服务。它覆盖普通 TP 的 prefill/decode，不按 batch 自动切换；FP4 权重、GMM1/SwiGLU/requant 融合、GMM2、GDN 共享量化和 DeepEP 模式配置保持原契约。它是对照开关，尚未声明 B 在服务端更快。
+
+```bash
+# A：先启动服务；显式设开关时，启动器会检查安装的 SGLang 是否支持它。
+SGLANG_NPU_W4A8_MOE_FUSE_ROUTING_QUANT=1 bash llm/qwen3.5_moe_online_w4a8.sh 6 7
+# 服务就绪后在另一终端运行，菜单选 Qwen3.6-35B-A3B。
+FLUSH_CACHE=1 BENCH_ROOT="$PWD/artifacts/w4a8-route-a" bash llm/bench_serving.sh
+
+# 完成 A 并手动停止服务后，启动 B；同样等待服务就绪再压测。
+SGLANG_NPU_W4A8_MOE_FUSE_ROUTING_QUANT=0 bash llm/qwen3.5_moe_online_w4a8.sh 6 7
+FLUSH_CACHE=1 BENCH_ROOT="$PWD/artifacts/w4a8-route-b" bash llm/bench_serving.sh
+```
+
+同一服务可重复运行压测命令三次；两组使用相同模型、TP、数据集、并发 32、500 请求，原生 benchmark 默认 seed=42。不启用 profiler；每次清空 prefix cache，结果写入独立目录。回传两组末尾的吞吐、TTFT、TPOT、ITL（含尾延迟）摘要及实际服务 SHA，不必传逐请求记录。此 A/B 先判断真实服务收益；模型精度仍需单独验证。
+
 ### 2. 双卡真实服务 profile
 
 仍用现有启动脚本，用户手动选择、更新并重启目标分支。下面采集器必须在服务所在机器运行；两次服务模型、TP、数据集、并发一致，**依次启动 BF16 和 W4A8 服务，不同时占用同一组卡**。采集会清空 prefix cache；不要与其他压测或 profiler 同时运行。
@@ -261,6 +278,15 @@ python3 llm/diagnostics/summarize_npu_profile.py ./artifacts/npu-profile/实际�
 摘要使用 `kernel_details.csv` 按采集窗口、设备分别汇总算子类型、次数、累计耗时和前 6 项；不会再从 trace 重复累计 kernel。`name_hints_ms` 仅按算子名分类，融合算子的耗时不拆分。`CANN_ms` 来自 `step_trace_time.csv` 的 Computing、Communication、Communication(Not Overlapped)、Overlapped 等字段（原始单位 µs，摘要转为 ms），这些列不能相加；缺少时明确显示通信覆盖未知。字段依据 [torch_npu CSV 定义](https://github.com/Ascend/pytorch/blob/master/torch_npu/profiler/analysis/prof_common_func/_csv_headers.py)和 [step 时间导出实现](https://github.com/Ascend/pytorch/blob/master/torch_npu/profiler/analysis/prof_view/_trace_step_time_parser.py)。
 
 NPU 原生目录名未必包含 TP rank 或阶段，脚本流式读取 `trace_view.json`（也支持 `.gz`），只根据显式 `step[EXTEND/DECODE ...]` 标记报告阶段及 batch/token 范围；没有标记就显示 `unknown`。设备编号不当作 TP rank，也不按目录排序猜阶段。`summary.json` 保留完整聚合结果和本地来源映射；若文本标记 `omitted>0`，可追加 `--capture C01` 等参数只打印某一窗口。没有有效 kernel CSV 或部分 kernel CSV 解析失败时退出非零，保留短诊断，不需要先传原始文件。
+
+摘要 v2 将 `gating_delta_rule` 正确归入 GDN，并把 `HcclLaunchAicpuKernel` 单列为 `comm_launch`；其耗时不等于 collective 完成耗时。存在 HCCL 事件但 CANN Communication 为零时明确提示口径不足，不能推断通信免费。可直接读取旧导出的 CSV，查看至多三个指定算子的 input shape/dtype、调用次数、平均/最小/最大耗时，结果打印到终端并保存在 `summary-detail.txt`：
+
+```bash
+python3 llm/diagnostics/summarize_npu_profile.py ./artifacts/npu-profile/实际运行目录 \
+    --capture C01 --operators IndexFill MoeInitRoutingV3
+```
+
+每个算子最多打印耗时最高的六组 shape，超出部分保留在本地 JSON；shape 只来自 CSV，不根据模型配置补猜。仅需要某个算子时在 `--operators` 后只传它的名字。此命令不访问服务、不重新运行 profiler。
 
 原生 serving benchmark 未请求 `record_shapes`，当前服务默认关闭它；trace 不保证包含输入 shape 或明确的 graph 命中标记，不从缺失字段推断 batch 或未命中原因。摘要只是 profile 窗口的算子累计耗时，重叠 stream/rank 不可相加当作 wall time；短窗口也不保证捕获 P95/P99 对应的慢步骤。只凭微基准不决定修改生产路径。
 

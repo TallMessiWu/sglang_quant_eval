@@ -16,6 +16,7 @@ usage() {
   DATASET_PATH     默认 /mnt/share/dataset/ShareGPT_V3_unfiltered_cleaned_split.json
   MAX_CONCURRENCY  并发数，默认 32
   NUM_PROMPTS      请求数，默认 500
+  FLUSH_CACHE      设为 1 时在压测前清空服务 prefix cache，默认 0
   BENCH_ROOT       结果目录，默认 当前工作目录/artifacts/bench-serving
   NO_COLOR         非空时不强调模型名或淡化路径
 
@@ -31,6 +32,13 @@ if (( $# )); then
     usage >&2
     exit 2
 fi
+
+cache_args=()
+case ${FLUSH_CACHE:-0} in
+    0) ;;
+    1) cache_args+=(--flush-cache) ;;
+    *) printf 'FLUSH_CACHE 只支持 0 或 1。\n' >&2; exit 2 ;;
+esac
 
 script_dir=$(dirname "$(readlink -f "$0")")
 model_paths=()
@@ -128,5 +136,6 @@ python3 -m sglang.bench_serving \
     --tokenizer "$tokenizer" \
     --max-concurrency "${MAX_CONCURRENCY:-32}" \
     --num-prompts "${NUM_PROMPTS:-500}" \
+    "${cache_args[@]}" \
     --output-file "$run_dir/results.jsonl" \
     2>&1 | tee "$run_dir/bench.log"

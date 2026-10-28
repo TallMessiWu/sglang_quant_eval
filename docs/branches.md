@@ -4,7 +4,7 @@
 
 <a id="current-branch-map"></a>
 
-## 当前分支定位（2026-10-22 全表；10-23 更新 W4A4）
+## 当前分支定位（2026-10-22 全表；10-23 更新 W4A4；10-28 更新 W4A8 路由对照）
 
 2026-10-22 全表核对真实 worktree 注册表、本地 HEAD、remote 和 GitHub PR head；10-23 单独更新 #32602，并确认 W4A8 正式/组合分支未变。表中 HEAD 均为本地 checkout；#44365 与 GitHub 的差异、#32745 与 kernel 的正式合入提交见表后说明。原验收分支与新 PR 发布分支分别保留；当前状态会漂移，操作前仍须实时查询。
 
@@ -15,7 +15,7 @@
 | [kernel #638](https://github.com/sgl-project/sgl-kernel-npu/pull/638) | `codex/a5-gemma-rmsnorm-csrc` | `4a4f838e8f` | `sgl-kernel-npu/` |
 | [SGLang #32745](https://github.com/sgl-project/sglang/pull/32745) | `junlin_qwen3.5_dense_w8a8` | `c89095b6e5` | `sglang/qwen3.5_dense_w8a8/` |
 | [SGLang #40419](https://github.com/sgl-project/sglang/pull/40419) | `junlin_npu_mamba_ssm_dtype` | `756dac5a66` | `sglang/npu_mamba_ssm_dtype/` |
-| [SGLang #43739](https://github.com/sgl-project/sglang/pull/43739)（原 [#32601](https://github.com/sgl-project/sglang/pull/32601)） | `junlin_qwen3.5_moe_w4a8` | `493372ce8f` | `sglang/qwen3.5_moe_w4a8/` |
+| [SGLang #43739](https://github.com/sgl-project/sglang/pull/43739)（原 [#32601](https://github.com/sgl-project/sglang/pull/32601)） | `junlin_qwen3.5_moe_w4a8` | `bacf338c55` | `sglang/qwen3.5_moe_w4a8/` |
 | [SGLang #32602](https://github.com/sgl-project/sglang/pull/32602) | `junlin_qwen3.5_moe_w4a4` | `9c40660a60` | `sglang/qwen3.5_moe_w4a4/` |
 | [SGLang #43740](https://github.com/sgl-project/sglang/pull/43740)（原 [#34387](https://github.com/sgl-project/sglang/pull/34387)） | `junlin_a5_fia_mixed_split` | `01bb8dc685` | `sglang/a5_fia_mixed_split/` |
 | G2.1：Dense W4A8 公共执行 | `junlin/w4a8-shared-execution` | `24e100f1e8` | `sglang/w4a8_shared_execution/` |
@@ -28,7 +28,7 @@
 | [SGLang #44365](https://github.com/sgl-project/sglang/pull/44365)：G2.2 发布 | `junlin/pr-diffusion-mxfp8-shared-execution` | `4cfdf3d543` | `sglang/pr_diffusion_mxfp8_shared_execution/` |
 | [SGLang #44366](https://github.com/sgl-project/sglang/pull/44366)：G2.3 发布 | `junlin/pr-ascend-mxfp-capabilities` | `9f9aa27254` | `sglang/pr_ascend_mxfp_capabilities/` |
 | [SGLang #45550](https://github.com/sgl-project/sglang/pull/45550)：#32041 自动 FA 路由续作 | `junlin/diffusion-mxfp8-fa-auto-selection` | `ceace1a8d3` | `sglang/diffusion_mxfp8_fa_auto_selection/` |
-| #43739 + #36426 组合验证（无 PR） | `junlin_qwen3.5_moe_w4a8_pr36426` | `52809fabf1` | `sglang/qwen3.5_moe_w4a8_pr36426/` |
+| #43739 + #36426 组合验证（无 PR） | `junlin_qwen3.5_moe_w4a8_pr36426` | `00e216bb88` | `sglang/qwen3.5_moe_w4a8_pr36426/` |
 | 旧 ModelSlim / 视觉塔分支（#32266） | `junlin_qwen3.5_moe_w8a8` | `3d72a9dc00` | `sglang/qwen3.5_moe_w8a8/` |
 | MoE LoRA 实验（无 PR） | `junlin-ascend-moe-lora` | `bc9a4d0753` | `sglang/ascend_moe_lora/` |
 | 本轮 main 只读参考（非自动跟随） | `upstream-main` | `3d508d614f` | `sglang/upstream-main/` |
@@ -38,6 +38,7 @@
 - #32745 于 2026-10-21 14:50:39（Asia/Shanghai）由源 head `c89095b6e5` squash 为 [`844d2b5dec`](https://github.com/sgl-project/sglang/commit/844d2b5decf6257aa192744cbdaaffb8ad797263)。合入后首轮 GitHub 查询时官方 `main` 即此提交，compare 为 `identical`；后续 #45550 使用重新 fetch 的 main，基线见下。源分支与正式 squash 提交分别保留；下游同步 main 后按内容核对并去除重复增量，不再将原源 head 作为待合入前置。
 - 2026-10-22：#43739 与 #45550 共同同步 `upstream/main@3d508d614f28d2c35da2fdafe422c9bfe454c1b8`，普通 merge / push 后本地、origin 与 GitHub head 一致，ahead/behind 均 `0 0`。#43739 为 `493372ce8fee4d8f69dd3d482cf711d840ce2bd7`：冲突采用 main 的已合入 Gemma/MXFP8 实现，并去掉旧 registry 及无关 ModelSlim GDN/视觉塔增量，最终相对 main 为 7 文件；#45550 为 `ceace1a8d392efb0f3719c3a405e6470d4d5ea59`，仍仅 3 文件自动 FA 路由增量，未叠加 #44365。验证与待真机范围见[计划](mxfp-refactoring-plan.md#refactoring-status)，证据在 `.pi/pr-ready-20261022/`。
 - 2026-10-23：按用户要求将 #32602 从 W4A8 功能栈拆出。原 worktree 普通 merge `upstream/main@904691e0b5dc4516c5bc9771874d03dd0cadb470`，去掉继承的在线 W4A8、旧 Gemma 和无关 ModelSlim 增量，独立 W4A4 相对 main 仅 8 文件。新 head `9c40660a609dab64476f72d0d8f939eeadecfdaa` 已普通推送，本地/origin/GitHub SHA 一致，ahead/behind `0 0`；历史提交保留但不再构成源码/合入前置，未强推。#43739 `493372ce8f` 及其 #36426 组合 `52809fabf1` 的 HEAD 和工作区均未变；未新建 PR/worktree。验证与依赖见[计划](mxfp-refactoring-plan.md#refactoring-status)，证据在 `.pi/w4a4-independent-20261023/`。
+- 2026-10-28：#43739 在原分支增加普通 TP 路由量化对照开关 `SGLANG_NPU_W4A8_MOE_FUSE_ROUTING_QUANT`，默认保持融合，仅显式 `0` 使用路由后量化。正式 head `bacf338c556f92db35460c6d2f68fc205783cb28`；组合分支同轮普通 merge/push 至 `00e216bb88bdc0562071fef44b3a4daef0b35119`，本地与 GitHub SHA 一致。两分支各通过 17 项隔离 CPU 契约测试，尚未执行新开关的 NPU 服务 A/B 或模型精度验收；命令见 [LLM 诊断说明](../llm/README.md#1b-同版本-w4a8-服务路由-ab)，证据在 `.pi/w4a8-route-serving-20261028/`。未同步新 main，未发布性能结果。
 - #45550 初次发布基于 `f7b8c6fe40`，功能提交 `79dba73be8` 仅延续 #32041 的自动 FA 选择，未复制已由 #39438 合入的 kernel。原作者 `hxhhhlalala <hyh_hh@163.com>` 的 co-author 保留；原 PR、署名与初次隔离测试证据在 `.pi/pr32041-continuation/`。
 - kernel 正式合入证据：#638 于 2026-10-16 15:16:44（Asia/Shanghai）squash 为 [`684b4c4036`](https://github.com/sgl-project/sgl-kernel-npu/commit/684b4c40361d38dd60fd888a5f5e2e224cab0c7a)，#824 于 15:16:53 squash 为 [`e1ef758b22`](https://github.com/sgl-project/sgl-kernel-npu/commit/e1ef758b2262f0b3edd886306a1951d457bafd00)。2026-10-16 查询时官方 `main` 为后者，GitHub compare 确认包含前者；2026-10-21 复核两项合入记录不变。主子模块仍保留 #638 源 head；#824 源分支/worktree 已清理，正式 squash 提交仍在 main。PR 状态和下一步见[合入计划](mxfp-refactoring-plan.md#pr-merge-status)。
 - 已清理的 kernel `main-638-824@e629e45a51` 是 2026-10-09 固定组合，未跟随后续 PR head。后续构建使用包含正式合入的官方 main，而非该旧组合；历史 26 项 CPU provider/build-target 测试不等于 wheel 或 NPU 通过。构建说明见 [kernel 文档](sgl-kernel-npu-build.md)。

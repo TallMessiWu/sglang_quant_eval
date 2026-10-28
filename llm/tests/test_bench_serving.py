@@ -58,6 +58,7 @@ class BenchServingTests(unittest.TestCase):
             "DATASET_PATH",
             "MAX_CONCURRENCY",
             "NUM_PROMPTS",
+            "FLUSH_CACHE",
             "BENCH_ROOT",
             "NO_COLOR",
             "BASH_ENV",
@@ -183,6 +184,16 @@ class BenchServingTests(unittest.TestCase):
                 self.assertEqual(code, 0, text)
                 args = self.args()
                 self.assertEqual(args[args.index("--tokenizer") + 1], expected)
+
+    def test_flush_cache_is_opt_in_without_enabling_profiler(self):
+        code, text = self.interactive(b"\r", {"FLUSH_CACHE": "1"})
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.args().count("--flush-cache"), 1)
+        self.assertNotIn("--profile", self.args())
+        self.env["FLUSH_CACHE"] = "bad"
+        result = self.noninteractive()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("FLUSH_CACHE", result.stdout)
 
     def test_overrides_and_no_color_preserve_argument_boundaries(self):
         dataset = str(self.root / "data with spaces.json")

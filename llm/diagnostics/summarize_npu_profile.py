@@ -153,10 +153,11 @@ def category(name):
     """Name hints only; fused operator time remains indivisible."""
     name = re.sub(r"[^a-z0-9]", "", name.lower())
     for label, words in (
+        ("comm_launch", ("hccllaunch",)),
         ("comm", ("hccl", "hcom", "allreduce", "allgather", "reducescatter")),
         ("gmm", ("groupedmatmul", "groupmatmul", "gmm")),
         ("attention", ("attention",)),
-        ("gdn/conv", ("gateddelta", "deltanet", "gdn", "causalconv")),
+        ("gdn/conv", ("gateddelta", "deltarule", "deltanet", "gdn", "causalconv")),
         ("linear", ("matmul", "gemm")),
         ("route", ("moeinit", "moefinal", "moedispatch", "moecombine")),
         ("quant", ("quant",)),
@@ -190,7 +191,7 @@ def read_steps(directory):
     ], "step_labels" if steps else "no_step_labels"
 
 
-def read_capture(path, capture_id, root):
+def read_capture(path, capture_id, root, operators=()):
     capture = {
         "id": capture_id,
         "source": str(path.relative_to(root)),
@@ -215,6 +216,18 @@ def read_capture(path, capture_id, root):
             stats["rows"] += 1
             shape = (row.get("Input Shapes") or "").strip()
             stats["shape_rows"] += shape.lower() not in ("", "n/a", "na", "none", "--")
+            if name in operators:
+                # No tensor values or stacks. Keep raw shape strings in the
+                # local JSON, and bound their length in the copyable report.
+                signature = json.dumps([shape, row.get("Input Data Types") or ""])
+                detail = op.setdefault("shapes", {}).setdefault(
+                    signature,
+                    {"count": 0, "us": 0.0, "min_us": duration, "max_us": duration},
+                )
+                detail["count"] += 1
+                detail["us"] += duration
+                detail["min_us"] = min(detail["min_us"], duration)
+                detail["max_us"] = max(detail["max_us"], duration)
     try:
         capture["steps"], capture["phase_evidence"] = read_steps(path.parent)
     except (ValueError, OSError, EOFError) as error:
@@ -270,26 +283,27 @@ def server_settings(value):
     return result
 
 
-def collect(root):
+def collect(root, operators=()):
     metadata = {}
     if (root / "metadata.json").is_file():
         metadata = json.loads((root / "metadata.json").read_text())
     trace_root = root / "traces" if (root / "traces").is_dir() else root
     paths = sorted(trace_root.rglob("kernel_details.csv"))
     result = {
-        "version": 1,
+        "version": 2,
         "label": compact(metadata.get("label", "unknown"), 12),
         "server_revision": compact(
             metadata.get("reported_server_revision") or "unknown", 40
         ),
         "settings": server_settings(metadata.get("server", {})),
+        "operators": list(operators),
         "captures": [],
         "errors": [],
     }
     for index, path in enumerate(paths, 1):
         capture_id = f"C{index:02d}"
         try:
-            capture = read_capture(path, capture_id, root)
+            capture = read_capture(path, capture_id, root, operators)
             if not capture["devices"]:
                 raise ValueError("Empty kernel export")
             result["captures"].append(capture)
@@ -305,7 +319,7 @@ def collect(root):
 
 def render(result, capture_id=None):
     lines = [
-        "=== NPU PROFILE SUMMARY v1 ===",
+        "=== NPU PROFILE SUMMARY v2 ===",
         f"label={result['label']} server_revision={result['server_revision']}",
         "settings="
         + json.dumps(result["settings"], sort_keys=True, separators=(",", ":")),
@@ -313,6 +327,9 @@ def render(result, capture_id=None):
         "Each capture/device is separate; device ID is NOT a TP rank. Phase uses step labels only.",
         "Short profiled windows do not establish P95/P99 causes or model accuracy.",
     ]
+    operators = result.get("operators", [])
+    if operators:
+        lines.append("Operator detail filter: " + ", ".join(operators))
     omitted = 0
     shown = 0
     for capture in result["captures"]:
@@ -350,16 +367,41 @@ def render(result, capture_id=None):
                 if cann
                 else "  CANN_ms: unavailable (communication coverage unknown)"
             )
+            if cann.get("comm") == 0 and (
+                categories["comm"] or categories["comm_launch"]
+            ):
+                block.append(
+                    "  CANN comm=0 with HCCL events: communication duration is not established."
+                )
             block.append(
                 f"  input_shape_rows={stats['shape_rows']}/{stats['rows']}; top types: count sum_ms share avg_us"
             )
             ordered = sorted(stats["ops"].items(), key=lambda x: (-x[1]["us"], x[0]))
+            if operators:
+                ordered = [(name, op) for name, op in ordered if name in operators]
+                if not ordered:
+                    block.append("  No matching operator types in this capture/device.")
             for name, op in ordered[:TOP_OPS]:
                 fraction = op["us"] / total if total else 0
                 block.append(
                     f"  {compact(name, 64)}: {op['count']} {op['us'] / 1000:.3f}"
                     f" {fraction:.1%} {op['us'] / op['count']:.2f}"
                 )
+                shapes = sorted(op.get("shapes", {}).items(), key=lambda x: -x[1]["us"])
+                for signature, detail in shapes[:6]:
+                    shape, dtype = json.loads(signature)
+                    block.append(
+                        f"    shape={compact(shape or 'unknown', 160)} dtype={compact(dtype or 'unknown', 60)}"
+                    )
+                    block.append(
+                        f"    count={detail['count']} sum_ms={detail['us'] / 1000:.3f}"
+                        f" avg_us={detail['us'] / detail['count']:.2f}"
+                        f" min_us={detail['min_us']:.2f} max_us={detail['max_us']:.2f}"
+                    )
+                if len(shapes) > 6:
+                    block.append(
+                        f"    remaining_shape_groups={len(shapes) - 6} (kept in local JSON)"
+                    )
             if len(ordered) > TOP_OPS:
                 rest = ordered[TOP_OPS:]
                 block.append(
@@ -390,8 +432,8 @@ def render(result, capture_id=None):
     return "\n".join(lines) + "\n"
 
 
-def write_summary(root):
-    result = collect(root)
+def write_summary(root, operators=()):
+    result = collect(root, operators)
     text = render(result)
     (root / "summary.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
     (root / "summary.txt").write_text(text, encoding="utf-8")
@@ -402,11 +444,22 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", type=Path, help="Existing profile run directory")
     parser.add_argument("--capture", help="Print only this capture, e.g. C01")
+    parser.add_argument(
+        "--operators",
+        nargs="+",
+        default=[],
+        help="Show shape/dtype and duration ranges for up to three exact operator types",
+    )
     args = parser.parse_args()
+    if len(args.operators) > 3 or any(len(op) > 100 for op in args.operators):
+        parser.error("Select at most three operator types, each at most 100 characters")
     try:
         root = args.directory.resolve(strict=True)
-        result, text = write_summary(root)
-        print(render(result, args.capture) if args.capture else text, end="")
+        result, text = write_summary(root, args.operators)
+        selected = render(result, args.capture) if args.capture else text
+        if args.operators or args.capture:
+            (root / "summary-detail.txt").write_text(selected, encoding="utf-8")
+        print(selected, end="")
         if args.capture and not any(
             c["id"] == args.capture for c in result["captures"]
         ):

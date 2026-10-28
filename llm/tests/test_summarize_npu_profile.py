@@ -44,6 +44,47 @@ def kernel(device="6", name="GroupedMatmul", duration="100"):
 
 
 class TestNpuSummary(unittest.TestCase):
+    def test_gdn_and_hccl_launch_are_not_misclassified(self):
+        self.assertEqual(
+            SUMMARY.category("_fused_sigmoid_gating_delta_rule_update_decode_kernel"),
+            "gdn/conv",
+        )
+        self.assertEqual(SUMMARY.category("HcclLaunchAicpuKernel"), "comm_launch")
+        self.assertEqual(SUMMARY.category("hcom_allReduce_AicpuKernel"), "comm")
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            root = Path(directory)
+            export(
+                root,
+                [kernel(name="HcclLaunchAicpuKernel")],
+                steps=[
+                    {"Device_id": "6", "Computing": "100", "Communication": "0"},
+                ],
+            )
+            text = SUMMARY.render(SUMMARY.collect(root))
+            self.assertIn("communication duration is not established", text)
+
+    def test_selected_operator_shapes_keep_counts_and_duration_units(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            root = Path(directory)
+            rows = [kernel(name="IndexFill", duration=v) for v in ("100", "300", "50")]
+            rows[2]["Input Shapes"] = "30,1024,128,128;1"
+            export(
+                root / "one", rows + [kernel(name="MoeInitRoutingV3", duration="1000")]
+            )
+            result = SUMMARY.collect(root, operators=["IndexFill"])
+            text = SUMMARY.render(result, "C01")
+            self.assertIn("IndexFill: 3 0.450", text)
+            self.assertIn(
+                "count=2 sum_ms=0.400 avg_us=200.00 min_us=100.00 max_us=300.00", text
+            )
+            self.assertIn("shape=30,1024,128,128;1", text)
+            self.assertNotIn("MoeInitRoutingV3:", text)
+            self.assertNotIn(
+                "shapes",
+                result["captures"][0]["devices"]["6"]["ops"]["MoeInitRoutingV3"],
+            )
+            self.assertLessEqual(len(text), SUMMARY.MAX_TEXT)
+
     def test_native_exports_stay_separate_and_do_not_double_count_trace(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as directory:
             root = Path(directory)

@@ -249,6 +249,27 @@ FLUSH_CACHE=1 BENCH_ROOT="$PWD/artifacts/w4a8-route-b" bash llm/bench_serving.sh
 
 同一服务可重复运行压测命令三次；两组使用相同模型、TP、数据集、并发 32、500 请求，原生 benchmark 默认 seed=42。不启用 profiler；每次清空 prefix cache，结果写入独立目录。回传两组末尾的吞吐、TTFT、TPOT、ITL（含尾延迟）摘要及实际服务 SHA，不必传逐请求记录。此 A/B 先判断真实服务收益；模型精度仍需单独验证。
 
+若首轮出现明显漂移，保留这轮记录，并在两组中各用一次完整 workload 预热后再比较。`--flush-cache` 清的是 prefix cache，不代表清空编译缓存或重置运行时。按 A→B 顺序跑的差异可能混入预热、缓存或时间漂移；需要归因时再回到 A 复测，不能把首次慢轮直接算成优化收益。
+
+### 1c. Mamba/GDN 状态池清零探针
+
+`MambaPool.clear_slots()` 在普通 NPU 路径对连续的 `[layers, capacity, ...]` conv/temporal 池执行 `index_fill_(1, indices, 0)`。下面的独立脚本固定选中槽位数量，改变池容量，并比较原始调用、dim=1 `index_copy_` 写零、展平成 `[layers * capacity, features]` 后的 dim=0 `index_copy_` 写零。后两项是待测候选，不会替换已安装的 SGLang 实现。
+
+```bash
+# 不导入 torch_npu、不分配 NPU 内存，先查看形状和内存预算。
+python3 llm/diagnostics/npu_mamba_clear_probe.py --dry-run
+
+# 停止占用卡 6 的服务，或换成一张空闲卡。脚本不清理其他进程。
+ASCEND_RT_VISIBLE_DEVICES=6 python3 llm/diagnostics/npu_mamba_clear_probe.py \
+    --device 0 --capacities 874 1583 --counts 2 13 17
+```
+
+默认复现 30 层、BF16 temporal `[16,128,128]` 和 conv `[3,4096]` 的每槽位形状；capacity 是实际 tensor 第二维（含 padding），不是直接传给服务器的 `--max-mamba-cache-size`。最大单池约 23.2 GiB，串行分配各个池；分配前检查空闲显存，另预留零张量和至少 2 GiB 余量。默认单池上限 24 GiB，可用 `--max-pool-gib` 显式调整。
+
+每个候选、容量和槽位数量在计时外逐块检查整个池：选中槽位清零，其他元素保持原值。NPU 检查使用全一哨兵；CPU 回归另覆盖非均匀状态、空索引、重复和乱序索引、边界槽位、多层步长及索引更新。检查失败立即退出，不能把失败路径当性能结果。候选计时包含零张量分配/初始化、索引 dtype 转换和展平索引计算；不预先缓存零张量，不复制完整池。使用已有 eager event/wall 计时器，预热后交替候选顺序，默认每轮 20 次、重复 3 轮。
+
+结果及临时/缓存目录位于当前目录 `artifacts/npu-mamba-clear/<唯一运行目录>/`。只回传终端 `=== NPU MAMBA CLEAR SUMMARY v1 ===` 到结尾之间的短表（默认不足 3000 字符），或 `summary.txt`；原始计时保存在本地 `results.jsonl`。出现错误时先贴终端的短错误，完整 traceback 在该目录的 `error.log`。这是单算子、单卡 eager 探针，不覆盖真实状态生命周期、模型精度、graph 或服务吞吐。
+
 ### 2. 双卡真实服务 profile
 
 仍用现有启动脚本，用户手动选择、更新并重启目标分支。下面采集器必须在服务所在机器运行；两次服务模型、TP、数据集、并发一致，**依次启动 BF16 和 W4A8 服务，不同时占用同一组卡**。采集会清空 prefix cache；不要与其他压测或 profiler 同时运行。

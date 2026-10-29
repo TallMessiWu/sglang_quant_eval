@@ -34,6 +34,19 @@ def fixture():
 
 
 class ServingTailTests(unittest.TestCase):
+    def test_live_scheduler_list_does_not_lose_pool_capacity(self):
+        info = {
+            "max_mamba_cache_size": None,
+            "internal_states": [
+                {"max_mamba_cache_size": 1582, "api_key": "private"},
+                {"max_mamba_cache_size": 1580},
+            ],
+        }
+        self.assertEqual(
+            SUMMARY.selected_settings(info),
+            {"max_mamba_cache_size": [None, 1582, 1580]},
+        )
+
     def timeline_fixture(self):
         record = fixture()
         record["stall_trace"] = {

@@ -37,6 +37,9 @@ def selected_settings(info):
     found = {}
 
     def visit(node):
+        if isinstance(node, list):
+            for item in node:
+                visit(item)
         if not isinstance(node, dict):
             return
         for key, value in node.items():
@@ -44,7 +47,7 @@ def selected_settings(info):
                 values = found.setdefault(key, [])
                 if value not in values:
                     values.append(value)
-            elif isinstance(value, dict):
+            elif isinstance(value, (dict, list)):
                 visit(value)
 
     visit(info)

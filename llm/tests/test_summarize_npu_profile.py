@@ -44,6 +44,37 @@ def kernel(device="6", name="GroupedMatmul", duration="100"):
 
 
 class TestNpuSummary(unittest.TestCase):
+    def test_preserves_startup_and_resolved_scheduler_settings(self):
+        self.assertEqual(
+            SUMMARY.server_settings(
+                {
+                    "max_mamba_cache_size": None,
+                    "internal_states": [
+                        {"max_mamba_cache_size": 873},
+                        {"max_mamba_cache_size": 1582},
+                    ],
+                }
+            ),
+            {"max_mamba_cache_size": [None, 873, 1582]},
+        )
+
+    def test_all_shapes_keeps_every_operator_without_trace_payload(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            root = Path(directory)
+            export(root, [kernel(name="IndexFill"), kernel(name="GroupedMatmul")])
+            result = SUMMARY.collect(root, operators=["*"])
+            ops = result["captures"][0]["devices"]["6"]["ops"]
+            self.assertEqual(set(ops), {"IndexFill", "GroupedMatmul"})
+            self.assertTrue(all("shapes" in op for op in ops.values()))
+            self.assertIn("GroupedMatmul:", SUMMARY.render(result))
+            result, text = SUMMARY.write_summary(root, all_shapes=True)
+            self.assertIn(
+                "shapes", result["captures"][0]["devices"]["6"]["ops"]["GroupedMatmul"]
+            )
+            self.assertNotIn(
+                "    shape=", text
+            )  # All shapes go to JSON, not a truncated text report.
+
     def test_gdn_and_hccl_launch_are_not_misclassified(self):
         self.assertEqual(
             SUMMARY.category("_fused_sigmoid_gating_delta_rule_update_decode_kernel"),

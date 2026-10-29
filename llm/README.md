@@ -161,7 +161,42 @@ python3 llm/diagnostics/recurrent_gated_delta_rule_check.py --dry-run
 
 ## W4A8 性能瓶颈诊断
 
-先做算子级 A/B，再用真实服务 profile 确认占比。两者都只是内部诊断，**不能把微基准或开启 profiler 的吞吐当作正式 benchmark**；脚本不会更新 PR、修改 SGLang、切分支、安装依赖或设置 PYTHONPATH。
+机时有限时，优先下面的一轮服务采集，再按 trace 定位是否需要算子级 A/B；不要默认重跑本节所有探针。两者都只是内部诊断，**不能把微基准或开启 profiler 的吞吐当作正式 benchmark**；脚本不会更新 PR、修改 SGLang、切分支、安装依赖或设置 PYTHONPATH。
+
+### 0. 一轮 BF16 / W4A8 性能取证
+
+适用于“W4A8 的普通 token 间隔更短，但 TTFT / 长尾抵消吞吐收益”的情况。继续使用普通 `qwen3.5_moe_bf16.sh`、`qwen3.5_moe_online_w4a8.sh`；两组必须在**同一个 SGLang SHA、同一组卡、TP2、相同模型及依赖环境**下依次启动，不同时运行。保留原 graph、prefill、池预算和路由设置，不叠加实验清零分支或同时更改多个配置。在线权重量化只在加载期执行；推理期的 MXFP8 激活量化、路由、状态管理需要分别检查。
+
+服务启动时建议两组都设置 `SGLANG_PROFILE_RECORD_SHAPES=1 SGLANG_PROFILE_WITH_STACK=0`，只影响之后的 profiler；不打开环境变量全量公开。服务已启动时，客户端设置这些变量不会改变服务端。保持自己的临时/缓存/日志目录在当前工作目录下，正常启动器不自动管理它们。等待服务就绪后，在**同一机器、同一 Python 环境**运行：
+
+```bash
+# BF16 服务就绪后，在仓库根目录执行。
+python3 llm/diagnostics/npu_profile_serving.py --diagnose \
+    --label bf16 --model-path /mnt/share/weight/Qwen3.6-35B-A3B \
+    --output-dir "$PWD/artifacts/w4a8-investigation/bf16"
+
+# 手动停止 BF16，沿用普通在线 W4A8 启动器启动并等待就绪，再执行。
+python3 llm/diagnostics/npu_profile_serving.py --diagnose \
+    --label w4a8 --model-path /mnt/share/weight/Qwen3.6-35B-A3B \
+    --output-dir "$PWD/artifacts/w4a8-investigation/w4a8"
+```
+
+`--server-url` 默认 `http://127.0.0.1:6969`；`--server-revision <实际服务SHA>` 可补充绑定版本。采集器记录客户端实际导入源码的 SHA/hash、torch/torch_npu/kernel wheel/Transformers 版本、可读 CANN version.info、配置和数据集 hash，以及采集前后的 `npu-smi info`，**不把客户端环境冒充运行中的服务环境**。请一并确认服务器实际 SHA；不要只根据本地分支名判断版本。
+
+每个服务只运行以下一组，默认并发 32、seed=42，各次均清 prefix cache：
+
+| 顺序 | 请求 | 用途 |
+| --- | --- | --- |
+| 1 | 64 条，1024 输入 / 1 输出 token，无 profiler | prefill 偏重负载；包含调度、状态清零等，并非纯 GEMM |
+| 2 | 32 条，128 输入 / 256 输出 token，无 profiler | 尽量减少中途新请求 prefill 的 decode 偏重负载；不保证每步 batch 都为 32 |
+| 3 | 原 ShareGPT 500 条，无 profiler，保留逐请求明细 | 绑定配置的原工作负载及尾延迟；不是三轮统计的替代品 |
+| 4 | ShareGPT 前 128 条，prefill/decode 各目标 5 步 profile | 区分路由、激活量化、GMM、GDN、IndexFill、通信等；实际覆盖以 trace 为准 |
+
+短负载使用数据集文本构造固定长度 **token ID**，避免 decode/re-encode 改变长度；不评估文本质量。native benchmark 仍执行自己的短预热，本轮没有再强制完整 500 请求预热，**因此不以此单轮宣布性能提升**。预算为每个服务一次完整 benchmark 加短负载/profile，另有 profiler 导出开销，不需要先跑全套微基准。`--num-prompts` 只改变 ShareGPT 请求量，`--profile-prompts` 默认将 profile 限到 128；不要为两组设置不同值。
+
+**回传两组各自的 `report.txt` 和 `report.json`，以及实际服务 SHA。** JSON 包含筛选后的 startup / scheduler 配置（含池容量、graph、内存占用）、短摘要和所有算子的 shape/dtype/次数/耗时；保留 scheduler 列表和冲突值，不以启动参数中的 `null` 替代实际容量，也不猜 TP rank。不存在的 shape/服务端环境变量仍是未知；数据路径/源码路径保留用于版本核对。报告不包含生成文本、API key、原始启动命令；原始逐请求 JSONL、trace 和日志留在服务器，不需要传出。
+
+输出目录必须不存在，失败时保留部分报告并非零退出；不要删除旧证据后覆盖。`--dry-run` 可零 NPU 开销查看完整命令计划。无 profiler 的每个 case 默认最多 600 秒，可用 `--case-timeout` 调整；超时中止整轮，不自动重试或清理服务。profile 故障仍按已有采集器的清理规则处理。需要确认请求已结束后才能运行下一轮。
 
 ### 1. 单 rank 算子探针
 
@@ -405,7 +440,7 @@ python3 llm/diagnostics/summarize_npu_profile.py ./artifacts/npu-profile/实际�
 
 每个算子最多打印耗时最高的六组 shape，超出部分保留在本地 JSON；shape 只来自 CSV，不根据模型配置补猜。仅需要某个算子时在 `--operators` 后只传它的名字。此命令不访问服务、不重新运行 profiler。
 
-原生 serving benchmark 未请求 `record_shapes`，当前服务默认关闭它；trace 不保证包含输入 shape 或明确的 graph 命中标记，不从缺失字段推断 batch 或未命中原因。摘要只是 profile 窗口的算子累计耗时，重叠 stream/rank 不可相加当作 wall time；短窗口也不保证捕获 P95/P99 对应的慢步骤。只凭微基准不决定修改生产路径。
+原生 serving benchmark 不显式传 `record_shapes`；当前 #43739 的 tokenizer control 默认按 `SGLANG_PROFILE_RECORD_SHAPES` 开启形状记录，显式关闭及不同服务版本仍可能缺失。建议启动前设为 `1`，并设 `SGLANG_PROFILE_WITH_STACK=0` 减小采集开销；客户端变量不能改变已运行的服务。trace 不保证包含输入 shape 或明确的 graph 命中标记，不从缺失字段推断 batch 或未命中原因。摘要只是 profile 窗口的算子累计耗时，重叠 stream/rank 不可相加当作 wall time；短窗口也不保证捕获 P95/P99 对应的慢步骤。只凭微基准不决定修改生产路径。
 
 CPU/模拟边界回归（不执行 NPU）：
 

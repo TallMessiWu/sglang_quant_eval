@@ -37,6 +37,14 @@ SETTINGS = {
     "max_running_requests",
     "max_total_tokens",
     "mem_fraction_static",
+    "max_mamba_cache_size",
+    "mamba_full_memory_ratio",
+    "max_total_num_tokens",
+    "effective_max_running_requests_per_dp",
+    "disable_radix_cache",
+    "SGLANG_NPU_W4A8_MOE_FUSE_ROUTING_QUANT",
+    "SGLANG_NPU_MAMBA_CLEAR_USE_INDEX_COPY",
+    "SGLANG_MAMBA_SSM_DTYPE",
 }
 # These torch_npu step_trace_time.csv columns are in microseconds, including
 # versions whose column names have no unit suffix. They are NOT additive.
@@ -216,7 +224,7 @@ def read_capture(path, capture_id, root, operators=()):
             stats["rows"] += 1
             shape = (row.get("Input Shapes") or "").strip()
             stats["shape_rows"] += shape.lower() not in ("", "n/a", "na", "none", "--")
-            if name in operators:
+            if name in operators or "*" in operators:
                 # No tensor values or stacks. Keep raw shape strings in the
                 # local JSON, and bound their length in the copyable report.
                 signature = json.dumps([shape, row.get("Input Data Types") or ""])
@@ -266,21 +274,30 @@ def read_capture(path, capture_id, root, operators=()):
 
 
 def server_settings(value):
-    result = {}
-    if isinstance(value, dict):
-        for key, child in value.items():
-            if key in SETTINGS and (
-                child is None or isinstance(child, (str, int, float, bool))
-            ):
-                result[key] = (
-                    child if not isinstance(child, str) else compact(child, 48)
-                )
-            elif isinstance(child, (dict, list)):
-                result.update(server_settings(child))
-    elif isinstance(value, list):
-        for child in value:
-            result.update(server_settings(child))
-    return result
+    # Startup defaults and resolved scheduler values may differ. Do not silently
+    # overwrite one DP entry with another; exact paths remain in metadata.json.
+    found = {}
+
+    def visit(node):
+        if isinstance(node, dict):
+            for key, child in node.items():
+                if key in SETTINGS and (
+                    child is None or isinstance(child, (str, int, float, bool))
+                ):
+                    item = compact(child, 48) if isinstance(child, str) else child
+                    values = found.setdefault(key, [])
+                    if item not in values:
+                        values.append(item)
+                elif isinstance(child, (dict, list)):
+                    visit(child)
+        elif isinstance(node, list):
+            for child in node:
+                visit(child)
+
+    visit(value)
+    return {
+        key: values[0] if len(values) == 1 else values for key, values in found.items()
+    }
 
 
 def collect(root, operators=()):
@@ -377,7 +394,7 @@ def render(result, capture_id=None):
                 f"  input_shape_rows={stats['shape_rows']}/{stats['rows']}; top types: count sum_ms share avg_us"
             )
             ordered = sorted(stats["ops"].items(), key=lambda x: (-x[1]["us"], x[0]))
-            if operators:
+            if operators and "*" not in operators:
                 ordered = [(name, op) for name, op in ordered if name in operators]
                 if not ordered:
                     block.append("  No matching operator types in this capture/device.")
@@ -387,7 +404,10 @@ def render(result, capture_id=None):
                     f"  {compact(name, 64)}: {op['count']} {op['us'] / 1000:.3f}"
                     f" {fraction:.1%} {op['us'] / op['count']:.2f}"
                 )
-                shapes = sorted(op.get("shapes", {}).items(), key=lambda x: -x[1]["us"])
+                shapes = sorted(
+                    op.get("shapes", {}).items() if operators else (),
+                    key=lambda x: -x[1]["us"],
+                )
                 for signature, detail in shapes[:6]:
                     shape, dtype = json.loads(signature)
                     block.append(
@@ -432,8 +452,9 @@ def render(result, capture_id=None):
     return "\n".join(lines) + "\n"
 
 
-def write_summary(root, operators=()):
-    result = collect(root, operators)
+def write_summary(root, operators=(), *, all_shapes=False):
+    result = collect(root, ["*"] if all_shapes else operators)
+    result["operators"] = list(operators)
     text = render(result)
     (root / "summary.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
     (root / "summary.txt").write_text(text, encoding="utf-8")

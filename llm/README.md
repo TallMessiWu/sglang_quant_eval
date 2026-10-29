@@ -198,6 +198,21 @@ python3 llm/diagnostics/npu_profile_serving.py --diagnose \
 
 输出目录必须不存在，失败时保留部分报告并非零退出；不要删除旧证据后覆盖。`--dry-run` 可零 NPU 开销查看完整命令计划。无 profiler 的每个 case 默认最多 600 秒，可用 `--case-timeout` 调整；超时中止整轮，不自动重试或清理服务。profile 故障仍按已有采集器的清理规则处理。需要确认请求已结束后才能运行下一轮。
 
+### 0a. 固定 Mamba 池容量的对照
+
+`qwen3.5_moe_bf16.sh` 与 `qwen3.5_moe_online_w4a8.sh` 支持 `EXTRA_ARGS`，与 Dense 入口一样按空白分词，不执行 shell 表达式；默认不附加任何参数。用于控制池容量时，需区分 Mamba 槽位容量和 KV token 容量：只缩小 Mamba 池可能让自动规划把显存再分配给 KV 池，不能把这当作其余配置完全不变。
+
+例如，W4A8 对照组实际 Mamba 容量为 1582、KV 容量为 2828544，想只将 Mamba 降到 872 时，显式保留 **W4A8 自己的 KV 容量**，而不是同时换成 BF16 的 KV 容量。启动前设置如下两项，再沿用普通在线启动器和原卡号：
+
+```bash
+export SGLANG_NPU_W4A8_MOE_FUSE_ROUTING_QUANT=1
+export EXTRA_ARGS="--max-mamba-cache-size 872 --max-total-tokens 2828544"
+```
+
+这些数值仅为已观测池规模的对照示例，不是默认值或所有模型的推荐配置。保持模型、TP、graph、prefill、state dtype、软件版本和并发不变；路由保持原融合路径 `1`，**不要同轮再切为 `0` 或启用实验清零实现**。较小 Mamba 池也可能改变 prefix cache 驻留、有效并发上限和空闲显存，测量后需核对实际 `server_info`，不能将全部收益都算作某个 kernel 的加速。
+
+新服务先跑一次完整 ShareGPT 预热，再测量一次：两次均用 `OUTPUT_DETAILS=1 FLUSH_CACHE=1` 运行原 `llm/bench_serving.sh`，不启用 profiler。只需回传测量轮短摘要；已有的 BF16 和算子 profile 不必为此重跑。该配置是待验证的性能候选，不代表已完成吞吐或长尾验收。完成对照后 `unset EXTRA_ARGS SGLANG_NPU_W4A8_MOE_FUSE_ROUTING_QUANT` 可恢复启动器默认行为，已经运行的服务必须重启才会改变。
+
 ### 1. 单 rank 算子探针
 
 在与服务相同、已包含 GDN 共享输入改动的 Python/SGLang 环境运行。探针要求在线 W4A8 方法提供 `prepare_input`，并记录真实导入的源码来源。`--model-path` **只读取 config.json，不读取 checkpoint 权重**，从实际 Qwen GDN/MoE 配置推导形状；合成 BF16 输入/权重，FP4 权重使用安装环境里的生产方法准备，转换在计时之外。当前面向普通 SwiGLU、EP=1、attention TP 与 MoE TP 相同的配置；不模拟 DP/EP、LoRA 或自定义激活。

@@ -746,6 +746,38 @@ class NpuCleanerTests(unittest.TestCase):
                     self.assertEqual(self.contents(self.kill_log), "")
                 self.assertEqual(model_paths[0], model_paths[1])
 
+    def test_moe_bf16_and_w4a8_forward_explicit_cache_budget(self):
+        extra = "--max-mamba-cache-size 872 --max-total-tokens 2828544"
+        for name in ("qwen3.5_moe_bf16.sh", "qwen3.5_moe_online_w4a8.sh"):
+            for value in ("", extra):
+                with self.subTest(script=name, extra=value):
+                    result = self.run_script(
+                        LLM_DIR / name, args=("6", "7"),
+                        overrides={"TEST_SMI_ROWS": "", "EXTRA_ARGS": value},
+                    )
+                    self.assertEqual(result.returncode, 0, result.stdout)
+                    launch = self.contents(self.launch_log)
+                    self.assertIn("--tp 2", launch)
+                    self.assertEqual("--quantization mxfp_w4a8" in launch, "online" in name)
+                    if value:
+                        self.assertIn(extra, launch)
+                    else:
+                        self.assertNotIn("--max-mamba-cache-size", launch)
+                        self.assertNotIn("--max-total-tokens", launch)
+                    self.assertEqual(self.contents(self.kill_log), "")
+
+    def test_moe_extra_args_are_not_shell_code_or_globs(self):
+        marker = self.root / "must-not-be-created"
+        extra = f"--dummy * $(touch {marker})"
+        for name in ("qwen3.5_moe_bf16.sh", "qwen3.5_moe_online_w4a8.sh"):
+            with self.subTest(script=name):
+                result = self.run_script(
+                    LLM_DIR / name, args=(), overrides={"EXTRA_ARGS": extra}
+                )
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertIn(extra, self.contents(self.launch_log))
+                self.assertFalse(marker.exists())
+
     def test_dense_online_explicit_model_path_is_preserved(self):
         result = self.run_script(LLM_DIR / "qwen3.5_dense_online_w4a8.sh", args=())
         self.assertEqual(result.returncode, 0, result.stdout)

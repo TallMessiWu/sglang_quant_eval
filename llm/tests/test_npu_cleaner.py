@@ -6,6 +6,7 @@ from pathlib import Path
 import pty
 import select
 import subprocess
+import sys
 import tempfile
 import termios
 import time
@@ -136,6 +137,10 @@ class NpuCleanerTests(unittest.TestCase):
         for name in (
             "SUDO_UID", "MTP", "EXTRA_ARGS", "SGLANG_MAMBA_SSM_DTYPE",
             "SGLANG_DIFFUSION_ENABLE_MXFP8_ATTENTION",
+            "SGLANG_NPU_W4A8_MOE_FUSE_ROUTING_QUANT",
+            "SGLANG_NPU_W4A8_MOE_UNFUSED_ROUTING_MIN_TOKENS",
+            "SGLANG_NPU_MAMBA_CLEAR_USE_INDEX_COPY",
+            "SGLANG_NPU_MAMBA_CLEAR_TRACE",
         ):
             self.env.pop(name, None)
         self.env.update(
@@ -745,6 +750,48 @@ class NpuCleanerTests(unittest.TestCase):
                     model_paths.append(launch[launch.index("--model-path") + 1])
                     self.assertEqual(self.contents(self.kill_log), "")
                 self.assertEqual(model_paths[0], model_paths[1])
+
+    def test_moe_routing_threshold_preflight(self):
+        name = "SGLANG_NPU_W4A8_MOE_UNFUSED_ROUTING_MIN_TOKENS"
+        stub = self.root / "preflight"
+        package = stub / "sglang/srt"
+        package.mkdir(parents=True)
+        (stub / "sglang/__init__.py").write_text("")
+        (package / "__init__.py").write_text("")
+        (package / "environ.py").write_text(
+            "import os\nfrom types import SimpleNamespace\n"
+            "envs = SimpleNamespace()\n"
+            "if os.environ['TEST_THRESHOLD_SUPPORTED'] == '1':\n"
+            f"    setattr(envs, {name!r}, SimpleNamespace(get=lambda: int(os.environ[{name!r}])))\n"
+        )
+        self.mock(
+            "python3",
+            'if [[ "$1" == - ]]; then exec "$TEST_PYTHON" "$@"; fi\n'
+            'if [[ "$1" == -c ]]; then echo 8; exit 0; fi\nexit 2\n',
+        )
+        for supported, value, success in (
+            (True, "2048", True), (True, "0", True),
+            (False, "2048", False), (True, "-1", False), (True, "oops", False),
+        ):
+            with self.subTest(supported=supported, value=value):
+                result = self.run_script(
+                    LLM_DIR / "qwen3.5_moe_online_w4a8.sh", args=("6", "7"),
+                    overrides={
+                        name: value, "PYTHONPATH": str(stub),
+                        "TEST_PYTHON": sys.executable,
+                        "TEST_THRESHOLD_SUPPORTED": str(int(supported)),
+                        "TEST_SMI_ROWS": "",
+                    },
+                )
+                self.assertEqual(result.returncode == 0, success, result.stdout)
+                if success:
+                    self.assertIn(f"{name}={value}", result.stdout)
+                    self.assertIn("--tp 2", self.contents(self.launch_log))
+                else:
+                    self.assertIn(name, result.stdout)
+                    self.assertEqual(self.contents(self.launch_log), "")
+                    self.assertEqual(self.contents(self.query_log), "")
+                self.assertEqual(self.contents(self.kill_log), "")
 
     def test_moe_bf16_and_w4a8_forward_explicit_cache_budget(self):
         extra = "--max-mamba-cache-size 872 --max-total-tokens 2828544"

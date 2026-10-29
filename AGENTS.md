@@ -58,7 +58,8 @@
 ## 验证与结论边界
 
 - 日志、结果、临时文件与运行缓存一律写入执行命令的当前目录或其子目录；不要默认写 `/tmp`、`/root` 或其他系统盘目录。生成命令时显式设置输出路径及可配置的临时/缓存目录。
-- 用户运行已有实现时，优先沿用或补充 `diffusion/`、`llm/` 的普通启动脚本。服务器分支由用户手动选择；启动脚本不自动 fetch、切换分支、创建 worktree 或修改 PYTHONPATH。用户已选择跳过的数值对照不再作为启动前置，也不换成新的 smoke/验收框架。
+- 用户运行已有实现时，优先沿用或补充 `diffusion/`、`llm/` 的普通启动脚本。**给用户的 LLM 启动/压测/探针命令默认 cwd 为 `llm/`**，写 `bash ./bench_serving.sh` / `python3 diagnostics/...`，不从主仓根目录运行，以避开用户部署中同名 `sglang/` 的导入遮蔽。服务器分支由用户手动选择；启动脚本不自动 fetch、切换分支、创建 worktree 或修改 PYTHONPATH。用户已选择跳过的数值对照不再作为启动前置，也不换成新的 smoke/验收框架。
+- 用户手动启动命令保持最简，只给本次必要参数；沿用已有环境和脚本管理的输出/缓存，不再机械附加 TMPDIR/XDG/HF/TRITON/INDUCTOR/PYCACHE/Ascend 日志等整套 export。agent 自行执行的工具仍遵守当前目录内输出规则。性能实验先复用已有证据；换机器或软件栈后不得继续推荐旧微基准阈值，候选无净收益就停止，避免连续添加开关、扫参和重复整机压测。
 - 先确认目标 worktree、分支、diff 和用户已有改动；保留不相关的脏文件。
 - 优先做最小、可证伪验证。Python 语法、AST、shape probe 和 CPU 单测只能证明静态契约，不能表述为 A5/A2/A3 端到端通过。
 - NPU kernel/layout 变更需要对应硬件 probe；模型加载、warmup、文本/图片请求、精度和性能结论需要真实 e2e 日志。
@@ -78,7 +79,7 @@
 
 ## 文档入口
 
-- 重构目标 G1–G5、任务编号与验收进度：[目标跟踪表](docs/mxfp-refactoring-plan.md#refactoring-status)
+- 重构目标 G1–G6、任务编号与验收进度：[目标跟踪表](docs/mxfp-refactoring-plan.md#refactoring-status)
 - G2 原验收分支、现成权重与按需运行命令：[接手入口](docs/mxfp-refactoring-plan.md#g23-handoff)；PR 发布分支可能不同，操作前核对分支表。验收状态不复制到本文件。
 - PR 合入计划、新旧编号与合入情况：[PR 跟踪表](docs/mxfp-refactoring-plan.md#pr-merge-status)；前置与并行范围：[依赖说明](docs/mxfp-refactoring-plan.md#merge-dependencies)
 - PR / branch / worktree / remote 定位与历史记录：[docs/branches.md](docs/branches.md)

@@ -1,6 +1,6 @@
 # Ascend MXFP 重构目标与执行计划
 
-更新日期：2026-10-23（Asia/Shanghai；本次仅刷新 #32602 的独立化与依赖，其余 PR 全表状态仍为 10-22 快照）。本文是任务、验收与 PR 合入入口，无需依赖聊天历史。
+更新日期：2026-10-29（Asia/Shanghai；本次刷新 #43739 回退/同步与评审、GSM8K 用户反馈，新增 G6 性能优化归档；其余 PR 保留各自标注日期的快照）。本文是任务、验收与 PR 合入入口，无需依赖聊天历史。
 
 范围：SGLang Ascend SRT Dense / MoE × W8A8 / W4A8 / W4A4 × 在线 / 离线 ModelSlim，以及 Diffusion MXFP8 执行复用。CUDA / ROCm 和其他量化格式不在本计划的实现范围内。
 
@@ -11,7 +11,7 @@
 | branch / worktree / HEAD / remote | [branches.md](branches.md#current-branch-map) |
 | 稳定能力与代码路径 / 故障机制 | [quantization-overview.md](quantization-overview.md) / [known-pitfalls.md](known-pitfalls.md) |
 
-[2026-10-10 HTML 审阅](reports/mxfp-architecture-roadmap-2026-10-10.html)是基于 `e35f60b9bcb51045fd0602d8ed12cff8021c040f` 的历史快照；其中六个执行步骤、旧 PR 号和状态不替代本文 G1–G5 / G2.1–G2.3 编号。删除的中间过程从 Git 历史追溯，不另建重复状态表。
+[2026-10-10 HTML 审阅](reports/mxfp-architecture-roadmap-2026-10-10.html)是基于 `e35f60b9bcb51045fd0602d8ed12cff8021c040f` 的历史快照；其中六个执行步骤、旧 PR 号和状态不替代本文 G1–G6 / G2.1–G2.3 编号。删除的中间过程从 Git 历史追溯，不另建重复状态表。
 
 ## 1. 目标与职责边界
 
@@ -44,13 +44,14 @@ Config：格式、来源、层与策略
 | 编号 | 目标 / 任务 | 实现进度 | 验证与剩余验收 | 交付载体 / 合入跟踪 |
 | --- | --- | --- | --- | --- |
 | G1.1 | 修正 MXFP8 partial-scale 与布局边界 | SRT ModelSlim RowParallel 未对齐 TP 的 scale 切片与 W/X 补零已随 #32745 于 2026-10-21 合入；Diffusion loader 仍需单独核对 | 两分支各 6 项隔离 CPU 测试通过，含 K=4304、TP1/2/4/8 全部 rank；TP2 用户反馈见下，合入不补齐其他 TP 或新 head 的目标 NPU 验收 | #32745 已合入；分支与正式合入提交见 `branches.md` |
-| G1.2 | 补在线 MoE W4A8 / W4A4 与实际精度分配 | #43739 于 10-22 同步 main、收敛为 7 文件；#32602 于 10-23 单独同步 main、去掉 W4A8 增量并收敛为 8 文件，两项不再互为源码/合入前置 | #43739 原 25 项量化 + 21 项 Gemma 隔离 CPU 回归不变；独立 #32602 有 19 项 W4A4 + 13 项共享基线回归通过。两项当前 head 的模型加载、warmup、请求、RTN 精度与 TP/EP 仍待真机 | #32602 于 10-23 按用户授权转为 Ready for review、独立推进；W4A8 正式及组合分支未改动 |
+| G1.2 | 补在线 MoE W4A8 / W4A4 与实际精度分配 | #43739 按授权回退到 `3cdd018` 后合并最新 main，保留完成即量化、C 组参数及 post-load 修复；推理优化移出到 G6。#32602 保持独立 | 正式/组合各 49 项隔离 CPU 通过、7 项 CUDA 跳过；用户 GSM8K BF16/在线 W4A8 均 96.13，非新 head 复测。NPU 源缓冲释放/启动峰值证据仍缺；其他配置不扩写通过 | #43739 已强推刷新、组合普通 merge/push；权重策略评审已回复并 resolve，加载线程保留未完成验证，版本见 `branches.md` |
 | **G2.1** | **Dense W4A8 在线/离线公共执行** | **实现已发布 PR；原验收分支在线/离线功能通过** | 原 8 项 CPU/mock；新 PR 去除无关配置测试后 6 项通过。2026-10-14 用户确认在线/离线请求正常；在线视觉 27 个 fc2 保留 BF16 回退。新发布 head 尚无同场景真机通过证据，数值等价未测 | #44363；混精独立 #44364。原实现 `24e100f1e8`、离线验收载体 `2ef4c276be` |
 | **G2.2** | **Diffusion 离线 MXFP8 委托公共 kernel** | **实现已发布 PR；原验收分支图生视频功能通过** | 2026-10-14 用户确认 I2V 输出成功、视频观感正常；新 PR 3 项 CPU/mock 通过。新发布 head 尚无同场景真机通过证据；按用户要求跳过数值比较，独立 warmup、量化误差和性能未实测 | #44365；原实现 `6eb8e1dd1c`，发布定位见 `branches.md` |
 | **G2.3** | **Ascend MXFP 局部能力描述与提前校验** | **局部试点已发布 PR；原验收分支图生视频功能通过** | 17 条能力描述；原 14 项 CPU/mock，新 PR 15 项及叠加的 3 项 adapter 测试通过。用户确认原分支 I2V 正常；新组合 head 的同场景真机、其他能力、TP/EP/backend、数值与性能未验收 | #44366，依赖 #44365；原实现 `d6a46f90d9`，发布定位见 `branches.md` |
-| G3 | 权重生命周期与公共在线入口 | 待设计 / 实施，与公共框架工作协调 | 参数、元数据、重载语义明确；入口迁移兼容既有 CLI | 尚未拆出交付 PR |
+| G3 | 权重生命周期与公共在线入口 | 在线 W4A8 已在 #43739 接入完成度跟踪、懒分配和注册 loader 重载；公共在线入口与其他 scheme 仍待设计 | 14 项加载生命周期 CPU 隔离回归通过，覆盖 native TP/EP 分片、重复/缺失加载、源缓冲释放、重载与外层 post-load staging；NPU 内存及模型验收待完成 | W4A8 局部实现随 #43739，尚未拆出公共框架 PR |
 | G4 | 跨代际差异按契约归属收敛 | Gemma kernel provider 与 SGLang 配套均已合入，Gemma 源码切片交付完成；其他契约与硬件验收继续按需推进 | provider 可追溯；仍需对应构建 target、API 与部署 wheel 的验证；只在必要处引入运行时契约层 | kernel #638 + #32745 均已合入；状态见 PR 表 |
-| G5 | 模型、算子、并行与 CI 的硬件验收 | 持续工作 | G2.1 在线/离线、G2.2 / G2.3 图生视频均已有用户真机功能通过反馈；数值、性能、并行与其他能力覆盖仍分别记录 | 随各任务记录证据，CI 通过不替代实际硬件覆盖 |
+| G5 | 模型、算子、并行与 CI 的硬件验收 | 持续工作 | G2.1 在线/离线、G2.2 / G2.3 图生视频已有用户真机功能反馈；GSM8K BF16/在线 W4A8 均 96.13。数值、并行和其他能力覆盖分别记录 | 随各任务记录证据，CI 通过不替代实际硬件覆盖 |
+| G6 | W4A8 端到端性能优化（后续独立 PR） | **已归档，暂停实施**；路由融合/阈值、GDN 输入复用与探针保留为研究来源，不在 #43739 当前 diff 中 | 现有实验未证明稳定 serving 收益；旧/新软件栈路由排序和数值不同。恢复后以同机同栈的完整链路、服务收益及精度/显存边界验收，不以算子节省外推吞吐 | 尚未创建 PR；用户后续点名再建独立分支/worktree，归档 tag 见 `branches.md`；不阻塞 #43739 功能评审 |
 
 原分支的用户真机反馈只证明报告场景的功能结果；新 PR head 的 CPU/mock 或 lint 不能继承为 NPU 验收。PR 状态统一见第 5 节。
 
@@ -73,6 +74,32 @@ Config：格式、来源、层与策略
 **MoE + #36426 组合准备（2026-10-22）**：按用户授权新建独立 MoE W4A8 组合分支并普通推送，仅在最新 #43739 上叠加 #36426 的完整 4 文件补丁，正式 PR 分支不变；版本和清理记录见 [branches.md](branches.md#current-branch-map)。本轮正式分支基线及组合分支各 25 项量化回归通过；组合另有 21 项 Gemma 与 10 项 ModelSlim 名称解析隔离 CPU 检查通过。四个文件的 AST、Ruff、格式、isort 和 diff 检查通过，补丁 patch-id 与实时 PR 一致。标准入口仍在缺 `orjson` 时导入失败；无 NPU 加载/warmup/请求、精度或性能结果。用户可在新组合分支沿用 `llm/qwen3.5_moe_online_w4a8.sh` 测试；#36426 主要覆盖离线 ModelSlim 与视觉 INT8，尚未证明是在线 W4A8 的必要前置。组合结果不能直接当作未叠加 #36426 的正式 PR head 验收。证据在 `.pi/cleanup-moe-combo-20261022/`。
 
 **W4A4 独立化（2026-10-23）**：#32602 在原 worktree 普通 merge 最新 main，去掉继承的 W4A8 在线入口/config、W4A8 Dense bias 与无关 ModelSlim/旧 Gemma 增量；历史提交仍在，但相对 main 的 8 文件不再依赖 #43739。只修改 W4A4 kernel/在线入口、对应配置、runner 分流、Dense L0 scale 修复、必要的 NPU 算子延迟绑定及两份回归测试。公共 main 基线先通过 13 项隔离 CPU 回归，独立树随后通过 32 项（19 项 W4A4 + 同一组 13 项基线）；覆盖在线 BF16/FP16、离线 packed 不二次量化、W13/W2 layout/stride、BF16 dispatch、runner/backend、融合 FP4 dtype/group-list 与单级/双级 scale。保留 main 的 SiTU/自定义激活分流；W4A4 只在 ascend_tp 普通 SiLU 融合，`swiglu_limit` 仍拒绝。AST 对照确认 W4A8 kernel/Dense 定义与 main 一致，#43739 及其组合 HEAD/工作区未动。Ruff、格式、isort、codespell、语法、全仓注册与 diff 检查通过；标准入口仍因缺 `orjson` 在导入阶段失败。无新 NPU 模型/算子、精度、并行或性能结果。初次发布保留 Draft，同日用户授权后转为 Ready for review，并[回复 TamirBaydasov](https://github.com/sgl-project/sglang/pull/32602#issuecomment-6359951386)说明已可审阅、真机验证仍待完成；GitHub 状态及 `ready_for_review` 事件均已核实，未修改代码、标签或手动触发 CI。后续由用户手动选择该分支，沿用 `llm/qwen3.5_moe_online_w4a4.sh`。版本/发布见 `branches.md`，实现证据在 `.pi/w4a4-independent-20261023/`，同类 PR 检索与 Ready 操作证据在 `.pi/w4a4-ready-20261023/`。
+
+**FIA mixed split 同步（2026-10-23）**：#43740 普通 merge 最新 main，消除冲突并去掉已合入的旧 Gemma/MXFP8 增量，相对 main 保留 13 个 FIA runtime/test 文件。先跑旧 head 的 70 项 attention 基线，再跑合并后 73 项（含上游 MLA prefix 回归），新增 4 项 hybrid 分派测试后共 77 项通过；另有 10 项 batch/TBO 测试和 8 组 graph-policy 检查通过，覆盖 TP/DP、mixed/pure、开关及三种 mixed-mode 载体。均为真实定义配合 CPU/mock 的隔离检查；标准 SRT 入口因缺 `orjson` 无法收集。Ruff、格式、isort、codespell、AST、全仓测试注册和相对 main 的 diff 检查通过。保留上游 Mamba tracking、logical decode 优先级与 fused-KV API；未新增 NPU 算子、模型加载/warmup、精度或性能结果，历史硬件数据不继承到新 head。继续保留 Draft，用户后续可手动选择该分支并沿用 `llm/a5_fia_mixed_split_serve.sh` 与现有 benchmark；版本/发布见 `branches.md`，证据在 `.pi/pr43740-sync-20261023/`。
+
+**W4A8 评审修订（2026-10-26）**：按用户要求在 #43739 内完成加载改造，不延期到后续 PR。先保持原 FP4 参数，实现 meta 占位、native TP/EP loader 完成度跟踪、Linear/W13/W2 独立完成即量化、缓存旧 Parameter 的浮点 backing 释放及后加载检查/重载，33 项 CPU 隔离回归通过；第二提交仅将在线 W4A8 Linear/MoE 权重量化改为 `round_mode="rint", scale_alg=2, dst_type_max=7.25`，不改 MXFP8 激活、离线 packed 权重或 W4A4。最终正式/组合分支各 37 项 CPU 隔离回归及 Ruff hook、格式、isort、AST/diff 检查通过；标准测试入口仍缺 `orjson`，未执行真实 NPU 算子或模型。用户此前在 Ascend 950、Qwen3.6-35B-A3B 上的参数 probe 为 40/40 样本重建误差改善，汇总 NMSE 相对下降约 5.69%；样本含主干 29 个和 MTP 11 个，不能表述为整模型准确率提升。当前版本的加载峰值显存、Linear/GMM 数值、模型请求及 BF16/旧 W4A8/新 W4A8 精度对照仍待真机。两提交与组合版本见 `branches.md`，本地证据在 `.pi/pr43739-review-20261026/`。
+
+**W4A8 post-load NZ 恢复故障（2026-10-26）**：用户贴回 `llm/qwen3.5_moe_online_w4a8.sh` 的 Qwen3.5-35B-A3B / Ascend 950 日志，14/14 shards 加载结束后在 `post_load._restore_tensor` 的 `original_data.copy_` 报内部格式不支持；未提供服务器 SHA，不能据此认定完整加载/warmup 通过。源码显示 `DeviceConfig` 提供无 index 的 `npu`，而常驻权重为 `npu:0`，设备比较误入 staging/恢复拷贝；此前测试未穿过这层 context。最小修复在 staging 入口用零元素张量解析实际设备，不改 NZ transpose、C 组参数或脚本。新增 generic/在线 Linear/MoE 回归先失败再通过，正式与组合各 38 项量化 + 4 项 staging CPU 检查通过，7 项 CUDA 跳过；Ruff、格式、isort、AST/diff 与全仓注册检查通过。CPU 以禁止 `copy_` 模拟硬件约束，非 NPU 实测；相同服务的真机恢复、显存与精度仍待用户复测。版本见 `branches.md`，机制见 [已知陷阱](known-pitfalls.md#在线-w4a8-post-load-恢复-nz-权重时报-copy_-不支持)，证据在 `.pi/pr43739-post-load-20261026/`。
+
+**#43739 收敛与评审（2026-10-29）**：用户明确将性能工作另开 PR，本轮先归档。正式分支以 `3cdd018` 为恢复点合并新 main；没有文本冲突，修正上游 EPLB 测试 stand-in 对旧 `_weight_loader_physical` 的引用，接入本 PR 的 `_weight_loader_expert_ids`，保留上游全本地副本/弹性扩容 shared-slot 保护。回退基线 41 项隔离 CPU 通过、7 项 CUDA 跳过，合并后正式/组合各 49 项通过、7 项跳过；实际 loader/Parameter/metadata 定义配合隔离 serving 导入和 NPU mock。Ruff、format、isort、codespell、AST、全仓注册与 PR 相对 main 的 diff 检查通过；标准入口仍缺 `orjson`。合并上游带入的无关 Hunyuan CRLF 空白未顺手改动。两个评审线程分别核对：FP4 策略已明确且激活不混用，[回复并 resolve](https://github.com/sgl-project/sglang/pull/43739#discussion_r4410300363)；加载生命周期代码已完成，但评审明确要求的 NPU 源缓冲释放/启动峰值测量尚无记录，[回复后保持 unresolved](https://github.com/sgl-project/sglang/pull/43739#discussion_r4410300039)。峰值显存是加载评审剩余证据，不冒充已经完成，也不改成吞吐验收。PR 正文已按收敛后范围更新；源码、归档及远端证据统一见 `branches.md`，本地日志在 `.pi/pr43739-archive-20261029/`。
+
+**GSM8K 用户反馈（2026-10-29）**：用户报告 BF16 和在线 W4A8 都为 **96.13 分，所报精度下差值 0**。记录为对应场景的用户实测精度对照，不是本机运行；未附逐次 server SHA、原始报告、shot/prompt/采样配置，不自行补齐，也不能继承为回退合并后新 head 的验证。该结果已写入 PR 正文及权重策略评审回复。
+
+<a id="g6-performance-archive"></a>
+
+### G6：W4A8 性能优化归档（暂停，后续独立 PR）
+
+以下为历史证据，**不代表当前 #43739 的源码范围或待运行清单**。TP 路由融合/阈值、GDN 共享量化已从正式功能栈移出，当前没有这些实验环境变量；主仓探针保留，恢复实验需从归档创建独立 worktree 并适配届时上游，不能直接用新版正式分支运行旧算子入口。停止安排新 benchmark、缩池和 C 路径移植；性能提升不再由本次功能 PR 承担。
+
+**W4A8 推理优化（2026-10-27，已归档）**：按用户授权分两提交实现此前调用审查的两项候选。普通 Ascend TP 在共用 W4A8 MoE kernel 设置 `dispatcher_output_dtype=mxfp8`，路由直接输出 FP8/E8M0，GMM1 复用 scale；记录量化前 dtype，防止 FP16 输出退成 BF16，DeepEP normal BF16 / low-latency MXFP8 保持不变。该 MoE 共用路径覆盖在线/离线，未改 packed 权重、C 组参数或 W4A4。第二提交仅对 GDN 两个精确匹配的在线 W4A8 Linear 共享本次 forward 的 FP8 输入/scale；保留独立 module 调用、bias、输出 shape/dtype，不跨 forward 缓存；混合量化、LoRA、SP、离线方法、自定义子类及非 NPU 不启用复用。两项均先复现多余量化调用再修复，最终正式/组合各 53 项量化/路由/GDN + 4 项 staging CPU 隔离回归通过，7 项 CUDA 跳过；Ruff hook、格式、isort、全仓注册与 diff 检查通过。标准入口仍缺 `orjson`，未执行真实 NPU 算子、graph replay、模型或性能测试；调用数减少不是吞吐收益或数值等价证据。等待绑定服务器版本的新一批 BF16/W4A8 数据后再更新 PR 表格，不混入先前未绑定版本的单轮结果。版本见 `branches.md`，证据在 `.pi/w4a8-perf-optimizations-20261027/`。
+
+**W4A8 路由形状对照与候选（2026-10-29）**：证据来自用户回传，不是本机 NPU 实测。原服务报告中 W4A8 Mamba/KV 池为 1582/2828544，缩 Mamba 到 872 并保留 KV 后，500 请求吞吐从 645.69 到 636.55 tok/s，未显示整体收益；ITL P95/P99 略降但极端间隔增多，单轮不证明显著回退，不再推荐扫池容量。随后同一份微基准绑定正式源码 `bacf338c55`、主仓 `4ce3c37`、Ascend950DT_9574、CANN 9.1.0、torch_npu 2.10.0.post4，按 TP2 分片形状测一层合成 MoE（H=2048、256 专家、top-k=8、local intermediate=256）。M=32/512 的融合路径更快或接近；M=2048 两种专家分布的完整链路拆分后 stream 耗时下降 13.8%/19.9%，M=7240 下降 21.5%/21.6%，wall 方向一致；8 组融合/拆分输出 relative L2 与 max abs 均为 0。stream 时间含主机提交间隙；这些结果不包含 TP 通信、GDN、graph replay 或真实权重，约 0.202 的 W4/BF16 合成误差不等于模型准确率下降。
+
+据此新增 `SGLANG_NPU_W4A8_MOE_UNFUSED_ROUTING_MIN_TOKENS`，默认 `0` 保持现状；显式设 `2048` 时，普通 TP 对 top-k 展开前本地 M≥2048 使用浮点路由并在 GMM1 量化，小输入保留融合，原全局关闭开关仍优先。2048 只是已测收益起点，不宣称通用最优阈值；不改权重、dtype/group-list 契约、GDN 或 DeepEP，也不叠加清零实验。两分支各 14 项实际源码定义配合 CPU/mock 的隔离契约通过，覆盖在线/离线、FP16/BF16、边界、空输入、大→小恢复和不复用无效 scale，3 种故障注入均被检出；主仓 64 项启动器 + 11 项 benchmark 测试通过。适用 Ruff hook、格式、注册和 diff/AST 检查通过；标准 SGLang 入口仍缺 `orjson`，Mintlify 页面未构建。后续用户换机，报告 W4A8 启动前设融合 `1`、阈值 `2048`、Mamba/KV 上限 `872/2828544`，W4A8 后测 BF16，两组均完整预热一次、500 请求成功。W4A8/BF16 吞吐为 974.76/1020.71 tok/s（−4.50%）、中位 ITL 为 12.98/14.32 ms（−9.36%），但均值和部分高分位更差；最大 ITL 均小于 1 秒，旧机多秒停顿未重现。记录为用户场景功能反馈，不是本机实测或阈值开/关收益验证；实际 server SHA、resolved 容量和 `FLUSH_CACHE` 未附，不能与旧机数据拼接归因。BF16 若继承 `EXTRA_ARGS` 也会带容量约束，但不消费 W4A8 路由开关，KV 实际容量仍受 profile 限制。
+
+**同日新栈 A/B/C 结果与纠正**：用户探针绑定 `a9b402d916` / 主仓 `5fe3bc7`，3 个源码 hash 与本地一致；Ascend950DT_9582、torch_npu 2.10.0.post7、CANN 路径 9.2.0，区别于旧机 9574/post4/9.1。不能单独归因于某一组件升级。完整 eager 单 rank 链路中，融合 A / 拆分 B / 原始 token 先量化再路由 C 的 stream 中位数（ms）为：M=2048 uniform `0.309686/0.333433/0.310083`、skewed `0.261805/0.282258/0.264941`；M=7240 uniform `0.763212/0.883090/0.751281`、skewed `0.748289/0.872074/0.738800`。A 比 B 少 7.1–14.2%，直接否定在新栈继续推荐 2048；C 相比 A 在 2048 略慢、7240 仅快约 1.3–1.6%，暂不为此接入新路径。A 的 7240 uniform 一轮 wall=3.382 ms 而 stream=0.763 ms，保留异常，不据此定性环境故障。C 的 FP8/scale 路由字节检查全部通过，C/B 完整输出差异为 0；**A/B relative L2=0.036365–0.036728，max abs=0.048828–0.054688**，不能沿用旧环境的相同输出结论，也不能换算为模型准确率下降。检查为合成 eager，非 graph/model 精度验收。
+
+服务复测 `w4a8-measure/20261029-161911-uLD80u` 完成 500 请求、零失败，112.64 s / 966.85 tok/s（比前轮 W4 少 0.81%，相对此前 BF16 低 5.28%，后者缓存策略未独立确认）。resolved Mamba/KV 为 872/2828544、TP2、graph on、prefill 8192、mixed off；mem_fraction_static=0.7915993749999999。ITL median/P95/P99/max 为 13.00/169.91/186.25/1297.34 ms；29 个 >1 s 样本涉及 29 个请求，不等于 29 次独立服务停顿；无 >3 s 样本或时间线。摘要不能独立证明服务 SHA/路由开关，按用户重跑既有阈值 2048 命令记录，不冒充 C 服务验收。当时建议只恢复阈值 0；**用户随后决定先归档，故不再安排这轮复测，当前正式分支也已移除该开关**。未来 G6 恢复时先核对实际服务关键路径与新上游实现，再决定候选，不继续盲扫参数。旧 profile 的 BA 投影收益不支持作为首要修复，池容量也不再扫。用户明确命令默认 cwd 为 `llm/`，且不要整套缓存 export，已写入 AGENTS。新机摘要选录及分析在 `.pi/w4a8-profile-analysis/`，版本定位见 `branches.md`；本地证据目录非上游公开报告。
 
 服务器仍沿用 `llm/qwen3.5_moe_online_w4a8.sh` 与 `diffusion/i2v_offline_mxfp8.sh`，手动选择对应分支；后者设置 `SGLANG_DIFFUSION_ENABLE_MXFP8_ATTENTION=1` 且不显式指定 attention backend，必须看到 `Using MXFP8 quantized Ascend Flash Attention.` 并完成视频生成，不能把 fallback 后生成成功算成自动 MXFP8 FA 验收。MoE 需确认 W13/W2 packed 准备、加载/warmup、文本和图片请求；版本/依赖以服务器实际记录为准，尤其 Qwen-VL 的 Transformers 5.19.0 契约。
 
@@ -124,25 +151,26 @@ ASCEND_RT_VISIBLE_DEVICES=0 bash diffusion/i2v_offline_mxfp8.sh
 - **G3 生命周期**：明确 `创建 → 加载 → 准备 → 执行 → 重载/更新` 的权重、scale、bias、属性和所有者，避免双重 transpose 或旧 cache。与公共 loader 工作协调并兼容现有 CLI，不作为 G2 的隐式前置。
 - **G4 跨代际**：独立算子差异进入 kernel provider，跨组件表示才按需进入 DeviceOperator；Gemma 是已有切片，不强制每个量化方法增加框架。
 - **G5 证据**：按实际覆盖记录 SHA、硬件、kernel wheel/target、CANN/torch/torch_npu、checkpoint、TP/EP/backend、命令与日志。静态、CPU、NPU kernel、模型加载/warmup、请求、数值和性能是不同证据维度，不是每次任务都要重跑的固定清单。
+- **G6 性能**：只在用户恢复任务后推进独立 PR。先固定机器、软件栈、权重、TP、真实容量、graph/prefill 与缓存/预热策略，复用已归档证据；每项候选需完整调用链收益，再给出绑定 SHA 的 serving 吞吐/延迟、精度与峰值显存边界。只减少量化调用或 kernel 时间不算完成；无净收益即停止，不以改大并发或换机器掩盖原负载回退。
 
 ## 5. PR 合入计划
 
 <a id="pr-merge-status"></a>
 
-### 当前 PR 跟踪（2026-10-22 全表；10-23 更新 #32602）
+### 当前 PR 跟踪（2026-10-22 全表；10-23 更新 #32602 / #43740；10-29 更新 #43739）
 
-SGLang #32745 与 kernel #638 / #808 / #824 已合入并移出待合入队列，本计划剩余 **9 个活跃 SGLang PR**，其中 #43740 / #44366 为 Draft，#32602 已于 10-23 转为 Ready for review。保留原计划序号；序号不是合入顺序。所有 Open PR 均 `base=main`、`reviewDecision=REVIEW_REQUIRED`；10-22 的 #43740 仍 `CONFLICTING`，#32602 已于 10-23 独立化后复核为 `MERGEABLE / BLOCKED`；其余七项 10-22 无冲突，#43739 / #45550 当时最终复核均为 `MERGEABLE / BLOCKED`。无冲突不等于满足合入条件，CI 跳过不等于硬件通过；本表不是自动监控面板。
+SGLang #32745 与 kernel #638 / #808 / #824 已合入并移出待合入队列，本计划剩余 **9 个活跃 SGLang PR**，其中 #43740 / #44366 为 Draft，#32602 已于 10-23 转为 Ready for review。保留原计划序号；序号不是合入顺序。所有 Open PR 均 `base=main`、`reviewDecision=REVIEW_REQUIRED`；#43740 已于 10-23 同步 main、解除 10-22 的冲突，复核为 `MERGEABLE / BLOCKED`；#32602 于 10-23 独立化后同为 `MERGEABLE / BLOCKED`；其余七项 10-22 无冲突，#43739 / #45550 当时最终复核均为 `MERGEABLE / BLOCKED`；#43739 于 10-29 授权回退并合并最新 main 后复核为 `MERGEABLE / BLOCKED`，性能实验已移出。无冲突不等于满足合入条件，CI 跳过不等于硬件通过；本表不是自动监控面板。
 
 | 序号 | PR | 职责 | 状态 / Git 合并检查 | 当前 CI 与下一步 |
 | --- | --- | --- | --- | --- |
 | 1 | [kernel #638](https://github.com/sgl-project/sgl-kernel-npu/pull/638) | Gemma 稳定 API / 构建期 provider；G4 | Merged，2026-10-16 | 合入前检查通过，1 项跳过；#32745 的 kernel 源码前置已满足，部署仍需核对 target wheel |
-| 2 | [SGLang #32745](https://github.com/sgl-project/sglang/pull/32745) | Gemma API、MXFP8 partial-scale / TP 对齐；G1.1/G4 | Merged，2026-10-21 | 已移出队列；#43739 / #43740 的源码前置满足，下一步各自同步包含正式合入的 main |
+| 2 | [SGLang #32745](https://github.com/sgl-project/sglang/pull/32745) | Gemma API、MXFP8 partial-scale / TP 对齐；G1.1/G4 | Merged，2026-10-21 | 已移出队列；#43739 / #43740 均已同步包含正式合入的 main，源码前置满足 |
 | 3 | [SGLang #32041](https://github.com/sgl-project/sglang/pull/32041) | Wan2.2 MXFP8 Attention 历史实现 | Closed，未合并，2026-10-06 | 维护者明确因核心功能由 #39438 替代而关闭；剩余自动 FA 路由由 #45550 延续，不等于 G2.2 去重 |
 | 4 | [SGLang #40419](https://github.com/sgl-project/sglang/pull/40419) | speculative SSM/intermediate state BF16 | Open，非 Draft；MERGEABLE | lint 通过；缺 `run-ci` 阻断 CI；与已合入 kernel #808 配套，可独立推进 CI 与 review |
 | 5 | [kernel #808](https://github.com/sgl-project/sgl-kernel-npu/pull/808) | Ascend 950 recurrent GDN / BF16 断言 | Merged，2026-09-29 | 已移出队列，不在原 PR 继续追加 |
-| 6 | [SGLang #43739](https://github.com/sgl-project/sglang/pull/43739)（原 #32601） | 在线 MoE W4A8，复用 main GMM；G1.2 | Open，非 Draft；更新后无冲突 | 今日选定：已同步 main、去重至 7 文件并更新标题/正文；新标题检查与 lint 通过；新 gate 日志明确缺 `run-ci`。本地 46 项隔离 CPU 回归通过，等待用户真机与 review |
+| 6 | [SGLang #43739](https://github.com/sgl-project/sglang/pull/43739)（原 #32601） | 在线 MoE W4A8、加载生命周期与权重策略；G1.2 / G3 局部，性能另归 G6 | Open，非 Draft；MERGEABLE / BLOCKED（10-29） | 回退到性能改动前并合并 main；正式/组合各 49 项隔离 CPU 通过、7 项 CUDA 跳过。新 head lint/标题通过；NPU gate 日志确认缺 `run-ci`（run `40844207843`），硬件 job 跳过，未改标签/触发重跑。GSM8K 用户报告两组 96.13；权重策略线程已 resolve，加载线程保留 NPU 峰值证据待办 |
 | 7 | [SGLang #32602](https://github.com/sgl-project/sglang/pull/32602) | 在线 MoE W4A4 / 融合 GMM；G1.2 | Open，非 Draft；MERGEABLE / BLOCKED（10-23） | 独立 8 文件，不再等待 #43739；按用户授权转为 Ready for review。32 项隔离 CPU/mock、GitHub lint 与最新标题检查通过。历史 Draft gate 失败不代表转 Ready 后已跑硬件 CI，仍缺 `run-ci`；等待当前 head 真机与 review |
-| 8 | [SGLang #43740](https://github.com/sgl-project/sglang/pull/43740)（原 #34387） | Ascend 950 FIA mixed split | Open，Draft；CONFLICTING | 同步含 #32745 的 main 并保留 FIA 增量；旧 head lint 通过，Draft gate 阻断、缺 `run-ci`；可与两个 MoE PR 并行 |
+| 8 | [SGLang #43740](https://github.com/sgl-project/sglang/pull/43740)（原 #34387） | Ascend 950 FIA mixed split | Open，Draft；MERGEABLE / BLOCKED（10-23） | 已同步 main、去重为 13 文件，普通推送并更新正文；77 项 attention、10 项 batch/TBO 隔离测试及 8 组 graph-policy 检查通过。新 head lint 运行中，gate 日志明确因 Draft 阻断；仍无 `run-ci`，等待真机复测和 review |
 | 9 | [kernel #824](https://github.com/sgl-project/sgl-kernel-npu/pull/824) | cache location view 边界修复 | Merged，2026-10-16 | 合入前检查通过，1 项跳过；已移出队列，后续部署核对 wheel 包含此修复 |
 | 10 | [SGLang #44363](https://github.com/sgl-project/sglang/pull/44363) | G2.1 公共 W4A8 执行 | Open，非 Draft；MERGEABLE | lint / 标题通过；缺 `run-ci` 阻断 CI，可独立推进 CI 与 review |
 | 11 | [SGLang #44364](https://github.com/sgl-project/sglang/pull/44364) | Qwen3.5 Dense ModelSlim 混精 | Open，非 Draft；MERGEABLE | lint / 标题通过；缺 `run-ci` 阻断 CI，可独立推进 CI 与 review |
@@ -186,7 +214,7 @@ Diffusion 链：#44365 MXFP8 复用 ──→ #44366 能力校验（Draft）
 ```
 
 - **只剩 Diffusion 一条线性依赖链：#44365 → #44366。** #32602 已解除对 #43739 的源码/合入依赖，可独立审阅和验证；当前可并行推进的八个入口是 #43739、#32602、#44365、#43740、#40419、#44363、#44364、#45550。Draft 状态、CI 和真机验收仍分别满足；#44366 可提前审阅，正式合入仍等待 #44365。
-- **2026-10-22 用户选定 #43739 与 #45550 优先完成运行 ready**：两者已同步 main、普通推送，本地回归通过，接下来由用户真机执行并回传证据，再向 committer 请求 CI/review。#44365 仍值得优先跟进以解锁 #44366，但不混入本轮自动 FA 分支。#44363 / #44364 / #40419 可独立推进；#43740 仍需同步 main、解冲突与 Draft 就绪检查。
+- **2026-10-22 用户选定 #43739 与 #45550 优先完成运行 ready**：两者已同步 main、普通推送，本地回归通过，接下来由用户真机执行并回传证据，再向 committer 请求 CI/review。#44365 仍值得优先跟进以解锁 #44366，但不混入本轮自动 FA 分支。#44363 / #44364 / #40419 可独立推进；#43740 已于 10-23 同步 main 并解冲突，仍待真机复测与 Draft 就绪检查。
 - #638 / #824 与 #32745 均已合入，正式合入提交见 [branches.md](branches.md#current-branch-map)。部署仍需包含 #638 provider 的配套 target wheel；源码合入不等于 wheel 已发布、安装或完成目标硬件验收。#734 的重叠实现已包含在 #638，不重复叠加。
 - #43739 与独立 #32602 均已从 main 承接 #32745 正式合入内容；不再要求 W4A8 → W4A4 顺序。#32602 历史上包含旧 W4A8 提交，但净增量已经去除其在线功能；普通 merge/push 保留历史不等于保留功能依赖。后续两 PR 合入时核对公共 `quant.py` 的等价小改动并去重，不复制量化实现。继续保留 main 的 scale helper、激活/clamp、DeepEP 契约与单级/双级区别；#43740 同样直接从 main 承接已合入内容，无需等待任一 MoE PR。
 - #40419 保留 main 的 GDN backend/prefill，仅维护自己的 dtype 契约；它与 #44363 / #44364 / #44365 均可独立推进，无需等待整个 MoE/FIA 栈。#36426 保持组合验证用途。
@@ -198,6 +226,7 @@ Diffusion 链：#44365 MXFP8 复用 ──→ #44366 能力校验（Draft）
 
 每次只更新目标表、PR 表和分支定位中发生变化的部分，保留足以复核的 `日期 / SHA / 场景 / 证据 / 未测范围 / 下一步`。不再追加逐次命令、CI 计数或重复“尚未发布”的过程流水；完整历史用 Git 追溯。
 
+- **G6**：性能研究先归档，后续独立 PR；当前不再向用户追加性能测试，也不将已有负收益候选混回 #43739。恢复入口见[归档摘要](#g6-performance-archive)与 `branches.md` 的归档 tag。
 - **G2**：原分支功能验收已结束，四个 PR 已发布。后续依据 review、实际 CI 失败或新模型日志继续；用户跳过的数值/基线比较不重新设为前置。
 - **NPU Qwen-VL 预处理整理**：2026-10-13 用户要求暂缓，尚未恢复。后续如授权，评估复用 Transformers 分组、resize、rescale/normalize，仅保留 NPU 必要 patch/layout，图片与视频一起覆盖；不要把已合入的 #43309 再提一遍。
 - **证据更新**：新 head 的测试、日志、视频反馈各自绑定版本；用户反馈标明来源，不能写成本机 NPU 已执行或完整数值等价。

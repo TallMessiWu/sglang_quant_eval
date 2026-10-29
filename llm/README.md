@@ -14,15 +14,15 @@
 | `test_images/` | 多模态测试图片及生成器 | `curl.sh` 使用的测试素材 |
 | `llm_quant_descriptions/` | 量化描述样例 | 量化格式的参考数据 |
 
-从仓库根目录运行：
+**默认在 `llm/` 目录运行**，避免用户部署中主仓同名 `sglang/` 遮蔽已安装包。不要修改 PYTHONPATH 绕过；下文尚带 `llm/` 前缀的历史命令，执行时去掉该前缀。沿用既有环境与脚本管理的缓存，不额外粘贴整套缓存 export。
 
 ```bash
-./llm/qwen3.5_dense_bf16.sh 0
-./llm/curl.sh
-VLLM_PORT=6969 ./llm/bench_serving.sh
-VLLM_PORT=6969 ./llm/gsm8k.sh --batch-size 16
-VLLM_PORT=6969 ./llm/gpqa.sh
-VLLM_PORT=6969 ./llm/mmmu.sh
+./qwen3.5_dense_bf16.sh 0
+./curl.sh
+VLLM_PORT=6969 ./bench_serving.sh
+VLLM_PORT=6969 ./gsm8k.sh --batch-size 16
+VLLM_PORT=6969 ./gpqa.sh
+VLLM_PORT=6969 ./mmmu.sh
 ```
 
 ## ShareGPT 服务性能测试
@@ -159,9 +159,20 @@ python3 llm/diagnostics/recurrent_gated_delta_rule_check.py --dry-run
 ./llm/benchmarks/a5_fia_mixed_split_bench.sh compare
 ```
 
-## W4A8 性能瓶颈诊断
+## W4A8 性能瓶颈诊断（已归档）
 
-机时有限时，优先下面的一轮服务采集，再按 trace 定位是否需要算子级 A/B；不要默认重跑本节所有探针。两者都只是内部诊断，**不能把微基准或开启 profiler 的吞吐当作正式 benchmark**；脚本不会更新 PR、修改 SGLang、切分支、安装依赖或设置 PYTHONPATH。
+**2026-10-29：用户决定先存档，性能优化改为后续独立 PR（[G6](../docs/mxfp-refactoring-plan.md#g6-performance-archive)）。下面的取证顺序和 A/B 命令仅供历史复现，不是当前待运行清单。** #43739 已回退到推理实验之前并同步 main，不再提供路由融合/阈值开关或 GDN `prepare_input` 扩展；上游也已重构旧 routing 模块。不要在新正式分支上直接运行旧算子探针。归档源码 tag 见[分支表](../docs/branches.md)，恢复任务时再建独立 worktree 并适配。
+
+当前只运行普通服务时，在 `llm/` 目录清掉先前实验设置，再沿用原脚本即可；无需性能复测，也不额外设置缓存变量：
+
+```bash
+unset SGLANG_NPU_W4A8_MOE_FUSE_ROUTING_QUANT \
+      SGLANG_NPU_W4A8_MOE_UNFUSED_ROUTING_MIN_TOKENS \
+      SGLANG_NPU_MAMBA_CLEAR_USE_INDEX_COPY SGLANG_NPU_MAMBA_CLEAR_TRACE EXTRA_ARGS
+bash ./qwen3.5_moe_online_w4a8.sh 6 7
+```
+
+以下保留原诊断说明：机时有限时，优先下面的一轮服务采集，再按 trace 定位是否需要算子级 A/B；不要默认重跑本节所有探针。两者都只是内部诊断，**不能把微基准或开启 profiler 的吞吐当作正式 benchmark**；脚本不会更新 PR、修改 SGLang、切分支、安装依赖或设置 PYTHONPATH。
 
 ### 0. 一轮 BF16 / W4A8 性能取证
 
@@ -305,32 +316,25 @@ FLUSH_CACHE=1 BENCH_ROOT="$PWD/artifacts/w4a8-route-b" bash llm/bench_serving.sh
 
 `SGLANG_NPU_W4A8_MOE_UNFUSED_ROUTING_MIN_TOKENS` 默认 `0`，不改变已有行为。融合开关为 `1` 且阈值为正整数时，普通 TP 的**本地输入 token 数 M（top-k 展开前）≥ 阈值**才使用 B；其余保留 A。不是按请求并发数、`M × top_k` 或 prefill/decode 标签判断。配置在加载时解析，每个 batch 只按 shape 选择，不修改持久路由模式；大输入后的下一个小输入仍能融合。原融合开关 `0` 优先，始终使用 B。DeepEP 不使用该阈值。
 
-以 `2048` 为候选起点时，中间尺寸 513–2047 仍保持原行为；这不是对所有模型、CANN 或 shape 的最优阈值承诺。拆分路径会额外产生浮点展开激活，需要核对实际峰值显存；graph 按 capture shape 选择分支，不根据运行时数据切换。候选的依据与待验收范围见[验证摘要](../docs/mxfp-refactoring-plan.md#refactoring-status)。不要直接全局关融合，也不要同时启用清零实验、更改池容量或 prefill 调度。
+**已撤回新机器上 `2048` 的性能建议。** 该值来自旧环境；用户在 Ascend950DT_9582、CANN 路径 9.2.0、torch_npu 2.10.0.post7 的完整 eager MoE 对照中，M=2048/7240 均是融合 A 比拆分 B 快。默认 `0` 无需代码更新即可恢复；不要继续用旧阈值，也不按 CANN 版本硬编码新阈值。C 预量化候选相对 A 的优势很小，暂不接入服务。具体证据和数值差异见[验证摘要](../docs/mxfp-refactoring-plan.md#refactoring-status)。
 
-在已选好的正式分支和对应安装环境中，从主仓根目录沿用普通启动器。下面保留上一轮缩池对照的预算**仅为了控制变量**，不是缩池推荐；首次对照与其他工作负载应保留各自已测基线的参数。
-
-```bash
-RUN="$PWD/artifacts/w4a8-route-cutoff-$(date +%Y%m%d-%H%M%S)"
-mkdir -p "$RUN"/{tmp,cache/hf/hub,cache/triton,cache/inductor,cache/pycache,ascend-logs}
-export TMPDIR="$RUN/tmp" XDG_CACHE_HOME="$RUN/cache"
-export HF_HOME="$RUN/cache/hf" HF_HUB_CACHE="$RUN/cache/hf/hub"
-export TRITON_CACHE_DIR="$RUN/cache/triton" TORCHINDUCTOR_CACHE_DIR="$RUN/cache/inductor"
-export PYTHONPYCACHEPREFIX="$RUN/cache/pycache" ASCEND_PROCESS_LOG_PATH="$RUN/ascend-logs"
-export SGLANG_NPU_W4A8_MOE_FUSE_ROUTING_QUANT=1
-export SGLANG_NPU_W4A8_MOE_UNFUSED_ROUTING_MIN_TOKENS=2048
-export EXTRA_ARGS="--max-mamba-cache-size 872 --max-total-tokens 2828544"
-set -o pipefail
-bash llm/qwen3.5_moe_online_w4a8.sh 6 7 2>&1 | tee "$RUN/server.log"
-```
-
-启动器会打印显式设置的开关；不支持该阈值的旧 SGLang 或非法阈值会在清理设备/启动服务前退出。服务器就绪后，在另一终端运行以下命令两次，第一次完整预热、第二次测量；菜单选择同一模型。只回传第二轮短摘要和实际服务器 SHA、开关打印值。不必再跑 BF16、profiler 或微基准；单轮仅用于判断候选是否值得继续，不作为稳定性能验收。
+如继续核对服务收益，停止旧服务后，在 `llm/` 内运行下列命令。仅把阈值从 2048 改回 0，池预算保留上一轮值控制变量，**不是生产容量推荐**；不改代码、graph、prefill 或清零实现，不再附加缓存环境变量。
 
 ```bash
-OUTPUT_DETAILS=1 FLUSH_CACHE=1 BENCH_ROOT="$PWD/artifacts/w4a8-route-cutoff" \
-    bash llm/bench_serving.sh
+SGLANG_NPU_W4A8_MOE_FUSE_ROUTING_QUANT=1 \
+SGLANG_NPU_W4A8_MOE_UNFUSED_ROUTING_MIN_TOKENS=0 \
+EXTRA_ARGS="--max-mamba-cache-size 872 --max-total-tokens 2828544" \
+    bash ./qwen3.5_moe_online_w4a8.sh 6 7
 ```
 
-恢复全融合只需将新阈值设为 `0` 并重启；正式采用前仍需同条件服务收益验证。单层 eager A/B 不证明 graph replay、模型精度或 TP 通信表现。
+服务就绪后，另一终端也进入 `llm/`，下列命令运行两次：第一次完整预热，第二次测量；菜单选择 Qwen3.6-35B-A3B。脚本自动创建当前目录下的结果和缓存目录。无需重测 BF16 或算子；单轮不是稳定性能验收，也不能将探针 SHA 冒充服务端 SHA。
+
+```bash
+OUTPUT_DETAILS=1 FLUSH_CACHE=1 BENCH_ROOT="$PWD/artifacts/w4a8-fused" \
+    bash ./bench_serving.sh
+```
+
+这仅恢复原有融合策略，不宣称已经解决服务性能差距。新环境 A/B 的合成完整输出 relative L2 约 0.0364–0.0367，不再是旧环境的 0；不能宣称开关数值等价或由此推断模型准确率。
 
 ### 1c. Mamba/GDN 状态池清零探针
 

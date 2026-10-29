@@ -5,7 +5,7 @@ SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 source "$SCRIPT_DIR/../llm/common/npu-launch.sh" || exit $?
 npu_prepare_launch 1 "$@" || exit $?
 
-python "$SCRIPT_DIR/run_wan22_ti2v.py" \
+sglang generate \
     --model-path /home/weights/Wan2.2-TI2V-5B-Diffusers \
     --image-path "$SCRIPT_DIR/gyro.jpg" \
     --prompt "Two anthropomorphic cats in comfy boxing gear and bright gloves fight intensely on a spotlighted stage." \
@@ -13,4 +13,5 @@ python "$SCRIPT_DIR/run_wan22_ti2v.py" \
     --num-gpus "$NPU_TP_SIZE" \
     --num-frames 81 \
     --num-inference-steps 40 \
-    --output-dir ./outputs_bf16
+    --guidance-scale 5.0 --fps 24 --seed 42 \
+    --output-path ./outputs_bf16

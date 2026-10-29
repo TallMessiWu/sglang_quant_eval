@@ -15,7 +15,7 @@
 2. `sglang/qwen3.5_dense_w8a8/` 是当前主 clone，持有共享 `.git`；其他 SGLang 目录是它派生的 worktree。
 3. 修改前必须从任一现有 SGLang checkout 执行：
 
-   ```powershell
+   ```bash
    git -C sglang/qwen3.5_dense_w8a8 worktree list --porcelain
    ```
 
@@ -26,7 +26,7 @@
 7. worktree、PR 编号与分支映射或 remote 变化后，更新 [docs/branches.md](docs/branches.md)；PR 合入状态、依赖及重构目标进度统一更新 [docs/mxfp-refactoring-plan.md](docs/mxfp-refactoring-plan.md)，不要另建重复状态表，也不要把易漂移的 HEAD/PR 状态复制回本文件。
 8. #36426 只放在独立组合验证分支，不混入正式功能栈；组合分支持续跟随对应功能分支。更新基础功能分支时，同一轮同步、验证并普通推送组合分支；当前映射和版本证据见 [docs/branches.md](docs/branches.md)。
 
-当前映射见 [docs/branches.md](docs/branches.md)。历史遗留、位于系统临时目录的 `junlin_codeowners` worktree 已清除；复用该分支必须先在 `sglang/` 下新建 worktree。
+当前映射与归档恢复点见 [docs/branches.md](docs/branches.md)。清理分支须明确确认范围，保留可恢复的远端 tag；不批量删除归属或独有提交用途不明的 refs。
 
 ## 仓库与远程约定
 
@@ -45,7 +45,7 @@
 
 ## 量化开发约定
 
-- **在线量化**：从 BF16/FP16 权重加载，在 `process_weights_after_loading` 中量化；常用入口为 `--quantization mxfp8`、`mxfp_w4a8`、`mxfp4`。
+- **在线量化**：从 BF16/FP16 加载，在初始化阶段准备权重（post-load 或逻辑权重加载完成即量化）；推理期动态量化 activation。SRT 常用入口为 `mxfp8`、`mxfp_w4a8`、`mxfp4`；Diffusion NPU FP4 为 `mxfp4_npu`。
 - **离线 ModelSlim**：加载预量化 checkpoint，scheme 由 `quant_model_description.json` 自动检测；启动脚本通常不需要显式传 `--quantization modelslim`。
 - NPU-only import 必须受 `sglang.srt.utils.is_npu()` 保护；不要在跨平台模块顶层无条件 `import torch_npu`，也不要用未安装 NPU 插件时恒假的 `current_platform.is_npu()` 代替。
 - ModelSlim MXFP4 权重是 packed `uint8 [out, in/2]`；已打包权重不得二次 cast/pack。
@@ -80,7 +80,7 @@
 ## 文档入口
 
 - 重构目标 G1–G6、任务编号与验收进度：[目标跟踪表](docs/mxfp-refactoring-plan.md#refactoring-status)
-- G2 原验收分支、现成权重与按需运行命令：[接手入口](docs/mxfp-refactoring-plan.md#g23-handoff)；PR 发布分支可能不同，操作前核对分支表。验收状态不复制到本文件。
+- G2 原验收版本、现成权重与按需运行命令：[接手入口](docs/mxfp-refactoring-plan.md#g23-handoff)；PR 发布分支可能不同，操作前核对分支表。验收状态不复制到本文件。
 - PR 合入计划、新旧编号与合入情况：[PR 跟踪表](docs/mxfp-refactoring-plan.md#pr-merge-status)；前置与并行范围：[依赖说明](docs/mxfp-refactoring-plan.md#merge-dependencies)
 - PR / branch / worktree / remote 定位与历史记录：[docs/branches.md](docs/branches.md)
 - 量化状态、入口与代码路径：[docs/quantization-overview.md](docs/quantization-overview.md)

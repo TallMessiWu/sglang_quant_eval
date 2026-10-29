@@ -6,7 +6,6 @@ from pathlib import Path
 import pty
 import select
 import subprocess
-import sys
 import tempfile
 import termios
 import time
@@ -49,7 +48,6 @@ class NpuCleanerTests(unittest.TestCase):
         self.online.mkdir()
         self.offline.mkdir()
         (self.offline / "quant_model_description.json").write_text("{}")
-        (self.root / "sglang/python/sglang").mkdir(parents=True)
         self.bash_env = self.root / "bash-env.sh"
         self.bash_env.write_text(
             'kill() { printf "%s\\n" "$*" >> "$TEST_KILL_LOG"; '
@@ -159,7 +157,6 @@ class NpuCleanerTests(unittest.TestCase):
             ASCEND_RT_VISIBLE_DEVICES="stale-mask",
             TP_SIZE="99",
             NPU_TP_SIZE="99",
-            SGLANG_DIR=str(self.root / "sglang"),
             ADAPTER_A_PATH=str(self.root / "adapter-a"),
             ADAPTER_B_PATH=str(self.root / "adapter-b"),
         )
@@ -751,47 +748,26 @@ class NpuCleanerTests(unittest.TestCase):
                     self.assertEqual(self.contents(self.kill_log), "")
                 self.assertEqual(model_paths[0], model_paths[1])
 
-    def test_moe_routing_threshold_preflight(self):
-        name = "SGLANG_NPU_W4A8_MOE_UNFUSED_ROUTING_MIN_TOKENS"
-        stub = self.root / "preflight"
-        package = stub / "sglang/srt"
-        package.mkdir(parents=True)
-        (stub / "sglang/__init__.py").write_text("")
-        (package / "__init__.py").write_text("")
-        (package / "environ.py").write_text(
-            "import os\nfrom types import SimpleNamespace\n"
-            "envs = SimpleNamespace()\n"
-            "if os.environ['TEST_THRESHOLD_SUPPORTED'] == '1':\n"
-            f"    setattr(envs, {name!r}, SimpleNamespace(get=lambda: int(os.environ[{name!r}])))\n"
+    def test_moe_launcher_does_not_load_retired_experiment_api(self):
+        result = self.run_script(
+            LLM_DIR / "qwen3.5_moe_online_w4a8.sh", args=(),
+            overrides={"SGLANG_NPU_W4A8_MOE_UNFUSED_ROUTING_MIN_TOKENS": "2048"},
         )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("--quantization mxfp_w4a8", self.contents(self.launch_log))
+
+    def test_lora_uses_installed_environment_without_checkout_override(self):
         self.mock(
-            "python3",
-            'if [[ "$1" == - ]]; then exec "$TEST_PYTHON" "$@"; fi\n'
-            'if [[ "$1" == -c ]]; then echo 8; exit 0; fi\nexit 2\n',
+            "sglang",
+            'printf "pythonpath:%s\\n" "${PYTHONPATH-<unset>}" > "$TEST_LAUNCH_LOG"\n',
         )
-        for supported, value, success in (
-            (True, "2048", True), (True, "0", True),
-            (False, "2048", False), (True, "-1", False), (True, "oops", False),
-        ):
-            with self.subTest(supported=supported, value=value):
-                result = self.run_script(
-                    LLM_DIR / "qwen3.5_moe_online_w4a8.sh", args=("6", "7"),
-                    overrides={
-                        name: value, "PYTHONPATH": str(stub),
-                        "TEST_PYTHON": sys.executable,
-                        "TEST_THRESHOLD_SUPPORTED": str(int(supported)),
-                        "TEST_SMI_ROWS": "",
-                    },
-                )
-                self.assertEqual(result.returncode == 0, success, result.stdout)
-                if success:
-                    self.assertIn(f"{name}={value}", result.stdout)
-                    self.assertIn("--tp 2", self.contents(self.launch_log))
-                else:
-                    self.assertIn(name, result.stdout)
-                    self.assertEqual(self.contents(self.launch_log), "")
-                    self.assertEqual(self.contents(self.query_log), "")
-                self.assertEqual(self.contents(self.kill_log), "")
+        result = self.run_script(
+            LORA, args=("baseline", "eager", "0"),
+            overrides={"SGLANG_DIR": str(self.root / "missing"), "PYTHONPATH": "caller-path"},
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.contents(self.launch_log), "pythonpath:caller-path\n")
+        self.assertEqual(self.contents(self.kill_log), "")
 
     def test_moe_bf16_and_w4a8_forward_explicit_cache_budget(self):
         extra = "--max-mamba-cache-size 872 --max-total-tokens 2828544"
@@ -973,9 +949,10 @@ class NpuCleanerTests(unittest.TestCase):
         result = self.run_script(DIFFUSION_DIR / "ti2v_bf16.sh", args=())
         self.assertEqual(result.returncode, 0, result.stdout)
         launch = self.contents(self.launch_log)
-        self.assertIn(f"args:{DIFFUSION_DIR}/run_wan22_ti2v.py ", launch)
+        self.assertIn("args:generate ", launch)
         self.assertIn(f"--image-path {DIFFUSION_DIR}/gyro.jpg ", launch)
-        self.assertIn("--output-dir ./outputs_bf16", launch)
+        self.assertIn("--output-path ./outputs_bf16", launch)
+        self.assertIn("--guidance-scale 5.0 --fps 24 --seed 42", launch)
 
         result = self.run_script(DIFFUSION_DIR / "i2v_offline_mxfp8.sh", args=())
         self.assertEqual(result.returncode, 0, result.stdout)

@@ -125,10 +125,28 @@ def validate_server(info, label):
         )
 
 
+def source_identity(path):
+    path = Path(path).resolve()
+    result = {
+        "path": str(path),
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
+    for key, command in (
+        ("git_head", ["rev-parse", "HEAD"]),
+        ("git_status", ["status", "--porcelain", "--untracked-files=no"]),
+    ):
+        process = subprocess.run(
+            ["git", "-C", str(path.parent), *command],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        result[key] = process.stdout.strip() if process.returncode == 0 else None
+    return result
+
+
 def environment_info(model_path, dataset_path):
     """Client identity only; never infer the running server SHA from this checkout."""
-    from mxfp4_perf_probe import source_identity
-
     versions = {}
     for name in (
         "sglang",

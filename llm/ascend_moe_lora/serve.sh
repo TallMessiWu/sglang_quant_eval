@@ -17,7 +17,6 @@ Required for the lora server:
   ADAPTER_B_PATH   Second true per-expert MoE adapter.
 
 Optional environment:
-  SGLANG_DIR          SGLang checkout (default: <repo>/sglang/ascend_moe_lora)
   SERVER_HOST         Listen address (default: 127.0.0.1)
   SERVER_PORT         Listen port (default: VLLM_PORT or 6969)
   CONTEXT_LENGTH      Maximum context length (default: 4096)
@@ -27,11 +26,11 @@ Optional environment:
 
 Examples:
   MODEL_PATH=/weights/Qwen3-30B-A3B \
-    ./llm/ascend_moe_lora/serve.sh baseline eager 0 1
+    ./ascend_moe_lora/serve.sh baseline eager 0 1
 
   MODEL_PATH=/weights/Qwen3-30B-A3B \
   ADAPTER_A_PATH=/weights/lora-a ADAPTER_B_PATH=/weights/lora-b \
-    ./llm/ascend_moe_lora/serve.sh lora graph 0 1
+    ./ascend_moe_lora/serve.sh lora graph 0 1
 EOF
 }
 
@@ -69,16 +68,6 @@ if [[ "$server_kind" == lora ]]; then
 fi
 
 script_dir=$(dirname "$(readlink -f "$0")")
-repo_root=$(dirname "$(dirname "$script_dir")")
-sglang_dir=${SGLANG_DIR:-${repo_root}/sglang/ascend_moe_lora}
-if [[ ! -d "$sglang_dir/python/sglang" ]]; then
-    echo "SGLang checkout not found: $sglang_dir" >&2
-    echo "Set SGLANG_DIR to the junlin-ascend-moe-lora checkout." >&2
-    exit 2
-fi
-
-export PYTHONPATH="${sglang_dir}/python${PYTHONPATH:+:${PYTHONPATH}}"
-
 source "$script_dir/../common/npu-launch.sh"
 npu_resolve_devices 1 "$@"
 

@@ -34,7 +34,7 @@
 
 - sgl-kernel-npu #638 的目标是保证 Qwen3.5 在 A5 上能跑，所以把被误划为 A3-only 的 `causal_conv1d` 解除门控留在 #638。
 - 移植 vllm-ascend 对 `recurrent_gated_delta_rule` 的 A5 适配（Qwen3.5 MTP 需要）明确推迟到另一个 PR。
-- 同日上游 [#802](https://github.com/sgl-project/sgl-kernel-npu/pull/802) 用同样方式解除了 `causal_conv1d`，用户说「既然上游已经修好了……那移除我们多余的……修复代码」；#638 因此删掉该提交（改写历史，与本仓对历史改写的偏好一致）并 merge 上游 main，让分支仍然带着这个修复。
+- 同日上游 [#802](https://github.com/sgl-project/sgl-kernel-npu/pull/802) 用同样方式解除了 `causal_conv1d`，用户说「既然上游已经修好了……那移除我们多余的……修复代码」；#638 因此删掉该提交（当次已获授权的历史改写，不代表后续可以自行强推）并 merge 上游 main，让分支仍然带着这个修复。
 
 **怎么用**：发现的问题超出当前 PR 目标时，说清哪部分属于本 PR、其余建议另开分支 / PR，并且不要先动手。同步或汇报 PR 状态前，先查上游是否已落地重叠修复；若已落地，提议删掉我们那份（并 merge 上游让分支继续可用），同时把 PR 描述改到与 diff 一致。
 

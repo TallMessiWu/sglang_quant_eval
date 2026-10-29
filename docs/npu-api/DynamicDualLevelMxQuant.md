@@ -1,5 +1,7 @@
 # DynamicDualLevelMxQuant
 
+> 历史 API 摘录，原始版本号未记录；下表不构成当前安装版本或整机支持保证。修改调用前核对实际 CANN/torch_npu 签名与目标硬件。原仓库示例未复制到本仓。
+
 ## 产品支持情况
 
 | 产品                                                         | 是否支持 |
@@ -143,5 +145,5 @@
 
 | 调用方式   | 样例代码           | 说明                                         |
 | ---------------- | --------------------------- | --------------------------------------------------- |
-| aclnn接口  | [test_aclnn_dynamic_dual_level_mx_quant](examples/arch35/test_aclnn_dynamic_dual_level_mx_quant.cpp) | 通过[aclnnDynamicDualLevelMxQuant](docs/aclnnDynamicDualLevelMxQuant.md)接口方式调用DynamicDualLevelMxQuant算子。 |
-| 图模式 | -  | 通过[算子IR](op_graph/dynamic_dual_level_mx_quant_proto.h)构图方式调用DynamicDualLevelMxQuant算子。         |
+| aclnn 接口 | 原仓库 `examples/arch35/test_aclnn_dynamic_dual_level_mx_quant.cpp` | `aclnnDynamicDualLevelMxQuant`，示例不在本仓。 |
+| 图模式 | 原仓库 `op_graph/dynamic_dual_level_mx_quant_proto.h` | 算子 IR，定义不在本仓。 |

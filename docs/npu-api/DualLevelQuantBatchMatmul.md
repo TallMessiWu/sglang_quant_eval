@@ -1,5 +1,7 @@
 # DualLevelQuantBatchMatmul
 
+> 历史 API 摘录，原始版本号未记录；下表不构成当前安装版本或整机支持保证。修改调用前核对实际 CANN/torch_npu 签名与目标硬件。原仓库示例未复制到本仓。
+
 ## 产品支持情况
 
 | 产品                                                         |  是否支持   |
@@ -135,10 +137,10 @@
 ## 约束说明
 
 - 不支持空tensor。
-- 支持连续tensor，[非连续tensor](../../docs/zh/context/非连续的Tensor.md)只支持转置场景。
+- 摘录版本支持连续 tensor；非连续 tensor 只支持转置场景。
 
 ## 调用说明
 
 | 调用方式      | 调用样例                 | 说明                                                         |
 |--------------|-------------------------|--------------------------------------------------------------|
-| aclnn调用 | [test_aclnn_dual_level_quant_matmul_weight_nz](examples/arch35/test_aclnn_dual_level_quant_matmul_weight_nz.cpp) | 通过[aclnnDualLevelQuantMatmulWeightNz](docs/aclnnDualLevelQuantMatmulWeightNz.md)接口方式调用DualLevelQuantBatchMatmul算子。 |
+| aclnn 调用 | 原仓库 `examples/arch35/test_aclnn_dual_level_quant_matmul_weight_nz.cpp` | `aclnnDualLevelQuantMatmulWeightNz`，示例不在本仓。 |

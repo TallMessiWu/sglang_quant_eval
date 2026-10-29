@@ -5,17 +5,14 @@
 一致，但在 CPU 上用 float32 重算，不依赖 torchair，形状可从命令行给定，有用例不通过就以
 非 0 退出，便于在 950 上快速确认算子本身是否正确。
 
-用法：
-    python3 llm/diagnostics/recurrent_gated_delta_rule_check.py                    # 默认几组形状
-    python3 llm/diagnostics/recurrent_gated_delta_rule_check.py --b 4 --mtp 4 --nk 16 --nv 32
-    python3 llm/diagnostics/recurrent_gated_delta_rule_check.py --dry-run          # 不碰 NPU，只跑参考实现
+在 llm/ 目录用空闲 NPU 按需运行：
+    python3 diagnostics/recurrent_gated_delta_rule_check.py --b 4 --mtp 4 --nk 16 --nv 32
+    python3 diagnostics/recurrent_gated_delta_rule_check.py --dry-run  # CPU 参考
 
-两个 wheel 的 A/B（例如 PR #808 的 arch35 实现 vs #823 的只放开编译）：
-    # 各自装好 wheel 后，用同一个 seed 各跑一次，把输出存下来
-    python3 llm/diagnostics/recurrent_gated_delta_rule_check.py --bench 100 --dump /tmp/pr808.pt
-    python3 llm/diagnostics/recurrent_gated_delta_rule_check.py --bench 100 --dump /tmp/pr823.pt
-    # 再直接比两边的输出（不经过容差，逐元素比）
-    python3 llm/diagnostics/recurrent_gated_delta_rule_check.py --compare /tmp/pr808.pt /tmp/pr823.pt
+需要 wheel A/B 时，两侧使用相同 seed，记录实际版本和构建 target：
+    python3 diagnostics/recurrent_gated_delta_rule_check.py --bench 100 --dump ./wheel-a.pt
+    python3 diagnostics/recurrent_gated_delta_rule_check.py --bench 100 --dump ./wheel-b.pt
+    python3 diagnostics/recurrent_gated_delta_rule_check.py --compare ./wheel-a.pt ./wheel-b.pt
 """
 
 from __future__ import annotations

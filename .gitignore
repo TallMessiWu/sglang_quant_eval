@@ -1,35 +1,23 @@
-.vscode
-.idea
+.vscode/
+.idea/
 .claude/settings.local.json
-# sglang: 全部 worktree 纯本地不跟踪（主仓不再有 sglang 子模块）
-# qwen3.5_dense_w8a8 是当前主 clone（持有共享 .git），其他功能目录由它派生
-sglang/
 
-# sgl-kernel-npu 功能分支的 worktree：由 sgl-kernel-npu 子模块派生，纯本地不跟踪
-sgl-kernel-npu-worktrees/
+# Independent SGLang checkouts and kernel worktrees, not parent gitlinks.
+/sglang/
+/sgl-kernel-npu-worktrees/
 
-# benchmark 结果与 torch profiler trace：跑一次就是几十 MB，只在本机有意义
+# Local agent evidence, reports and reproducible run artifacts.
+/.pi/
+/tmp/
+artifacts/
+outputs_*/
 llm/fia_bench/
 llm/profiling/
-
-# 一次性渲染产物（进度图 HTML/PNG），只在本机有意义
-artifacts/
-
-# 本地 agent 日志、检查结果和临时证据，不作为源码发布
-/.pi/
-
-# 已发布讲义的本地制作工作区；交付 HTML 跟踪在 presentations/
-/docs/learning/pr638/
-/docs/learning/pr824/
-
-# ais_bench 按端点生成的模型配置：run_ais_bench.sh 的产物，不用手动维护
 llm/.ais_bench_configs/
+/docs/learning/
 
-# Python 字节码：曾被误提交，见 llm/__pycache__
+# Interpreter/tool caches.
 __pycache__/
 *.pyc
-
-# G2 run artifacts are written beneath the caller's current directory.
-g2-*/
-outputs_i2v_mxfp8/
-outputs_i2v_mxfp8_fa_check/
+.pytest_cache/
+.ruff_cache/

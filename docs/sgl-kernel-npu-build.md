@@ -44,7 +44,7 @@ git -C sgl-kernel-npu remote add upstream https://github.com/sgl-project/sgl-ker
 
 构建别名（`910B` / `910` / `910C` / `950`）与 wheel provider 的对应见下节「构建」的表，不在这里重复。
 
-探测不到设备（无 `npu-smi` 的构建容器）时回落 `Ascend910_9382`，即 A3 兼容目标；出 A5 的 wheel 前先核对这一列，或显式传 `950`。评测服务器上本仓的 checkout 与 benchmark 数据在 `hajimi` 用户下（`llm/benchmarks/a5_fia_mixed_split_bench.sh` 默认取 `/home/hajimi/benchmark/`）。
+探测不到设备（无 `npu-smi` 的构建容器）时回落 `Ascend910_9382`，即 A3 兼容目标；出 A5 的 wheel 前先核对这一列，或显式传 `950`。实际用户、模型和 benchmark 路径以部署环境为准。
 
 ## 构建
 
@@ -117,7 +117,7 @@ python -c "from sgl_kernel_npu.norm.gemma_rmsnorm import npu_gemma_rms_norm; pri
 
 旧版文档记录过 CANN beta 头文件缺失和 `-Wframe-larger-than` 被 `-Werror` 提升等环境问题。这些不是默认源码修改步骤；只有当前构建日志再次出现相同错误时，才按实际 CANN 安装定位。不要预先修改编译参数或系统头文件。
 
-已知具体形态：评测服务器的 CANN 是 beta 版 `cann-9.1.T560`，`include/experiment/` 头文件树不全（缺 `prof_common.h`、`aprof_pub.h` 等），从源码编译 AscendC 算子会踩到。纯 triton 内核不受影响（运行时 JIT，如 `norm/split_qkv_rmsnorm_rope.py`，见 [known-pitfalls.md](known-pitfalls.md) 第一节）。
+历史 `cann-9.1.T560` 部署曾缺 `include/experiment/` 中的 `prof_common.h`、`aprof_pub.h` 等头文件，影响 AscendC 源码编译。不能据此推断当前服务器仍缺文件，也不能推断不使用这些头文件的 Triton 路径已通过完整环境验证。
 
 常用定位：
 

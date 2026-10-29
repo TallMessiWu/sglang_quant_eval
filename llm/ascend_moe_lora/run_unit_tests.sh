@@ -36,7 +36,6 @@ if [[ ! -d "$sglang_dir/python/sglang" ]]; then
     exit 2
 fi
 
-export PYTHONPATH="${sglang_dir}/python${PYTHONPATH:+:${PYTHONPATH}}"
 cd "$sglang_dir"
 
 python3 - <<'PY'

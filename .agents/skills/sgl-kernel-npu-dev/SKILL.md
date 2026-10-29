@@ -11,11 +11,13 @@ Treat the local fork checkout, official upstream, target-specific wheel, and pai
 
 Run the bundled read-only audit:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .agents/skills/sgl-kernel-npu-dev/scripts/check-local-state.ps1
+Resolve the repository root from this skill directory (`../../..`), then run:
+
+```bash
+bash <repo>/.agents/skills/sgl-kernel-npu-dev/scripts/check-local-state.sh
 ```
 
-Use its output to confirm the kernel branch, HEAD, tracking ref, dirty state, remotes, parent gitlink, and all registered SGLang worktree paths. Do not infer branch identity from a directory name or the parent gitlink.
+Use its output to confirm the kernel branch, HEAD, tracking status, dirty state, remotes, committed/staged parent gitlink, and all registered SGLang worktree paths. Do not infer branch identity from a directory name or the parent gitlink.
 
 ## Classify the task
 
@@ -84,7 +86,7 @@ For the current Gemma RMSNorm design, read [references/target-wheel.md](referenc
 
 ## Avoid stale documentation
 
-- Put current PR, branch, HEAD, worktree, and remote snapshots in `docs/branches.md`.
+- Put PR status/dependencies in `docs/mxfp-refactoring-plan.md`; branch, HEAD, worktree and remote mapping in `docs/branches.md`.
 - Put user-facing build instructions in `docs/sgl-kernel-npu-build.md`.
 - Keep durable operating rules in `AGENTS.md` and this skill.
 - Do not duplicate volatile hashes across multiple files.

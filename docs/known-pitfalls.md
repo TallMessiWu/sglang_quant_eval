@@ -1,426 +1,97 @@
-# 已知陷阱详解
+# Ascend 量化与部署陷阱
 
-> 已确认的故障机制、适用条件，以及尚未定位问题的诊断边界。
-> 流程规则见 AGENTS.md；分支证据和当前验收分别见 branches.md 与 mxfp-refactoring-plan.md。
+只保留仍有用的机制、识别条件和处理边界；历史日志/地址/逐次测试记录不在此累积。能力与路径见 [量化概览](quantization-overview.md)，验收结论见 [目标计划](mxfp-refactoring-plan.md)。
 
-## Qwen-VL 图片预热与 Transformers 接口不匹配
+## 环境与部署
 
-2026-10-21 用户在组合分支上启动离线 W8A8 服务，`/model_info` 成功，但图片预热报 `TorchvisionBackend.resize() missing 1 required positional argument: 'image'`。服务器确认安装 Transformers 5.12.1；同步后的 SGLang `python/pyproject.toml` 固定为 5.19.0。5.12.1 的 Qwen2VLImageProcessor 继承 backend 的 `resize(image, ...)`；5.19.0 覆写为 `resize(images, size, resample, factor, ...)`，并在内部计算 smart resize。当前 NPU wrapper 已随上游 #43309 使用后者，旧包会把 `images` 收进 `**kwargs`，缺少必需的 `image`，尚未进入模型量化算子就返回 500。
+### Qwen-VL 图片预热与 Transformers 接口不匹配
 
-处理方式是将服务器 Transformers 对齐当前 checkout 的固定依赖并重启，不能只把调用参数改成 `image=`：新旧接口的尺寸计算职责也不同。用官方 5.12.1 源码函数体和实际 wrapper 的隔离 CPU 复现连续两次得到同一异常；换成 5.19.0 函数体后相同输入通过，另有 4 项图片/视频契约检查通过。证据在 `.pi/qwen-vl-resize-20261021/`；尚无服务器升级后的 NPU 重启或精度通过结果。
+同步 SGLang 后也要核对其依赖约束。曾有部署仍为 Transformers 5.12.1，而 checkout 要求 5.19.0，resize 的 `image`/`images` 契约不同导致 warmup 失败。先对齐实际安装版本，不复制旧补丁或仅改一个关键字。#43309 已修复的逻辑不要重复提交。
 
-## 量化不生效/乱码输出
+### 模型注册失败可能只是导入失败
 
-先验证模型是否注册成功。若 `sgl_kernel_npu` 某 kernel 不存在会导致模型模块 import 失败，`ModelRegistry` 静默跳过，fallback 到 HF Transformers（无量化感知），FP8 权重被当 BF16 解读 → 乱码。
+缺失 `sgl_kernel_npu` 接口可能让模型模块被 registry 跳过，最后只显示“不支持模型”。直接导入实际模型模块查看最早 traceback，并核对安装 wheel 与 SGLang 的配套版本。不要把任意 checkout 文件复制进 site-packages 伪装匹配 wheel；构建与安装入口见 [kernel 文档](sgl-kernel-npu-build.md)。
 
-```bash
-python3 -c "from sglang.srt.models.registry import ModelRegistry; print(list(ModelRegistry.models.keys()))"
-python3 -c "from sglang.srt.models.qwen3 import Qwen3ForCausalLM; print('OK')"
-```
+### Attention、异步 fault 与服务来源
 
-修复：`sgl_kernel_npu` 非核心 kernel 的 import 改为 try/except + `None` fallback（见 `rotary_embedding/base.py`）。
-若是 `sgl_kernel_npu` 版本太旧、缺某个 kernel 符号（如跑 Qwen3.5 缺 `split_qkvgate_gemma_rmsnorm_rope`），
-需从源码升级 `sgl_kernel_npu`，编译安装过程见 [sgl-kernel-npu-build.md](sgl-kernel-npu-build.md)。
-
-**先看到真错误再动手**：`registry.py` 的 `logger.warning("Ignore import error ...")` 会把真实 traceback 吞掉，只看注册表或跑服务只会得到一句伪装成「没实现」的报错。直接 import 该模型模块才能暴露它：
-
-```bash
-python3 -c "import sglang.srt.models.qwen3_5"
-```
-
-**实例（2026-07-13，Qwen3.5 27B dense）**：报 `Qwen3_5ForConditionalGeneration has no SGLang implementation and the Transformers implementation is not compatible`。真因不是没实现——`models/qwen3_5.py` 已实现并注册了 `EntryClass`，但它 import 了 `sgl_kernel_npu.norm.split_qkv_rmsnorm_rope.split_qkvgate_gemma_rmsnorm_rope`，服务器上 2026.3.1 版 `sgl_kernel_npu` 没有这个符号 → 模块 import 失败 → 该架构不进 `supported_archs` → fallback 到 transformers。qwen3 不依赖这个算子，所以只有 qwen3.5 中招。
-
-**修法不必重编 wheel**：`split_qkvgate_gemma_rmsnorm_rope` 是纯 `@triton.jit` 内核（`sgl-kernel-npu` 的 `python/sgl_kernel_npu/norm/split_qkv_rmsnorm_rope.py`），运行时 JIT，与 SOC / AscendC 编译无关。把本仓较新版本的 `sgl_kernel_npu/norm/` Python 源码覆盖到已装包的 `site-packages` 同名路径即可，不用整包 `bash build.sh`；qwen3.5 dense 也用不到 attentions / prof 那几个模块，别为它去碰 A5 上会踩的编译坑（见 [sgl-kernel-npu-build.md](sgl-kernel-npu-build.md)）。
-
----
+- 历史 Ascend 950 默认 ATB attention 在 warmup/解码出现故障，本仓 LLM 脚本用 `ASCEND_USE_FIA=1`。不能把该故障直接归为 FP4 布局错误。
+- Python traceback 常落在下一次同步点，不一定是 fault kernel；优先读取已有 plog：在 `llm/` 执行 `bash diagnostics/npu_fault_kernel.sh <scheduler-PID>`。
+- 客户端安装路径/SHA 不证明运行中服务的 SHA。修改环境变量也不会改变已启动服务，必须重启才生效。
+- 用户环境的 NPU `Critical` 状态不作为不能运行或卡顿根因的证据；单次 wall 异常同样不能定性硬件故障。
 
 <a id="wan-modelslim-repack"></a>
 
-## Wan ModelSlim repack 与 I2V 日志
+## Wan ModelSlim 与 attention
 
-- **多份量化描述不能排序取首项。** 本次 I2V high/low noise 目录同时含全 FLOAT 的 `quant_model_description_w8a8_fp8_only.json` 与实际使用的 `quant_model_description_w8a8_mxfp8.json`。修复后的 `wan_repack.py` 支持 `--quant-description-file`，应对每个 expert 显式选择后者；不要改 JSON 冒充权重转换。工具提交见 [分支记录](branches.md#g2-runtime-record)。
-- **rotation 张量名与 JSON 键要一起映射。** 原始 `self_attn.q_rot/k_rot` 应转为 `attn1.q_rot/k_rot`，不能误变成 `attn1.to_q_rot/to_k_rot`；JSON-only attention 元数据也需要改名。
-- **模板大小不能证明完整。** repack 前需检查同架构的 `model_index.json` 和两套 transformer config。原始模板 `/mnt/weight/Wan2.2-I2V-A14B-Diffusers` 曾缺第一套 transformer 的第 12/12 分片；离线 repack 会整体替换 transformer，因此未阻塞本次转换，但不能直接用于原始权重的在线运行。当前离线输出已生成，后续直接复用。
-- **Linear 量化与 attention 量化分开判断。** CLI 的 `quantization: null` 不否定组件从 `quant_model_description.json` 自动识别 ModelSlim。默认关闭 `SGLANG_DIFFUSION_ENABLE_MXFP8_ATTENTION` 时，Torch SDPA 路径不会注册/加载 `q_rot/k_rot`；这类 skipped-key 日志符合该配置，不代表 MXFP8 Linear 被关闭。
-- **`fused linear+GELU ... quantized linear` 不表示退回全精度。** 它只关闭面向非量化 Linear 的可选融合，原有量化 Linear 仍执行。`host pageable` 配合 CPU offload 表示权重暂存主存，也不能据此认定整个模型在 CPU 上运行。
-- **I2V 尺寸使用支持列表。** 本次列表为 1280×720、720×1280、832×480、480×832；脚本已从沿用的 TI2V 1280×704 改为 1280×720。一次正常输出或未中断运行的依赖告警不等于所有尺寸、性能和依赖组合都已验证。
-
----
+- 显式选择正确的 `quant_model_description.json`，不能按字母顺序误选 FLOAT 描述。以当前 msmodelslim 导出格式为准，检查两套 transformer 的权重、模板和描述完整性。
+- repack 必须同步转换旋转张量及其描述键；只改权重名或只改 JSON 都会破坏加载契约。工具版本见 [分支表](branches.md#g2-runtime-record)。
+- Linear 量化与 MXFP8 attention 是两个开关/路径。出现 SDPA 或没有 rotation key 不自动证明 Linear 量化失败。
+- 自动 FA 验收要看到 `Using MXFP8 quantized Ascend Flash Attention.`，不能仅凭后端名 `fa` 或视频生成成功判断。图片缩放后 token 数、对齐和后端限制要按实际 shape 检查；不要把某张图的对齐尺寸推广到所有图片。
 
 <a id="mxfp-shared-execution-adapters"></a>
 
-## MXFP 公共执行复用仍需适配加载布局与缓存
+## 权重、scale 与执行契约
 
-以下契约来自 2026-10 的 G2 与 MoE 重构记录；适用于对应代码路径，不是所有 MXFP 格式通用的转换规则。
+### 在线 / 离线与单级 / 双级
 
-- **checkpoint 名称与执行名称分开。** Diffusion ModelSlim 加载时必须保留 `weight_scale`、`uint8`、parameter 类和 loader metadata；不能为复用 SRT 提前改名为 `weight_scale_inv`。按分片后的 K 分配 `ceil(K/32)` 个 scale，奇数个补一个 0 字节后再配对、转置；K=4304 是 135→136，额外字节不对应权重。执行布局可在 post-load 后转换，离线权重不能再次量化或打包。
-- **公共 Method 的缓存可能改变调用语义。** G2.2 清空公共 Method 建立的 `bias_fp32`，保留原离线每次调用转 FP32 的行为；否则 post-load 后更新 bias 可能仍使用旧值。共享执行回归应覆盖 bias 更新和非连续输入，不能只验证首次调用。
-- **四维 scale 不一定已转置。** 在线 MoE 的 `[E,N,K/64,2]` 与 prepared `[E,K/64,N,2]` 同为四维；将前者直接交给把四维视为 prepared 的 helper 会漏转置。该路径先 `flatten(-2)` 还原 block 序列，再委托 helper；用 N 与 K/64 不同的形状核对内容及 stride。
+- 在线从 BF16/FP16 准备权重；离线 ModelSlim MXFP4 为 packed `uint8 [out, in/2]`，不得再 cast/pack 或再次量化。
+- Dense 在线 W4A4 双级 L0/L1、MoE W4A4 单级、W4A8 的 FP4/FP8 组合是不同契约。不能因都叫 MXFP4 就复用同一个 scale 变换。
+- checkpoint 参数名、Parameter 类型、loader 属性与分片轴必须保留。共享执行仅消费准备后的张量，不接管各来源的加载语义。
+- scale rank 相同不代表轴相同；在线量化原始四维 scale 与转置/配对后的 GMM 四维 scale 必须区分。准备应可识别完成状态，避免二次 transpose。
+- bias 的 dtype/shape 属于算子契约：W4A8 Dense 当前使用 BF16 `[1,N]`。如缓存准备后 bias，原参数替换、原地更新与重载都需失效处理。
 
-loader 支持 partial block 后，组合分支还需同步能力校验、文档与测试，避免旧的 K 按 64 对齐校验继续误拒绝；不能据此解除其他 loader 或 FP4 算子的对齐限制。上述 CPU 契约检查不证明 NPU 数值等价，验收仍见[目标跟踪](mxfp-refactoring-plan.md#refactoring-status)。
+### partial-scale 与 TP
 
-## 模块级 `import torch_npu` 会炸掉全平台 CI
+MX block 为 32，pair 按 2 个 block 组织。K=4304 需要 `ceil(K/32)=135` 个 scale block，pair 容量为 136；不能丢尾块或直接 reshape 奇数 block。RowParallel 的 TP 分片要按**全局 K 起点**取 scale，并计入左侧 block 偏移，不能仅用本地 K 整除。占位 shape 修正不等于 kernel 支持任意 K，padding 和实际分片都要核对。
 
-`quantization/__init__.py` 无条件 import `ModelSlimConfig`，链路上任何文件顶层 `import torch_npu` 都会让 CUDA/CPU/AMD/XPU CI 在 import 时 `ModuleNotFoundError`（PR #22352 踩过两次：`linear_method_npu.py`、`modelslim_mxfp8.py`）。
+### transpose、NZ 与 FP4 dtype
 
-**标准写法**（见这两个文件）：
+- FP4 API 对 enum 与 torch dtype 的接受范围随算子/版本而异；历史接口不能用 `torch_npu.float4_e2m1fn_x2` 简单替代 torch dtype（或反向替代）。核对实际生产调用与安装版本。
+- W4A8 常用 NZ 权重转置视图，W4A4 MoE 的融合调用可能使用 ND；不要统一强转 NZ。weight/scale 的方向、stride、transpose 标志必须匹配具体 API。
+- `.contiguous()` 不是通用修复，也不是一概禁止：应证明表示与转置参数一致，再测数值/性能。不要把旧版本报错扩大成所有版本的支持结论。
+- 双级量化 L0 scale 应保留算子所需的二维 `[M,1]`/`[1,N]` 形状；`squeeze(-1)` 可能把 `[N,1]` 变成错误的一维，使用明确 reshape。N=1 边界也要覆盖。
 
-```python
-from sglang.srt.utils import is_npu
-_is_npu = is_npu()
-if _is_npu:
-    import torch_npu
-```
+### 在线 W4A8 post-load 恢复 NZ 权重时报 `copy_` 不支持
 
-模块级用到 `torch_npu` 属性的常量（如 `_FLOAT8_E8M0FNU_DTYPE`）也要用 `if _is_npu else` 三元守卫；函数体内的 `torch_npu.xxx` 调用只在 NPU 运行时执行，无需改。
+`torch.device("npu")` 与 `torch.device("npu:0")` 的对象比较不同，即使都指向当前设备。外层 `stage_module_for_post_load` 若未解析实际设备，会把常驻 NZ 转置视图误判为需要 staging/恢复，并触发不支持的 `copy_`。
 
-> ⚠️ **不要用 `current_platform.is_npu()` 做这个守卫**（旧写法，2026-06-16 已废弃）：新 upstream 把 `sglang/srt/platforms/` 重构成「插件发现的懒单例」，NPU 是 out-of-tree 插件，没装注册 `entry_point`（group `sglang.srt.platforms`）的 NPU 平台插件时，`current_platform` 会 fallback 到 base `SRTPlatform`、`is_npu()` 在**真 NPU 机器上也恒返回 False**（单例缓存、永久卡住）→ `torch_npu` 不 import → 量化哑掉。upstream 自己全用 util 版 `from sglang.srt.utils import is_npu`（直接 `torch.npu.is_available()`，核心文件如 `model_runner.py`/`model_loader/loader.py` 都是模块级 `_is_npu = is_npu()`），这才是可靠且与 upstream 一致的写法。
+处理：先解析实际 process device，等价设备不搬运、不改 storage/stride/offset/alias；真正跨设备 offload 仍需恢复。不要用改 ND/contiguous、改量化参数掩盖问题。回归应穿过外层 context 并检查 hook 异常不被额外 copy 掩盖，不能只测试量化方法内部。
 
----
-
-## `process_weights_after_loading` 中 transpose 不加 `.contiguous()`
-
-`npu_grouped_matmul` 通过 strides 感知内存布局，`.contiguous()` 会物理重排数据破坏 block-scale 映射 → 乱码。用 `Parameter(qw.transpose(1, 2), requires_grad=False)` 直接包装非连续 view，不要在 transpose 后加 `.contiguous()`。
-
----
-
-## vllm-ascend MoE MXFP8/MXFP4 均为 offline
-
-`AscendW8A8MXFP8DynamicFusedMoEMethod`（`w8a8_mxfp8.py:178`）和 `AscendW4A4MXFP4DynamicFusedMoEMethod`（`w4a4_mxfp4.py:119`）的 `process_weights_after_loading` 只做 layout transform，没有 BF16→FP 在线转换。
-
-**MoE W4A8_MXFP 在 vllm-ascend 没有 MoE scheme**（`quant_parser.py` 注册了字符串但无对应类）。
-
-MoE 在线量化需自实现：online quant 参考 dense `NPUMXFP8LinearMethod`，routing pipeline 参考 `npu_fused_experts_w4a4`。
-
----
-
-## FusedMoE vs EPMoE quant method 共享，但 dispatch_output 类型不同
-
-`Fp8Config.get_quant_method` 对 FusedMoE 及其所有 EP 子类（`DeepEPMoE`/`NpuFuseEPMoE`/`MoriEPMoE`）返回同一个 method 实例。EPMoE 传入 `apply` 的不是 `StandardDispatchOutput`，需单独处理。当前 `NPUMXFP8FusedMoEMethod.apply` 仅支持 `StandardDispatchOutput`（TP-only），其他类型抛 `NotImplementedError`。
-
----
-
-## W4A8_MXFP checkpoint 权重格式
-
-当前 msmodelslim `ascendv1.py` 使用 `pack_fp4_to_uint8` 导出 W4A8_MXFP 权重，物理格式为 packed FP4 `uint8 [out,in//2]`；SGLang `ModelSlimMXFP4W4A8Scheme.create_weights` 必须使用相同 shape/dtype，post-load 只做 FRACTAL_NZ layout 转换和 transpose。旧 `qwen3-8b-dense-w4a8` checkpoint 可能仍是早期 `float8_e4m3fn [out,in]` 格式，它不代表当前导出契约，需重新导出或转换后再由当前 scheme 加载。
-
----
-
-## 离线 W4A8 (`W4A8_MXFP`) 在 A5 上有两个不同报错，根因完全不同
-
-（`junlin_qwen3_dense_w4a8`，2026-06-24/25，A5 + `Qwen3-8B-mxw4a8-pack-full-0421`，graph 模式 e2e 输出已验证正常）
-
-### ① prefill 阶段 `x2 should be in ... nz format, but it is 2` = 旧 torch_npu 的 FP4 `npu_quant_matmul` bug（量化相关，已靠升级解决）
-
-`NPUMXFP4W4A8OfflineLinearMethod` 照搬 vllm（`npu_format_cast(weight,29,customize_dtype=fp8,input_dtype=fp4)` → `.transpose(-1,-2)` → `npu_quant_matmul(x2_dtype=float4_e2m1fn_x2, group_sizes=[0,0,32])`）在 **`torch_npu 2.10.0.dev20260320`** 报此错；升级到 **`2.10.0.post1.dev20260624`** 后消失，NZ 写法正确。
-
-该 A5 强制 `allow_internal_format=False`（设 True 被打回、无 getter）但 NZ 仍能造出且 matmul OK，**不是阻塞点**；`npu_dynamic_mx_quant` 原生返回 3D block scale `[tokens, in//64, 2]`，无需 vllm `maybe_normalize_mxfp_scale_layout`（那个只 MoE 用）。代码保持 vllm 对齐的 NZ 写法（cast29+transpose），**不要切 ND**。
-
-### ② decode 阶段 `atb::OperationSetup` 段错误 = eager-decode 走 ATB `_npu_paged_attention`，与量化无关
-
-（已坐实根因 + 真修复，2026-06-25）
-
-升级 torch_npu 后改在 decode 崩。三段同步插桩定位：qkv 的 `npu_quant_matmul` 同步 OK、o_proj 的 matmul **还没跑**就在「进 o_proj 前的入口同步」崩 → fault 来自 qkv→o_proj 之间的 **decode attention**，不是 FP4 matmul。
-
-**根因**：graph / eager 两模式在 `AscendAttnBackend` dispatch 到不同 attention 算子——
-- graph decode（`forward_decode_graph`，`ascend_backend.py:2256`）走 `npu_fused_infer_attention_score`（**aclnn** op，吃 ND，不建 internal 张量）
-- eager decode（`forward_decode` 默认分支 `ascend_backend.py:2617`，`use_fia=use_fa=False`）落到 `torch_npu._npu_paged_attention`（**ATB** op）
-
-这台 A5 把 `allow_internal_format` 强制打回 False（`utils.py:114` 设 True 不生效），ATB `OperationSetup` 要建 FRACTAL_NZ internal workspace 张量、建不出来 → 段错误（报错命名空间 `atb::` 正对 ATB 算子，FIA 是 aclnn 不带此前缀）。
-
-**两条解法都已在 A5 验证可跑**：
-1. **别加 `--disable-cuda-graph`**（默认 graph 模式，FIA，离线 W4A8 输出正常）
-2. 若确需 eager decode，**`ASCEND_USE_FIA=1`** 让 eager 路径也改走 FIA（`ascend_backend.py:2552`，aclnn）绕开 `_npu_paged_attention` → **A5 实测能跑**（这是一整套 FIA 模式，`memory_pool_npu.py:67`/`npu_graph_runner.py:113` 同读此 flag、KV cache 布局随之变，非单纯换算子）
-
-此 attention bug **非 W4A8 特有**（与 linear 量化无关、在线/离线同理），属独立 NPU attention 问题，不在本 PR 交付范围。
-
-**误判史**：我中途基于旧 torch_npu 误加的 ND commit `4c1a0f5a0d` 已回退（②的 atb 段错误一度被我也归给 torch_npu 版本/ND，实为 eager-decode attention，已订正）。`--disable-cuda-graph` 是我早期排查时让用户加的，结果它本身才是触发 ② 的开关。
-
----
-
-## 在线 W4A8 FP4 崩「output y must be same shape as input x」的真凶 = fp4 dtype 来源用错
-
-（`junlin_qwen3_dense_w4a8`，2026-07-06 二次诊断）
-
-`mxfp_w4a8` 在线量化 `npu_dynamic_mx_quant(weight, dst_type=fp4, round_mode="round")` 在 torch_npu `2.10.0.post2.dev20260704`（CANN 9.1.0，A5）崩 561002。
-
-**~~此前误诊为「upstream FP4 kernel 被整体打回、只能纯 torch RTN 绕过」（commit `db4dee06ea`）——已推翻。~~**
-
-**真相**：**NPU op 的 fp4 dtype 参数**（`npu_dynamic_mx_quant(dst_type=)` / `npu_quant_matmul(x2_dtype=)` / `npu_format_cast(input_dtype=)`）只接受 `torch_npu.float4_e2m1fn_x2`（int enum，==`296`），拒绝 `torch.float4_e2m1fn_x2`（torch dtype 对象，存在但喂给 op 会在 op-plugin 层报错；传 `None` 报「Expected a value」）。
-
-生产 `_get_float4_e2m1fn_x2_dtype()` 当时 `getattr(torch, "float4_e2m1fn_x2")` → 拿 torch dtype 对象 → 崩。
-
-A5 probe（同 shape 分别拿 `torch_npu.float4_e2m1fn_x2`=296 vs `torch.float4_e2m1fn_x2` 当 dst_type）在**同一台 post2 机器**坐实：
-- `dst=296` 走完整 quant→format_cast→matmul 链 **PASS**（含 weight `[4096,4096]→[4096,2048]`）
-- `dst=torch.float4` 在 quant 第一步 **FAIL**
-
-**kernel 完全没坏。** fp8 不中招是因为 `torch.float8_e8m0fnu`(dtype 对象)作 `scale_dtype` 被接受——**只有 fp4 dtype 挑剔**。post1 能跑 post2 崩：升级收紧的是 op 对 fp4 dst_type 的**类型接受度**，不是 kernel。
-
-**修法（恢复 op 版）**：`_get_float4_e2m1fn_x2_dtype()` 改为 `is_npu()` 时优先 `getattr(torch_npu, "float4_e2m1fn_x2")`（函数体内惰性 import torch_npu，不炸跨平台 CI），torch fallback；然后 `git checkout` 回 op 版 `process_weights_after_loading`（`npu_dynamic_mx_quant(dst=fp4)`）、删纯 torch `_mxfp4_quantize_weight`。在线+离线的 matmul/format_cast 一并受益（离线 post2 也没验过、同隐患）。**A5 e2e 已验证：op 版 + dtype 修复后在线 `mxfp_w4a8` 输出连贯（2026-07-06，用户实测）。**
-
-**两条教训**：
-1. 第一次误诊「kernel regression」正因 probe **没忠实复现生产的 dtype 来源**——probe v1 用 `torch_npu.float4`(296) 全 PASS、生产用 `torch.float4` 会崩，差异全在 dtype 从哪个模块取。**probe 要逐字节照抄生产 call，dtype 取自哪也算 call 的一部分**；「先 probe 再下结论」还不够，probe 本身必须忠实。
-2. PR #23650 review 定的「W4A8 全脱 torch_npu、dtype 走 `getattr(torch,...)`」对 **fp4 是错的**——fp4 dtype 必须来自 torch_npu（fp8/e8m0 无所谓）。
-
----
-
-## 在线 W4A4 双级路径：`w_l0_scale.squeeze(-1)` 会在中维为 1 时把维度吃掉
-
-（2026-07-25 踩，Qwen3.5 MoE 在线 W4A4）
-
-`linear_method_npu.py` 里 `npu_dynamic_dual_level_mx_quant` 返回的 L0 scale 要按 `reshape(shape[0], -1)` 处理：
-
-```python
-# 错：L0 scale 中维为 1（如 [4, 1]）时 squeeze(-1) 把维度吃掉，transpose(0, 1) 随即塌成错误形状/报错
-w_l0_scale = w_l0_scale.squeeze(-1).transpose(0, 1).contiguous()
-# 对
-w_l0_scale = w_l0_scale.reshape(shape[0], -1).transpose(0, 1).contiguous()
-```
-
-**判据**：`[4, 1] -> [1, 4]`。2026-09-24 复查：9 个 worktree 里 8 个（`upstream-main`、`qwen3.5_moe_w8a8`、`qwen3.5_moe_w4a8`、`qwen3.5_dense_w8a8*` 等）**仍是 `squeeze(-1)` 写法**，属尚未修的潜在 bug；动 W4A4 双级路径时一并换掉。
-
----
-
-## W4A4 MoE 的 packed 权重保持 ND，不能套用 W4A8 的 NZ cast
-
-（2026-07-25 踩，Qwen3.5 MoE 在线 W4A4）
-
-W4A8 路径会把 weight 转 `FRACTAL_NZ` 再喂 grouped matmul，**W4A4 不能照抄**：
-
-- `w13` / `w2` 用 `transpose(1, 2)` 后**保留 strided view**，不要再 `.contiguous()`（理由同上面的 MoE MXFP8 一节）。
-- `npu_grouped_matmul` 接受 ND 或 `FRACTAL_NZ`，**不接受 `FRACTAL_NZ_C0_32`**；套用 W4A8 的 NZ helper 会在 warmup / 图捕获阶段直接报非法 format。
-
----
-
-## ModelSlim 导出配置：fused expert 的三个 shard 必须同精度，排除 router gate 用 `*gate`
-
-（2026-07-25 / 2026-07-27 踩，Qwen3.5 MoE W4A8 / W4A4 的 YAML）
-
-vLLM-Ascend 把 Qwen3.5 的 fused `experts` 映射成 `experts.0.gate_proj` / `up_proj` / `down_proj`，三者共享同一精度，所以 include/exclude 规则要按整体写：
-
-- `exclude: ["*mlp.experts.*gate*"]` 会把 `gate_proj` 留成 FLOAT，而同一个 expert 的 `up_proj` / `down_proj` 是 W4 → 能加载、精度不对，且日志里看不出来。
-- 正确写法：按 `*mlp.experts*` 整体量化，只排除 `mtp*`；确实要排除 router gate 时用**后缀** `*gate`，不要用 `*gate*`。
-- 位宽口径：W4A8 = `act=mxfp8` + `weight=mxfp4`；W4A4 = 两者都 `mxfp4`。混合 scheme 要显式保留 attention 的 MXFP8 例外，别叫它「全层 W4A8」。
-
----
+来源：10-26 用户加载结束后的报错及对应 CPU/mock 回归；不把 mock 的禁止 copy 当作 NPU 验收，后续证据见目标计划。
 
 <a id="modelslim-mixed-gate-up"></a>
 
-## Dense ModelSlim 的 gate/up 混精不能强行融合
+### 混精与 fused loader
 
-真实 Qwen3.6-27B checkpoint 可以是 `gate_proj=FLOAT`、`up_proj/down_proj=W4A8_MXFP`。原 fused `gate_up_proj` 的一致性 guard 会报 `Detected some but not all shards ... are quantized`；这不等于 checkpoint 缺 key，也不是公共 W4A8 apply 的数值回归。
-
-当前 Qwen3.5 Dense 兼容路径仅在完整、异构的 ModelSlim gate/up 描述下显式拆成两套 `ColumnParallelLinear`。两个 loader 保留独立 weight/scale canonical keys，各自处理 FLOAT 或 packed FP4；同精度仍融合，缺失描述仍受原 guard 保护。不能改量化 JSON 假装权重转换、删除一致性检查或二次打包 FP4，也不能把 Dense 的适配直接推广到 fused MoE experts。分支与验证证据见 [branches.md](branches.md)，当前验收见 [G2.1](mxfp-refactoring-plan.md#refactoring-status)。
+- router 的 `*gate` 与 MLP `*gate_proj` 不同；过宽的 `*gate*` 会误伤目标层。按实际层名和描述核对，不按模型名猜精度。
+- 同一 fused 参数的 shard 必须有一致格式；Dense 异构 gate/up 可拆成现有两套 ColumnParallelLinear 并保留各自 loader，MoE 专家 fused layout 另行处理。
+- 不修改描述 JSON 假装权重已转换；FLOAT、FP4、INT8 的真实存储才是依据。
 
 <a id="w4a8-alignment-fallback"></a>
 
-## 在线 W4A8 的 K=4304 视觉层回退提示
+### 在线 W4A8 对齐回退
 
-`Mxfp4W4A8Config.get_quant_method()` 在 `input_size % 32 != 0` 时返回 `UnquantizedLinearMethod`。因此 `model.visual.blocks.0–26.mlp.linear_fc2` 的 K=4304（134×32+16）会逐层打印回退提示，保留非量化精度；当前用户 BF16 部署中即为 BF16。这不表示整个模型退回 BF16，也不能将请求正常记成这些层的 W4A8 验收通过。
+Qwen 视觉 fc2 的 K=4304 不满足当前 W4A8 调用对齐要求时保留 BF16，不能将它计为全视觉 W4A8。判断使用 TP 后真实本地 shape，不扩大为所有 Linear 或模型的禁用条件。离线能力以 checkpoint scheme 和实际 kernel 为准。
 
-保护来自本 fork 的 `7aa87ddfab`（2026-07-24），当时记录的 FP4 matmul 错误为 `the k dim must to be aligned to 32, which is 4304`。该策略有配置回归，G2.1 公共执行重构保留了它。历史报错不证明当前所有 torch_npu/CANN 版本都有同样限制；是否解除保护需针对部署版本做 NPU probe，并同时验证输入/权重 padding、scale 配对与 NZ 表示。不能仅删除 guard，也不能直接套用 MXFP8 的 partial-scale 适配。全视觉 W4A8 是额外能力扩展，不是 G2.1 去重的新验收门槛。
+## MoE 与跨平台导入
 
-## graph 正常复测与 dtype、事件依赖的证据边界
-
-Qwen3.6-27B 部署曾出现 `chunk_state dtype must match initial_state`，显式设置 `SGLANG_MAMBA_SSM_DTYPE=bfloat16` 后可启动。该部署基线未覆盖时 SSM 回退 float32、conv 默认 BF16；诊断进程打印的默认 dtype 不等于服务中实际 pool dtype。通过 dtype 检查也不等于数值或完整推理通过。
-
-随后曾有禁 graph、重启后长文本恢复正常的对照；用户又确认去掉禁用参数并停止、重启服务后正常。当前记录为“用户真机功能复测通过，历史退化根因未证实”，不能把环境推测写成已定位根因，也不固化禁 graph 为修复。`207005 / EL0006 / bind sq cq failed` 属于另一份资源分配错误日志，不能直接与生成乱码归为同一根因。
-
-`replay_with_input_update()` 的 update/replay 并发顺序由 #40814 有意引入，另有 #40446 的 rebind fence；底层图更新是否通过事件保证依赖，必须核对**实际部署的** torch_npu 实现。不能凭过时注释、Python 两行顺序或一个假定底层无同步的 mock 就交换顺序，也不能拿 torch_npu master 代替部署版本作为结论。
+- GMM 的 group list 是 COUNT 还是 CUMSUM 必须逐调用确认；融合 GMM1/SwiGLU 与 GMM2 可以不同，不能只复制一个 dtype/shape。
+- dispatcher 的 payload、scale、原输出 dtype 及 DeepEP normal/low-latency 契约分别检查。上游已重构过 Ascend dispatcher，不按旧类名推断当前路径。
+- `vllm-ascend` 已存在 W4A8 MoE 参考；应查当前 checkout 的 `w4a8_mxfp4.py`，不沿用“只有 Dense”的旧结论。
+- 跨平台顶层 `torch_npu` import 受 `sglang.srt.utils.is_npu()` 保护；不能用插件未加载时恒假的 platform 判断代替。CPU 可构造的类不要在 `__init__` 提前绑定缺失 NPU op，按调用惰性解析。
+- 在线 W4A4 `"mxfp4"` 配置需正确标明动态模式（`is_static_cfg=False`）；已在上游注册的模块不要重复装饰器注册。
 
 <a id="npu-mtp-state-contract"></a>
 
-## MTP 的 SSM dtype、layout 与 prefill 必须匹配
+## MTP / GDN 状态与边界
 
-以下是 2026-09-20 联调保留下来的机制，不代表当前版本仍缺全部修复。当前待合入项与部署依赖见[PR 跟踪表](mxfp-refactoring-plan.md#pr-merge-status)。
+- SSM/intermediate state 的 BF16 dtype、`(HV,V,K)` layout 需与部署 wheel 配套。相关源头：kernel #747/#808、SGLang #39589/#40419；不能只升级一侧。用 K≠V 的输入检测轴交换，方阵可能掩盖错误。
+- prefill、decode、verify 的状态索引/容量和更新顺序分别核对。曾经重启后恢复正常的 graph/乱码反馈不证明 graph 是根因；不默认关闭 graph 或重排 update/replay。
+- cache_loc 曾按 `batch*16` 发射，而实际 view 更小，写入同 storage 后续区域；kernel #824 已修复。要使用 tensor 的真实 numel/stride，并检查 view 的存储边界。越界写入恰好相同值时，单纯输出相等仍可能漏检。
+- 旧 text-replacement 补丁已删除；恢复历史复现从 Git 获取，不对新版部署自动应用。
 
-- **dtype**：历史 recurrent kernel 按 BF16 读取 state；传入 FP32 会按错误的元素位宽解释内存，可能先输出通顺、随后复读或产生极大值。kernel #808 增加 BF16 断言，SGLang #40419 配套让 persistent/intermediate speculative SSM state 使用相同 BF16，不能只改单侧。
-- **layout**：kernel #747 与 SGLang #39589 配套统一 `(HV,V,K)`。只更新一侧会让 prefill、decode、verify 对同一 pool 的解释不同；`K=V` 时 shape 相同会掩盖转置错误，应以 `K != V` 的 probe 核对实际 stride 和内容。
-- **prefill/gating**：历史 wheel 将 gating 输出改为二维，并提供返回 `(V,K)` state 的 AscendC prefill，而旧调用仍期待三维 gating 和 `(K,V)` state。后续功能分支已保留 main 的 GDN backend/prefill；不要直接重新套用归档补维或换算子补丁。旧 probe 中 attention 输出接近不等于 recurrent state 已等价，曾有 state 对照未解释清楚的记录。
-- **构建与资源**：旧 `move_intermediate_cache` 的 `h_block_size=2` 曾在 Ascend 950 超出 UB，#651/#742 组合将其改为 1。旧实验 worktree 已删除，恢复验证应检查当前实现与 wheel target；相关诊断脚本位于 `llm/diagnostics/`，不能用退出码代替脚本中的数值失败统计。
+## 文档与验证
 
-## A8W4 `npu_quant_matmul` 的 bias 必须是 BF16 二维 `[1,N]`
-
-Qwen3.5 在线 W4A8 的首次图片请求会进入视觉塔 QKV；该层带一维 bias。若沿用其他量化 matmul 的 FP32 `[N]` 处理，A5 会在 `NPUMXFP4W4A8LinearMethod.apply` 报 `The dimension of bias should be 2. Actual bias dimension is: 1.`。MindIE-SD 的同类 W4A8 路径会将 bias 转为 BF16，并把 `[N]` 扩成 `[1,N]`。
-
-在线和离线 W4A8 Dense 方法必须共享这一规范化逻辑。Qwen3 文本模型常见的无 bias 路径保持 `None`，不会受到数值或性能影响；不能把这个例外扩散到 MXFP8/W4A4 等其他量化方法。
-
----
-
-## sglang 文档路径迁移过两次；长期分支里的 `docs_new/` 改动会被 merge 静默吞掉
-
-（2026-07-06 踩第一次，`junlin_qwen3_dense_w4a8` PR #23650；2026-08-25 踩第二次，PR #32602）
-
-upstream 先把文档从 `docs/`（`.md`）迁到 `docs_new/docs/`（`.mdx`），**之后又把 `docs_new/` 改回 `docs/`**。当前 main 只有 `docs/docs/**/*.mdx`，`docs_new/` 与当年那个 `scripts/ci/check_no_docs_changes.py` 守卫都已不存在。
-
-**改文档一律去 `docs/docs/` 对应位置**，用 `.mdx`（HTML `<table>` + JSX `style={{color:'green'}}`，非 md 表）。改之前先 `git ls-tree -r upstream/main --name-only | grep <关键词>` 确认真实路径，不要照抄旧文档快照——Ascend 量化页面这一路走过 `docs/platforms/ascend/ascend_npu_quantization.md` → `docs_new/docs/hardware-platforms/ascend-npus/ascend_npu_quantization.mdx` → `docs/docs/hardware-platforms/ascend-npus/optimization/quantization.mdx`。
-
-**最危险的是长期分支**：目录改名 + 文件重排后 git 的 rename 检测认不出来，合并 `upstream/main` 时**不报冲突**，只是把你在 `docs_new/` 下的改动一起删掉。合并后必须 `git diff upstream/main -- docs` 复核自己的文档改动还在不在，为空就说明被吞了，要手动搬到新路径。
-
----
-
-## MDX 表格标记不能使用 HTML 注释
-
-`.mdx` 的不可见标记使用 `{/* marker */}`，不能写 `<!-- marker -->`。#44366 的旧 head 在 Mintlify 解析时因 HTML 注释失败；只检查 Python 测试中的表格内容一致性无法发现 MDX 语法错误。更换标记时同步生成器/测试中的匹配字符串，并运行文档解析与链接检查。语法依据见 [MDX 官方说明](https://mdxjs.com/docs/what-is-mdx/)。
-
-## MoE MXFP8 `npu_grouped_matmul` 必须显式传 `x_dtype` + `weight_dtype`
-
-仅传 `scale_dtype=FLOAT8_E8M0FNU_DTYPE` + `per_token_scale_dtype=FLOAT8_E8M0FNU_DTYPE` 不够——kernel 无法仅从 scale_dtype 推断「权重/激活是 fp8_e4m3fn 且 scales 是 UE8M0 block scale」，会走错 dequant 路径产生乱码。
-
-对齐 vllm-ascend `A5DeviceAdaptor.get_quant_gmm2_kwargs` (`device_op.py:460-466`)，gmm1/gmm2 都加：
-
-```python
-x_dtype=torch_npu.float8_e4m3fn,
-weight_dtype=torch_npu.float8_e4m3fn,
-scale_dtype=_FLOAT8_E8M0FNU_DTYPE,
-per_token_scale_dtype=_FLOAT8_E8M0FNU_DTYPE,
-```
-
-注意：dense linear (`npu_quant_matmul`) **不** 需要 `x_dtype/weight_dtype`，它通过 `group_sizes=[1, 1, 32]` 显式带块大小，能从 tensor dtype 推断模式；MoE `npu_grouped_matmul` 没 `group_sizes`，必须靠 `x_dtype/weight_dtype` 显式声明。
-
----
-
-## MoE MXFP8 的 gmm1 需使用 fused gmm+swiglu+quant
-
-对齐 vllm-ascend A5 MXFP MoE 路径，gmm1 使用 `torch_npu.npu_grouped_matmul_swiglu_quant_v2`，而不是拆成 `npu_grouped_matmul` → `npu_swiglu` → `npu_dynamic_mx_quant`。
-
-该 fused op 的 `group_list` 需要从 count-style（`expert_tokens_num_type=1`）转换为 cumulative-style（`group_list.cumsum(dim=0)`）；gmm2 仍使用 `npu_grouped_matmul` 并保留 count-style `expert_tokens`。
-
----
-
-## MoE MXFP8 的 weight + scale 必须 `.transpose(1, 2)` 但 _不要_ `.contiguous()`
-
-**真实机制是内核断言，不是带宽效应**（2026-07-21 A5 一次性 kernel 探针实测更正，脚本已删）。`npu_grouped_matmul_swiglu_quant_v2` 有一条 `CheckMXTranspose`：**weight 与 weight_scale 的 transpose 标志必须一致**。只给 weight 加 `.contiguous()`（或转 NZ）而 scale 仍是 transpose view，会**直接报错**，不是静默乱码：
-
-```
-AclNN_Parameter_Error(EZ1001): The transposition of weightScale/weight
-should be equal, but actual transpositions are true/false.
-CheckMXTranspose failed.
-```
-
-**两边一起 `.contiguous()` 数值是正确的**（cos 与 strided view 完全一致），只是更慢：128-expert 下 decode −6.2%、prefill −0.5%。所以结论「不要 contiguous」成立，但理由是实测更慢 + 容易踩标志不一致，而非早先写的「block-scale 映射错位 → 乱码」。
-
-> ⚠️ 小 expert 数的 micro-benchmark 会给出完全相反的结论：E=4/top_k=2 时 contiguous 反而快 58%。定 layout 必须用真实 expert 数（128）测。
-
-正确做法（对齐 vllm-ascend `AscendW8A8MXFP8DynamicFusedMoEMethod.process_weights_after_loading`，`w8a8_mxfp8.py:332-339`）：
-
-```python
-layer.w13_weight = Parameter(qw13.transpose(1, 2), requires_grad=False)         # [E, H, 2I] strided view
-layer.w13_weight_scale = Parameter(s13.transpose(1, 2), requires_grad=False)    # [E, H//64, 2I, 2] strided view
-```
-
-内存仍是 `[E, N, K]` / `[E, N, K_blk//2, 2]` 物理布局，但逻辑 shape 已变为 `[E, K, N]` / `[E, K_blk//2, N, 2]`——同时满足 kernel 的「n-dim 相等」和「transposition 一致」两个约束。
-
-`npu_dynamic_mx_quant` 对 2D 输入 `[N, K]` 直接吐 **3D** scale `[N, K_blk//2, 2]`（参考 `mxfp8_npu.py:144`，**不要手动 reshape**——已经 3D，stack 后是 4D，再 reshape 会 `too many values to unpack`）；`torch.stack` 拼出 weight 3D `[E, N, K]` + scale 4D `[E, N, K_blk//2, 2]`；transpose(1, 2) 后即为正确布局。
-
-注意：dense linear 路径 (`NPUMXFP8LinearMethod`) 用 `.transpose(0, 1).contiguous()` 是 OK 的，因为 `npu_quant_matmul` 接受 contig 布局；MoE 的 `npu_grouped_matmul` 不接受。
-
-踩坑历史：早先版本错误地加了 `.contiguous()`，跑通但输出乱码——纠正回 vllm-ascend 的 strided-view 布局后修复。（当时归因为「映射错位」，2026-07-21 探针证明真实约束是上面的 `CheckMXTranspose` 断言。）
-
-### FRACTAL_NZ：cast 必须在 transpose _之前_
-
-同一条断言决定了 NZ 怎么加。`npu_format_cast` 返回的是物理重排后的张量，transpose 标志为 false，所以**先 transpose 再 cast 会让 weight 与 scale 标志不一致而报错**——同文件 int8 MoE 方法（`moe_methods.py:378`/`:485`）的 `npu_format_cast(w.transpose(1, 2))` 写法**不能照抄到 MXFP8**（int8 没有 MX scale 要同步）。正确顺序与 dense W4A8（`linear_method_npu.py:443`/`:578`）一致：
-
-```python
-weight = npu_format_cast(weight)                 # [E, N, K] ND -> FRACTAL_NZ
-Parameter(weight.transpose(1, 2), ...)           # 再 transpose，标志与 scale 一致
-Parameter(scale.transpose(1, 2), ...)            # scale 保持 strided view，不动
-```
-
-A5 实测（Qwen3-30B-A3B，128 experts，torch_npu 2.10.0.post2）：**decode +1.4%、prefill +3.8%**，噪声底噪 0.2~0.3%，输出与改前完全一致。远不及 int8 路径报告的 ~10%，但两个 shape 方向一致。分支 `junlin_qwen3_moe_w8a8_nz`（commit `d419aa41f`）。
-
-其他实测结论：
-
-- `npu_format_cast` **直接接受 `float8_e4m3fn`**；vllm-ascend `fp8.py` 的 `uint8 view + customize_dtype` 写法在此 build 上失败（`Cannot find bin of op TransData ... FRACTAL_NZ_C0_32`）。
-- NZ 权重配 ND 的 e8m0 block scale 数值正确，不会静默读错 scale。
-- `_is_nz_aligned` 原先对 fp8 落到兜底 `return True`；已补 int8 同款规则（`k%16, n%32`，fp8 同为单字节）。
-
----
-
-## strided-view（去 `.contiguous()`）在 w4a8 硬件上反而变慢
-
-（`junlin_qwen3_dense_w4a8`，2026-06-16）
-
-strided weight/scale view（w8a8 上实测 -6.6% 提升）在 **w4a8 分支的 NPU 上端到端比更新前 w4a8 慢**（多条路径），且是「慢」非「乱码」。故 commit `9d6e9583e` 把两处 `.contiguous()` 恢复回来：MXFP8 dense（`NPUMXFP8LinearMethod`，merge 带来的 strided）+ W4A8 dual-level（`NPUMXFP4W4A8LinearMethod`，原 perf commit `33dfc0b9b` 去掉的）。
-
-**注**：`NPUMXFP4W4A8LinearMethod` 的 dual-level 路径已于 2026-06-25（commit `a1947f3133`）整体替换为单级真 W4A8（apply 复用离线 NZ 路径），此条对它已不适用；MXFP8 dense 那半仍有效。**bias 缓存（`layer.bias_fp32`）是纯增益、保留**。
-
-strided 优化版存档在分支 **`junlin_qwen3_dense_w4a8_strided`**（72fa20005）。
-
-**教训**：`.contiguous()` 去留是「硬件/kernel 相关」，不要跨分支照搬 w8a8 的 layout 优化，需各自 NPU benchmark。
-
----
-
-## NPU kernel 类在 CPU 上构造即炸，CPU 单测写不出来
-
-（2026-08-25 踩，PR #32601）
-
-`HiddenStatesDynamicQuant.__init__` 曾直接 `self._op = torch.ops.npu.npu_dynamic_mx_quant`。没装 torch_npu 时 `torch.ops.npu` 是空 namespace，属性访问就 `AttributeError`，于是 `NPUW4A8MXFP4MoEMethod()` / `NPUW4A4MXFP4MoEMethod()` 构造不出来，连带持有它们的 `ModelSlimW4A8MXFP4MoE` / `ModelSlimW4A4MXFP4MoE` 也无法在 CPU 上实例化——`register_cpu_ci` 的 scheme 测试一行都写不了。
-
-已改成首次调用时 `getattr(torch.ops.npu, self._op_name)`：dtype 校验仍在 `__init__` 里立刻报错，缺 torch_npu 依然在真正执行时炸得很响。**新写 NPU kernel 类时别在 `__init__` 里绑 `torch.ops.npu.*`**，否则等价于宣布这条路径没有 CPU 覆盖。
-
----
-
-## 新增 MoE 量化方案前先查 `moe_quant_schemes`，重名条目会变死代码
-
-（2026-08-25 踩，PR #32601 / #32602）
-
-`ModelSlimConfig.get_moe_scheme` 用一张 `[(scheme_name, scheme_class), ...]` 列表按顺序匹配，命中第一条就返回。上游 [#30318](https://github.com/sgl-project/sglang/pull/30318) / [#30319](https://github.com/sgl-project/sglang/pull/30319) 已把 `W4A8_MXFP` → `ModelSlimW4A8MXFP4MoE`、`W4A4_MXFP4` → `ModelSlimW4A4MXFP4MoE` 注册进去；长期分支里再追加一条同名条目**不会冲突也不会报错**，只是排在后面永远匹配不到，整套自研 scheme 变成死代码。
-
-同理，`hardware_backend/npu/quantization/moe_methods.py` 里上游已有 `NPUW4A8MXFP4MoEMethod` / `NPUW4A4MXFP4MoEMethod`。要加在线量化就在这些类里按权重 dtype 分支（BF16/FP16 = 在线，uint8 = 离线 checkpoint），不要另起一个平行类。
-
----
-
-## 在线 W4A4 的 `get_name()` 与静态 MXFP4 同名，靠 `is_static_cfg()` 区分
-
-（2026-07-25 踩，Qwen3.5 MoE 在线 W4A4）
-
-`Mxfp4W4A4Config.get_name()` 返回 `"mxfp4"`（`npu_mxfp4_w4a4.py`），与静态 MXFP4 checkpoint 的 scheme **同名**；通用 MoE loader 靠 `Mxfp4W4A4Config.is_static_cfg()` 判断这是「已序列化的静态 MXFP4 checkpoint」还是「BF16 权重现量化」。
-
-**在线 W4A4 必须 `return False`**：返回 `True` 会被当成静态 checkpoint 走加载，报出来的错落在下一层的形状/dtype 检查上，完全不指向这里。回归测试是 `test_online_config_is_not_static()`。新加在线 scheme 时，先确认它的 `get_name()` 有没有和离线 scheme 撞名。
-
----
-
-## 异步 device fault（`507035` / `vector core exception`）先去 plog 查 `fault kernel_name`
-
-（2026-09-23 踩，Qwen3.5 MTP on Ascend 950）
-
-stderr 里那段 `EZ9999` 只说"某个 AI Core 任务访问了非法 GM 地址"，**不说是哪个算子**；Python 栈指向的是**下一个同步点**，不是出错的 kernel。overlap 调度下一轮 decode 里往往只有一个同步点（verify replay 前的 `forward_batch.seq_lens.cpu()`），于是栈永远落在同一个地方，跟真凶无关。
-
-runtime 会把出错任务的 kernel 名单独写进 plog，崩过一次就能查，不用重跑：
-
-```bash
-./llm/diagnostics/npu_fault_kernel.sh <PID>      # PID 取报错里的 EZ9999[PID: ...]，是 scheduler 子进程
-```
-
-它 grep 的是这类行（`~/ascend/log/{run,debug}/plog/` 与 `device-*/`）：
-
-```
-AI Core kernel execution failed, ... fault kernel_name=cache_loc_assign_1, ...
-[Dump][Exception] ... exceptionType=2(aicore), kernelName=cache_loc_assign_1
-```
-
-**先做这一步再猜**。这次靠它一步从"GDN/MTP 的某个算子"缩到 `cache_loc_assign`，而那个算子和 GDN、投机解码的 kernel 全都无关。
-
-## `cache_loc_update` 按 `batch * MAX_STEP` 读写 `out_cache_loc`，并发下随机踩非法 GM 地址
-
-（2026-09-23 定位，kernel [#824](https://github.com/sgl-project/sgl-kernel-npu/pull/824)）
-
-`csrc/cache_location_assign` 的 host 把 `cacheLocSize` 写死成 `batchSize * MAX_STEP`（`MAX_STEP = 16`，#411 从 5 改来），**完全不看 `out_cache_loc` 实际多长**：`PreProcess` 按这个数 `DataCopy` 读进 UB，`ProcessForCacheUpdate` 结尾再 `DataCopyPad` 整块写回。SGLang 投机解码只分配 `batch_size * draft_token_num`（NEXTN 下 4），于是每次 verify 准备都越界读写 `batch * 12` 个 int32。
-
-**这个越界在数值上是隐形的**：尾部读出来什么就写回什么，比对内容、放哨兵张量都发现不了。唯一症状是踩到未映射显存时的 fault。所以它能潜伏很久，而且"输出正常"不能作为没问题的证据。
-
-崩溃要同时满足三个条件，这就是"跑到测试集一半才炸"的由来：
-
-1. **bs ≥ 9** —— 越界才超出分配器的 512B 最小块（bs=15 时张量 240B、越界 720B）；
-2. **张量落在某个 2MB segment 的最后一个块** —— 实测约 0.6~0.8%；
-3. **那个 segment 的下一页没有映射** —— 实测 20 次跨段里只中 1 次。
-
-实测证据（`llm/patches/patch_cache_loc_probe.py` 打桩，gsm8k 并发跑）：3256 次调用里 20 次跨段，前 19 次全在同一地址 `0x120bff5ffe00`（邻页已映射，安然无恙），第 20 次在另一个 segment 的尾部 `0x12057fbffe00`，越过段尾 448B，进程当场死在这次调用上。
-
-- **kernel 侧正解**：host 改用 `outCacheLoc.numel()`（#824）。修完后残余的只有"读取个数向上对齐到 8 个 int32"，最多 28B，且可证明总落在分配块自身的 512B 取整余量里。
-- **不要在 SGLang 侧绕**：调用方多分配到 `batch * 16` 也能让越界落回张量内，但那是把 kernel 的常量硬编码进调用方（上游已经把它从 5 改到过 16），修的不是根因。2026-09-23 一度这么提交过，当天即 revert（`junlin_qwen3.5_dense_w8a8_pr36426` 的 `b35cc57288` → `05f11fdab0`）；`llm/patches/archive/patch_cache_loc_update_capacity.py` 和打桩脚本的 `guard` 模式只用于定位，不要当修复用。
-- 与 Ascend 代际无关，910B/910C 同样中招；与 GDN、MTP 的 kernel 也无关，只是投机解码是唯一调用方，所以只有开 MTP 才看得见。
-- 这个仓自己的 `tests/python/sgl_kernel_npu/test_cache_update.py` 同样越界（bs=300 给 ~450 个元素，算子按 4800 个读写，越出约 17KB），一直没炸纯属运气。
-
-排查工具（不用跑测试集）：`llm/patches/patch_cache_loc_probe.py` 打印每次调用的几何关系（`observe` 观察 / `strict` 跨段即抛 / `guard` 等价于修复 / `force` 强制跨段），`llm/diagnostics/cache_loc_update_oob_check.py` 离线复现。**必须跑出并发**，单条 curl 只有 bs=1，永远看不到问题。
+- 上游文档当前在 `docs/docs/*.mdx`；修改前查实际目录，合并后检查 rename 是否吞掉修改。MDX 用 `{/* ... */}`，不是 HTML 注释。
+- 独立算子探针只在空闲 NPU 上运行，不能与 serving 抢同一卡。CPU/mock、NPU kernel、graph replay、模型精度与 serving 性能是不同证据层级。
+- 新机器/软件栈重新核对完整链路，旧微基准阈值不作为生产策略。G6 的负收益和停止条件见 [归档](mxfp-refactoring-plan.md#g6-performance-archive)。

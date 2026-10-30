@@ -1,6 +1,6 @@
 # 分支与版本定位
 
-更新：2026-10-30，本轮实时刷新 #32602；其余版本记录仍为 10-29 快照。PR 状态/依赖/验收只在 [目标计划](mxfp-refactoring-plan.md) 维护；本文记录版本和恢复入口，不记录逐次操作流水。
+更新：2026-10-30，本轮实时刷新 #43739、其 #36426 组合分支及 #32602；其余版本记录仍为 10-29 快照。PR 状态/依赖/验收只在 [目标计划](mxfp-refactoring-plan.md) 维护；本文记录版本和恢复入口，不记录逐次操作流水。
 
 ## 仓库关系
 
@@ -26,9 +26,9 @@ SGLang fork 的默认分支已按用户授权从旧 Diffusion 分支改为 `main
 
 | 用途 | 分支 | worktree | 本地 HEAD / 差异 |
 | --- | --- | --- | --- |
-| #43739 | `junlin_qwen3.5_moe_w4a8` | `qwen3.5_moe_w4a8` | `0bfad837568c` |
-| #43739 + #36426，仅组合验证 | `junlin_qwen3.5_moe_w4a8_pr36426` | `qwen3.5_moe_w4a8_pr36426` | `9a4a1d2134ae` |
-| #32602 | `junlin_qwen3.5_moe_w4a4` | `qwen3.5_moe_w4a4` | `b5a1140f70` |
+| #43739 | `junlin_qwen3.5_moe_w4a8` | `qwen3.5_moe_w4a8` | `c0e0fab8e6a0` |
+| #43739 + #36426，仅组合验证 | `junlin_qwen3.5_moe_w4a8_pr36426` | `qwen3.5_moe_w4a8_pr36426` | `83a7157ab8a5` |
+| #32602 | `junlin_qwen3.5_moe_w4a4` | `qwen3.5_moe_w4a4` | `831438498f89` |
 | #43740 | `junlin_a5_fia_mixed_split` | `a5_fia_mixed_split` | `4f38ae231f2b` |
 | #40419 | `junlin_npu_mamba_ssm_dtype` | `npu_mamba_ssm_dtype` | `756dac5a667b` |
 | #44363 | `junlin/pr-w4a8-shared-execution` | `pr_w4a8_shared_execution` | `4f998c97fd76` |
@@ -41,11 +41,11 @@ SGLang fork 的默认分支已按用户授权从旧 Diffusion 分支改为 `main
 | 已合入 #32745 的主 clone | `junlin_qwen3.5_dense_w8a8` | `qwen3.5_dense_w8a8` | `c89095b6e50f`；保留共享 git 元数据 |
 | 只读上游快照 | `upstream-main` | `upstream-main` | `3d508d614f28`；不是最新 main，不自动移动 |
 
-#43739 当前完整 SHA：`0bfad837568c6617a2b1a70cfb8f901e2cd5c3d9`。组合 SHA：`9a4a1d2134aeee4ac5f27f7964ce6b5d1819ab72`。组合只增加 #36426 的 4 文件补丁（+97/-43），对应 head `9ea4881cc32b2c43afbfd10795183752e5d33f22`，patch-id `267e9d65d3e05fb0ae29bbb1fb5a64f73ae6d189`；正式 PR 不含该补丁。
+#43739 当前完整 SHA：`c0e0fab8e6a039793782c6be92a7f0b245d32212`。组合 SHA：`83a7157ab8a5e0da96186d87e7dc946e4d80fdab`。10-30 通用修复通过普通 merge 同步到组合和 #32602；三分支本地与 origin 均同步。组合仍只增加 #36426 的 4 文件补丁（+97/-43），已核对忽略 hunk 行号后的补丁内容与同步前一致，应用来源为 `9ea4881cc32b2c43afbfd10795183752e5d33f22`；正式 PR 不含该补丁。
 
 ### #32602 rebase 恢复点
 
-2026-10-30 经用户明确授权重排并使用限定旧远端提交的 `--force-with-lease` 发布，本地与 origin 同步。保留 main `52604e1d46` 的同步结果；基线同步提交 `d1ef1f8f1a`、W4A4 净功能提交 `3abdc8dc08`、评审修复 `02342dab5039`；随后公共权重准备整理 `b5a1140f70` 使用普通推送。#43739 及其 #36426 组合分支未修改。
+2026-10-30 经用户明确授权重排并使用限定旧远端提交的 `--force-with-lease` 发布，本地与 origin 同步。保留 main `52604e1d46` 的同步结果；基线同步提交 `d1ef1f8f1a`、W4A4 净功能提交 `3abdc8dc08`、评审修复 `02342dab5039`；随后公共权重准备整理 `b5a1140f70` 使用普通推送。初轮重排未修改父分支；后续按用户要求把通用修复归入 #43739，再通过 `831438498f89` 普通 merge 回 #32602，未再次改写历史。
 
 先于强推发布的远端恢复 tag：
 

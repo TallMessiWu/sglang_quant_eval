@@ -28,7 +28,7 @@ SGLang fork 的默认分支已按用户授权从旧 Diffusion 分支改为 `main
 | --- | --- | --- | --- |
 | #43739 | `junlin_qwen3.5_moe_w4a8` | `qwen3.5_moe_w4a8` | `0bfad837568c` |
 | #43739 + #36426，仅组合验证 | `junlin_qwen3.5_moe_w4a8_pr36426` | `qwen3.5_moe_w4a8_pr36426` | `9a4a1d2134ae` |
-| #32602 | `junlin_qwen3.5_moe_w4a4` | `qwen3.5_moe_w4a4` | `02342dab5039` |
+| #32602 | `junlin_qwen3.5_moe_w4a4` | `qwen3.5_moe_w4a4` | `b5a1140f70` |
 | #43740 | `junlin_a5_fia_mixed_split` | `a5_fia_mixed_split` | `4f38ae231f2b` |
 | #40419 | `junlin_npu_mamba_ssm_dtype` | `npu_mamba_ssm_dtype` | `756dac5a667b` |
 | #44363 | `junlin/pr-w4a8-shared-execution` | `pr_w4a8_shared_execution` | `4f998c97fd76` |
@@ -45,7 +45,7 @@ SGLang fork 的默认分支已按用户授权从旧 Diffusion 分支改为 `main
 
 ### #32602 rebase 恢复点
 
-2026-10-30 经用户明确授权重排并使用限定旧远端提交的 `--force-with-lease` 发布，本地与 origin 同步。保留 main `52604e1d46` 的同步结果；基线同步提交 `d1ef1f8f1a`、W4A4 净功能提交 `3abdc8dc08`、评审修复 `02342dab5039`。#43739 及其 #36426 组合分支未修改。
+2026-10-30 经用户明确授权重排并使用限定旧远端提交的 `--force-with-lease` 发布，本地与 origin 同步。保留 main `52604e1d46` 的同步结果；基线同步提交 `d1ef1f8f1a`、W4A4 净功能提交 `3abdc8dc08`、评审修复 `02342dab5039`；随后公共权重准备整理 `b5a1140f70` 使用普通推送。#43739 及其 #36426 组合分支未修改。
 
 先于强推发布的远端恢复 tag：
 

@@ -28,7 +28,7 @@
 | PR | 单一职责 | 当前阻塞 / 下一步 |
 | --- | --- | --- |
 | [#43739](https://github.com/sgl-project/sglang/pull/43739) | 在线 MoE W4A8、加载生命周期与权重策略 | 可合并但受门禁/review 阻塞；权重策略线程已 resolve，加载线程等待 NPU 内存证据 |
-| [#32602](https://github.com/sgl-project/sglang/pull/32602) | 在线 MoE W4A4 / 融合 GMM，依赖 #43739 | 10-30 rebase 与评审代码修复已发布；74 项隔离 CPU/mock 通过、7 项跳过；FP4 cast/布局、加载峰值及准确率仍待 Ascend 950 |
+| [#32602](https://github.com/sgl-project/sglang/pull/32602) | 在线 MoE W4A4 / 融合 GMM，依赖 #43739 | 10-30 rebase 与评审代码修复已发布；76 项隔离 CPU/mock 通过、7 项跳过；用户回传小 shape ND/NZ 算子执行证据，完整模型/加载峰值/准确率待验收 |
 | [#43740](https://github.com/sgl-project/sglang/pull/43740) | Ascend 950 FIA mixed split | Draft；77 项 attention、10 项 batch/TBO 隔离回归通过，缺当前 head 真机结果 |
 | [#40419](https://github.com/sgl-project/sglang/pull/40419) | speculative SSM/intermediate state BF16 | kernel #808 已合入；缺 run-ci，待 review |
 | [#44363](https://github.com/sgl-project/sglang/pull/44363) | Dense W4A8 公共执行 | 6 项 CPU/mock 通过；缺 run-ci，待 review |
@@ -65,10 +65,11 @@
 
 - 已基于 #43739 重排并发布，版本及远端恢复 tag 见 [分支表](branches.md)。保留本地已有 main 同步；未改动 #43739 或其组合分支。#43739 合入前，#32602 对 main 的 diff 仍包含前置改动，不再宣称独立。
 - 对应 [10-27 评审](https://github.com/sgl-project/sglang/pull/32602#pullrequestreview-5667827652)：共享在线 MXFP4 基类复用原 loader，保留 meta/完成即量化/源释放/重载；共享显式 FP4 权重策略与融合调用；在线融合 opt-in 且检查 bias/激活/无 A2A，离线保持非融合；W2 不构造融合组件，初始化与执行统一按 W13 判断；W4A8/W4A4 检查 TP 后本地 K。惰性 op 直接继承前置，没有第二份补丁。
-- 意见 3 **只完成 scale 归一及奇数 block 校验**；当前 W4A4 cast 暂保持原行为。ND/NZ、FP4 cast 参数必须通过 Ascend 950 验证后再定，不以 W4A8 布局契约代替，也未将该线程标为解决。
-- rebase 后、修复前：**61 项隔离 CPU/mock 通过、7 项 CUDA 跳过**；修复后：**74 通过、7 跳过**。7 类故障注入被捕获，覆盖权重策略、源释放、重复 shard、融合 bias/opt-in、本地 K 和离线二次量化。原生 shard loader、W4A4 准备逻辑和 runner 被执行，NPU 算子及无关 serving 导入仍隔离；标准 unittest 入口在 `orjson` 缺失处阻断，不能写成标准环境测试通过。语法、Ruff、isort、codespell、注册测试检查和 diff 检查通过。
-- 真机尚未执行：加载阶段峰值及源释放、真实 layout/融合算子数值、最终 head 的模型加载/warmup/请求、BF16 对照准确率。旧 W4A4 benchmark 或 W4A8 GSM8K 不覆盖本版本。
-- `llm/diagnostics/probe_w4a4_layout.py` 提供单次真实算子检查：每次只选一个 layout/source，输出 format/dtype/shape/stride 和数值差异至 `llm/logs/`；离线输入为合成 packed uint8，不是 ModelSlim checkpoint 验收。在空闲 Ascend 950 上从 `llm/` 运行 `python3 diagnostics/probe_w4a4_layout.py --device 0`，根据结果再选 ND/显式 FP4 NZ 对照；不自动扫参。探针本地仅做语法、lint 和 CLI 检查。
+- 意见 3 已整理为公共 `prepare_mxfp4_moe_weight`：W4A4 显式保留 packed-byte cast，W4A8 保留原 FP4 unpack/cast 参数及兼容入口，共享 scale 校验与转置；不改生产默认布局，也不将所有 FP4 GMM 泛化为必须 NZ。评审线程未自行关闭。
+- **用户真机证据**：Ascend950DT_9582、torch `2.10.0+cpu`、torch_npu `2.10.0.post7`，online，E=2/H=128/I=256、每专家 4 token。默认 current 的 W13/W2 实测 format=29（NZ）；跳过 cast 的 ND 对照为 format=2，权重仍是 packed `uint8`。两次融合/非融合链均执行成功、输出有限；两份报告的 relative L2 与 max_abs 全部相同：非融合/浮点参考 `0.2666974664 / 0.6075800657`，融合/浮点参考 `0.2657815814 / 0.5879714489`，融合/非融合 `0.0169498660 / 0.046875`。这是相同汇总指标，不证明跨运行逐元素一致，也不是模型精度或性能结论。用户未附源码 SHA；后续公共 helper 整理未再次真机执行。
+- rebase 后、修复前：**61 项隔离 CPU/mock 通过、7 项 CUDA 跳过**；公共准备整理后：**76 通过、7 跳过**。新增回归检查 W4A4/W4A8 的 cast 参数、共享入口、scale 校验及转置视图，错误套用 W4A8 cast 的故障注入被捕获；此前 7 类故障注入被捕获，覆盖权重策略、源释放、重复 shard、融合 bias/opt-in、本地 K 和离线二次量化。原生 shard loader、W4A4 准备逻辑和 runner 被执行，NPU 算子及无关 serving 导入仍隔离；标准 unittest 入口在 `orjson` 缺失处阻断，不能写成标准环境测试通过。语法、Ruff、isort、codespell、注册测试检查和 diff 检查通过。
+- 尚缺：真实加载阶段峰值及源释放、完整模型 shape/离线 checkpoint 范围、最终 head 的模型加载/warmup/请求、BF16 对照准确率。小 shape 的 layout 执行反馈不能替代这些验收；旧 W4A4 benchmark 或 W4A8 GSM8K 也不覆盖本版本。
+- `llm/diagnostics/probe_w4a4_layout.py` 提供单次真实算子检查：每次只选一个 layout/source，输出 format/dtype/shape/stride 和数值差异至 `llm/logs/`；离线输入为合成 packed uint8，不是 ModelSlim checkpoint 验收。当前已收到 current/ND 两份报告，不继续扫 cast 参数。探针冷导入顺序错误已在主仓 `508e14d` 修复，2 项 CPU 导入契约回归通过；NPU 执行证据来自用户，不是本机执行。
 
 ### 其他已报告功能
 

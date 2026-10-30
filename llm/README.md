@@ -49,6 +49,30 @@ VLLM_PORT=6970 CONTEXT_LENGTH=8192 EXTRA_ARGS="--disable-cuda-graph" \
 
 graph、池容量和 state dtype 不是通用优化开关。恢复默认后需重启服务；不要把历史缩池值作为生产建议。当前部署的 BF16 SSM、FIA 与视觉 K=4304 回退边界见 [陷阱](../docs/known-pitfalls.md)。
 
+## W4A4 加载峰值记录
+
+独立入口 **`record_w4a4_load_memory.sh`**，原有启动脚本不变。旧/新 SGLang 都用此入口；`before` / `after` 只是输出标签，**不会切换、更新或修改 SGLang**。修改前恢复点为远端 tag `archive/pr32602-pre-rebase-20261030`，修改后选择 #32602 当前分支；版本见 [分支表](../docs/branches.md)。两轮必须固定模型、NPU、TP、dtype、软件栈和启动环境，并使用独立的新服务进程。
+
+在 `llm/` 执行，每轮先手动选择并安装相应 checkout：
+
+```bash
+# 修改前版本；6 为示例空闲卡号。
+bash ./record_w4a4_load_memory.sh before 6
+# 等各加载 worker 的报告 complete=true 后正常停止本轮服务，切换/安装修改后版本，再运行：
+bash ./record_w4a4_load_memory.sh after 6
+
+# 离线汇总，两轮目录也可以单独传入；不会启动模型。
+python3 diagnostics/npu_load_memory.py summarize artifacts/load-memory
+```
+
+输出位于 `artifacts/load-memory/<标签>-<时间>-<唯一后缀>/`：`server.log` 是服务日志，`load-memory-<pid>-<时间>.json` 是每个 worker/target/draft 的记录。可只为记录加载峰值而运行，不需要请求或压测。
+
+- 在实际 worker 的 `ModelRunner.load_model` 入口同步、重置 allocator 峰值，返回后同步并读取。窗口包括模型构造、权重加载、post-load 及该方法的收尾，**不含后续 KV pool、graph capture、warmup**；不是整次启动峰值。
+- `summary_gib.peak_allocated` 是主要比较指标；同时保留 `peak_reserved`、`end_allocated`、`end_reserved`、`peak_allocated_above_begin`，原始数据单位为 bytes。`reserved` 包含缓存，不能把它保持高位直接解释为源权重未释放。它们是 **PyTorch NPU allocator** 统计，不含全部驱动/HCCL/其他进程占用，不是整卡 HBM 总量。
+- 报告记录实际加载源码路径、Git revision/dirty 状态、设备、可见卡映射、TP/PP rank、模型参数和 torch/torch_npu 版本。对照时核对 `source_revision`，不要把标签当版本凭据；`source_dirty=true` 需说明额外修改。
+- 只把 `status=ok` 且 `complete=true` 的记录视为完整窗口。OOM/异常仍保留部分峰值和错误；进程被强杀可能仅留下 `loading` 记录；尚未进入加载函数则没有记录。若启用了延后权重加载，记录为 `deferred_weights`，不冒充完整加载。还需核对所有预期 rank 都有报告。
+- TP 各卡分别比较，不能把不同时间的各卡峰值简单相加。前后峰值差反映整组代码变更，若要严格归因到 loader，需另做单因素对照；加载结束占用下降也不单独证明每个源张量都释放。
+
 ## ShareGPT benchmark
 
 ```bash

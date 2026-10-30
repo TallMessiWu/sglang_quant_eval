@@ -73,6 +73,27 @@ python3 diagnostics/npu_load_memory.py summarize artifacts/load-memory
 - 只把 `status=ok` 且 `complete=true` 的记录视为完整窗口。OOM/异常仍保留部分峰值和错误；进程被强杀可能仅留下 `loading` 记录；尚未进入加载函数则没有记录。若启用了延后权重加载，记录为 `deferred_weights`，不冒充完整加载。还需核对所有预期 rank 都有报告。
 - TP 各卡分别比较，不能把不同时间的各卡峰值简单相加。前后峰值差反映整组代码变更，若要严格归因到 loader，需另做单因素对照；加载结束占用下降也不单独证明每个源张量都释放。
 
+<a id="w4a8-load-memory"></a>
+
+## W4A8 加载峰值记录（#43739）
+
+使用独立入口 **`record_w4a8_load_memory.sh`**，复用上节采集器与测量窗口，量化参数为 **`mxfp_w4a8`**，其余参数及 `EXTRA_ARGS` 行为对齐普通 W4A8 启动器。原有普通/W4A4 启动器不变；旧/新两轮保持相同环境和参数，脚本不 fetch、不切换版本或修改源码。
+
+两版都来自正式分支 `junlin_qwen3.5_moe_w4a8`：修改前固定为加载优化的父提交 `493372ce8f`，修改后使用正式 PR 当前 head。不要用 `_pr36426` 组合分支；`3cdd0182b9` 已含加载优化，也不是 before。版本定位和对照边界见 [分支表](../docs/branches.md#43739-加载峰值对照基线)。
+
+在 `llm/` 中，每轮先手动选择/安装相应版本、停止上一轮服务，再执行：
+
+```bash
+# 已选择修改前 493372ce8f；6 为示例空闲卡号。
+bash ./record_w4a8_load_memory.sh w4a8_before 6
+# 各 worker 完整记录后停止服务，选择/安装正式 PR 当前 head。
+bash ./record_w4a8_load_memory.sh w4a8_after 6
+# 只汇总 W4A8，避免混入先前的 W4A4 记录。
+python3 diagnostics/npu_load_memory.py summarize artifacts/load-memory/w4a8_*
+```
+
+这里只比较加载阶段 NPU allocator 峰值。历史版本到新 head 还包含上游同步及其他修复，不是 loader 单因素实验；不能沿用 W4A4 的降幅，验收状态统一见 [目标计划](../docs/mxfp-refactoring-plan.md)。
+
 ## ShareGPT benchmark
 
 ```bash

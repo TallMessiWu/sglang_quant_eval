@@ -353,7 +353,13 @@ class TestMemoryLauncher(unittest.TestCase):
         )
 
     def test_shell_uses_normal_parameters_and_preserves_failure_exit(self):
-        launcher = self.put("llm/record_w4a4_load_memory.sh", LAUNCHER.read_text())
+        self.check_launcher("record_w4a4_load_memory.sh", "mxfp4")
+
+    def test_w4a8_shell_uses_w4a8_and_preserves_extra_args_and_failure_exit(self):
+        self.check_launcher("record_w4a8_load_memory.sh", "mxfp_w4a8")
+
+    def check_launcher(self, script_name, quantization):
+        launcher = self.put(f"llm/{script_name}", (LLM / script_name).read_text())
         self.put(
             "llm/common/npu-launch.sh",
             """
@@ -387,6 +393,7 @@ sys.exit(int(os.environ.get("FAILURE", "0")))
             "PATH": f"{python.parent}:{os.environ['PATH']}",
             "CAPTURE": str(self.root / "capture.json"),
             "PYTHONPATH": "unchanged",
+            "EXTRA_ARGS": "--mem-fraction-static 0.7",
         }
         for code in (0, 17):
             result = subprocess.run(
@@ -404,10 +411,12 @@ sys.exit(int(os.environ.get("FAILURE", "0")))
             args = captured["args"]
             for flag, expected in (
                 ("--tp", "1"),
-                ("--quantization", "mxfp4"),
+                ("--quantization", quantization),
                 ("--device", "npu"),
             ):
                 self.assertEqual(args[args.index(flag) + 1], expected)
+            if quantization == "mxfp_w4a8":
+                self.assertEqual(args[args.index("--mem-fraction-static") + 1], "0.7")
             self.assertIn(
                 "fake server log", (Path(captured["output"]) / "server.log").read_text()
             )

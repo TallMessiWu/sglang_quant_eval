@@ -249,7 +249,9 @@ class _RecordingFinder(importlib.abc.MetaPathFinder):
 
 def install_hook():
     if not os.environ.get(OUTPUT_ENV):
-        raise RuntimeError(f"Set {OUTPUT_ENV}; use record_w4a4_load_memory.sh")
+        raise RuntimeError(
+            f"Set {OUTPUT_ENV}; use record_w4a4_load_memory.sh or record_w4a8_load_memory.sh"
+        )
     if TARGET in sys.modules:
         cls = sys.modules[TARGET].ModelRunner
         cls.load_model = _wrap_load(cls.load_model)
@@ -310,7 +312,8 @@ def summarize(paths):
 def main():
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
         print(
-            "Launch: bash ./record_w4a4_load_memory.sh before|after [NPU_ID ...]\n"
+            "Launch W4A4: bash ./record_w4a4_load_memory.sh before|after [NPU_ID ...]\n"
+            "Launch W4A8: bash ./record_w4a8_load_memory.sh w4a8_before|w4a8_after [NPU_ID ...]\n"
             "Summarize: python3 diagnostics/npu_load_memory.py summarize REPORT_DIR [REPORT_DIR ...]\n"
             "Metrics cover ModelRunner.load_model only, not entire startup or total device HBM."
         )

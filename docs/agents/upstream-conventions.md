@@ -22,6 +22,25 @@
 
 **怎么用**：提出 commit、改文件或写 PR 描述之前，先扫一遍新产生的文本。
 
+## SGLang PR 标题
+
+**本仓约定（2026-10-30 用户明确要求）**：向 `sgl-project/sglang` 提交的普通 PR，在上游要求的标题结构内，将 Gitmoji 文本 code 放在 `scope:` 后、英文描述前：
+
+```text
+[Type] [Hardware] scope: :gitmoji_code: English title
+[Type] scope: :gitmoji_code: English title
+```
+
+例如：`[Feat] [Ascend] quantization: :sparkles: Support online W4A8 MoE`。
+
+- 上游强制的是 `[Type] [Hardware] scope: title` / `[Type] scope: title` 结构；在描述前加 Gitmoji 是本仓偏好，不是上游的必填规则。
+- `Type` 使用 `Feat`、`Fix`、`Refactor`、`Perf`、`Doc`、`Test`、`CI` 或 `Chore`；`scope` 必填，使用模块或模型名，以字母/数字组成的片段及 `.`、`_`、`/`、`-` 分隔。
+- 硬件标签可省略；通常全大写，如 `[NPU]`、`[AMD]`，品牌特例为 `[Intel]`、`[Apple]`、`[Huawei]`、`[Ascend]`。字段间及 scope 冒号后用一个空格，无首尾空白。
+- Gitmoji 使用 `:sparkles:`、`:bug:`、`:recycle:` 等文本 code，不使用原始 emoji。不能放在整条标题开头、`[Type]` / `[Hardware]` 与 scope 之间，也不能写成 `:sparkles:quantization:`。
+- Draft 由 GitHub 状态表示，不把 `[WIP]` 当作 Type；可在描述前保留 `:construction:`。GitHub 自动生成的 `Revert "original title"` 按上游特例保留。
+- 这条规则只改变 SGLang PR 标题，不改变 Git commit 的 `:gitmoji: type(scope): Subject` 约定，也不要求重写已发布提交历史。改标题时不顺带改变 Draft、base、标签、正文或代码。
+- 操作前读取[上游当前标题校验](https://github.com/sgl-project/sglang/blob/main/.github/workflows/pr-title.yml)，不把本文快照当作永久有效的上游规则。
+
 ## PR 职责边界
 
 **规则**：一个 PR 只担一个职责（用户原话：「我们尽量把每个 pr 职责分开」）。

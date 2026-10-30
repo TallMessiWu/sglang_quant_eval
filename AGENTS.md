@@ -71,6 +71,7 @@
 
 - 需要服务器拉取的代码和启动脚本改动，完成验证后默认使用 `gitmoji-commit` skill 提交并普通推送，不等用户重复提醒；明确要求暂不提交的内容除外。文档遵循当次授权，用户要求提交文档时一并发布。
 - 提交完直接 push，不要停下来问；未经确认不得 `--force` / `--force-with-lease` 改写已发布历史。push 后核对本地与远端 SHA（ahead/behind `0 0`）并报出。
+- **SGLang 上游 PR 标题**按本仓约定使用 `[Type] [Hardware] scope: :gitmoji_code: English title`（硬件标签可省略），例如 `[Feat] [Ascend] quantization: :sparkles: Support online W4A8 MoE`。Gitmoji 使用文本 code，只放在 `scope:` 后，不能放在整条标题或 scope 前；commit message 格式不变。细则见 [PR 标题约定](docs/agents/upstream-conventions.md#sglang-pr-标题)。
 - 每个 PR 只担一个职责；可分离的移植另开 PR，且要用户点名后才建。细节见 [docs/agents/upstream-conventions.md](docs/agents/upstream-conventions.md)。
 - SGLang 改动在对应 `sglang/<worktree>/` 中提交并推到 `origin`；主仓无需更新 SGLang 指针。
 - `sgl-kernel-npu` 是主仓子模块：在子模块内提交/推送后，只有用户要记录该版本时才更新主仓 gitlink。

@@ -24,6 +24,9 @@ def run(args, report):
         raise RuntimeError("This probe requires an installed Ascend NPU environment")
     import torch_npu
 
+    # Initialize the registry first: a cold moe_methods import cycles through
+    # quantization -> awq -> unquant -> the partially initialized moe_methods.
+    import sglang.srt.layers.quantization  # noqa: F401
     from sglang.srt.hardware_backend.npu.quantization import moe_methods
 
     torch.npu.set_device(args.device)

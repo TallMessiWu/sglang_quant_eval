@@ -1,6 +1,6 @@
 # Ascend MXFP 目标与验收
 
-更新：2026-10-29。本文件只维护目标、PR 状态、关键证据与未测范围；分支/HEAD 在 [branches.md](branches.md)，格式契约在 [量化概览](quantization-overview.md)，故障机制在 [已知陷阱](known-pitfalls.md)。历史过程由 Git 追溯，不另存流水表。
+更新：2026-10-30（本轮刷新 #32602；其他 PR 保留 10-29 快照）。本文件只维护目标、PR 状态、关键证据与未测范围；分支/HEAD 在 [branches.md](branches.md)，格式契约在 [量化概览](quantization-overview.md)，故障机制在 [已知陷阱](known-pitfalls.md)。历史过程由 Git 追溯，不另存流水表。
 
 范围：SGLang Ascend 的 SRT Dense/MoE 与 Diffusion，在线 BF16/FP16 量化及离线 ModelSlim。相同执行契约复用 kernel；加载、量化准备与推理分开。Dense 双级 FP4 与 MoE/ModelSlim 单级格式不强行合并，模型名不成为复制量化实现的理由。
 
@@ -10,7 +10,7 @@
 
 | 目标 | 当前结论 | 剩余工作 |
 | --- | --- | --- |
-| G1：格式与边界正确性 | MXFP8 partial-scale / TP 对齐已随 #32745 合入；在线 MoE W4A8 在 #43739，W4A4 在独立 #32602 | Diffusion partial-scale 与各 TP/EP、dtype、backend 分别验证；不从单配置推断全覆盖 |
+| G1：格式与边界正确性 | MXFP8 partial-scale / TP 对齐已随 #32745 合入；在线 MoE W4A8 在 #43739；#32602 按评审重新基于 #43739 接入 W4A4 | Diffusion partial-scale 与各 TP/EP、dtype、backend 分别验证；不从单配置推断全覆盖 |
 | G2.1：Dense W4A8 公共执行 | #44363；ModelSlim gate/up 混精另列 #44364。原验收版本在线/离线功能通过 | 新发布 head 的真机结果与原验收版本分开记录；数值等价未测 |
 | G2.2：Diffusion MXFP8 公共执行 | #44365；原验收版本 I2V 输出正常 | 当前 PR 的 CI 失败归因与 review；新 head 真机未验收 |
 | G2.3：局部能力描述和提前拒绝 | #44366，依赖 #44365；原版本 I2V 功能通过 | Draft；17 条描述不等于全部硬件组合通过 |
@@ -28,7 +28,7 @@
 | PR | 单一职责 | 当前阻塞 / 下一步 |
 | --- | --- | --- |
 | [#43739](https://github.com/sgl-project/sglang/pull/43739) | 在线 MoE W4A8、加载生命周期与权重策略 | 可合并但受门禁/review 阻塞；权重策略线程已 resolve，加载线程等待 NPU 内存证据 |
-| [#32602](https://github.com/sgl-project/sglang/pull/32602) | 独立在线 MoE W4A4 / 融合 GMM | 非 Draft，32 项隔离 CPU/mock 通过；缺 run-ci，当前 head 真机待验收 |
+| [#32602](https://github.com/sgl-project/sglang/pull/32602) | 在线 MoE W4A4 / 融合 GMM，依赖 #43739 | 10-30 rebase 与评审代码修复已发布；74 项隔离 CPU/mock 通过、7 项跳过；FP4 cast/布局、加载峰值及准确率仍待 Ascend 950 |
 | [#43740](https://github.com/sgl-project/sglang/pull/43740) | Ascend 950 FIA mixed split | Draft；77 项 attention、10 项 batch/TBO 隔离回归通过，缺当前 head 真机结果 |
 | [#40419](https://github.com/sgl-project/sglang/pull/40419) | speculative SSM/intermediate state BF16 | kernel #808 已合入；缺 run-ci，待 review |
 | [#44363](https://github.com/sgl-project/sglang/pull/44363) | Dense W4A8 公共执行 | 6 项 CPU/mock 通过；缺 run-ci，待 review |
@@ -45,11 +45,11 @@
 
 ### 依赖
 
-- 唯一未合入的线性依赖：**#44365 → #44366**。其余 8 个入口可独立审阅；W4A4 不再等待 W4A8。
+- 未合入的线性依赖：**#44365 → #44366**、**#43739 → #32602**。10-30 用户批准 W4A4 重新基于 W4A8，以复用完成度 loader，其他入口不因此增加依赖。
 - 已合入前置：SGLang #32745，kernel #638/#808/#824。源码合入不代表部署 wheel 已包含修复。
 - #45550 延续已关闭 #32041 的自动路由增量；核心 MXFP8 attention 已由 #39438 合入，不重复实现。
 - #36426 只放独立组合验证分支，不混入正式功能栈。基础分支更新时同轮同步组合分支。
-- 后续更新用普通 merge/追加提交；先查实际 diff，去掉已合入重复代码。新 PR 只在用户点名后创建。
+- 后续更新用普通 merge/追加提交；10-30 的 #32602 rebase/限定 lease 强推为当次明确授权，不构成其他历史改写许可。先查实际 diff，去掉已合入重复代码；新 PR 只在用户点名后创建。
 
 ## 验收证据与边界
 
@@ -60,6 +60,15 @@
 - 用户报告 **BF16 / 在线 W4A8 GSM8K 均 96.13**。未附逐次 server SHA、原始报告及 shot/prompt/采样配置，不能继承为回退合并后新 head 的精度结果。
 - 权重采用 `round_mode="rint", scale_alg=2, dst_type_max=7.25`，不改激活策略、离线 packed 权重或 W4A4。此前用户 Ascend 950 权重 probe 的 40/40 样本重建误差改善、汇总 NMSE 相对下降约 5.69%；这不是整模型准确率提升。
 - [权重策略评审](https://github.com/sgl-project/sglang/pull/43739#discussion_r4410300363)已回复并 resolve；[加载评审](https://github.com/sgl-project/sglang/pull/43739#discussion_r4410300039)代码已处理，**NPU 源存储释放与启动峰值测量仍未完成**，保持 unresolved。
+
+### 在线 W4A4 评审修复（2026-10-30）
+
+- 已基于 #43739 重排并发布，版本及远端恢复 tag 见 [分支表](branches.md)。保留本地已有 main 同步；未改动 #43739 或其组合分支。#43739 合入前，#32602 对 main 的 diff 仍包含前置改动，不再宣称独立。
+- 对应 [10-27 评审](https://github.com/sgl-project/sglang/pull/32602#pullrequestreview-5667827652)：共享在线 MXFP4 基类复用原 loader，保留 meta/完成即量化/源释放/重载；共享显式 FP4 权重策略与融合调用；在线融合 opt-in 且检查 bias/激活/无 A2A，离线保持非融合；W2 不构造融合组件，初始化与执行统一按 W13 判断；W4A8/W4A4 检查 TP 后本地 K。惰性 op 直接继承前置，没有第二份补丁。
+- 意见 3 **只完成 scale 归一及奇数 block 校验**；当前 W4A4 cast 暂保持原行为。ND/NZ、FP4 cast 参数必须通过 Ascend 950 验证后再定，不以 W4A8 布局契约代替，也未将该线程标为解决。
+- rebase 后、修复前：**61 项隔离 CPU/mock 通过、7 项 CUDA 跳过**；修复后：**74 通过、7 跳过**。7 类故障注入被捕获，覆盖权重策略、源释放、重复 shard、融合 bias/opt-in、本地 K 和离线二次量化。原生 shard loader、W4A4 准备逻辑和 runner 被执行，NPU 算子及无关 serving 导入仍隔离；标准 unittest 入口在 `orjson` 缺失处阻断，不能写成标准环境测试通过。语法、Ruff、isort、codespell、注册测试检查和 diff 检查通过。
+- 真机尚未执行：加载阶段峰值及源释放、真实 layout/融合算子数值、最终 head 的模型加载/warmup/请求、BF16 对照准确率。旧 W4A4 benchmark 或 W4A8 GSM8K 不覆盖本版本。
+- `llm/diagnostics/probe_w4a4_layout.py` 提供单次真实算子检查：每次只选一个 layout/source，输出 format/dtype/shape/stride 和数值差异至 `llm/logs/`；离线输入为合成 packed uint8，不是 ModelSlim checkpoint 验收。在空闲 Ascend 950 上从 `llm/` 运行 `python3 diagnostics/probe_w4a4_layout.py --device 0`，根据结果再选 ND/显式 FP4 NZ 对照；不自动扫参。探针本地仅做语法、lint 和 CLI 检查。
 
 ### 其他已报告功能
 

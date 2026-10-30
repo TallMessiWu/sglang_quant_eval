@@ -1,6 +1,6 @@
 # 分支与版本定位
 
-更新：2026-10-29，已实时核对 GitHub、远端 refs 与本地 worktree。PR 状态/依赖/验收只在 [目标计划](mxfp-refactoring-plan.md) 维护；本文记录版本和恢复入口，不记录逐次操作流水。
+更新：2026-10-30，本轮实时刷新 #32602；其余版本记录仍为 10-29 快照。PR 状态/依赖/验收只在 [目标计划](mxfp-refactoring-plan.md) 维护；本文记录版本和恢复入口，不记录逐次操作流水。
 
 ## 仓库关系
 
@@ -28,7 +28,7 @@ SGLang fork 的默认分支已按用户授权从旧 Diffusion 分支改为 `main
 | --- | --- | --- | --- |
 | #43739 | `junlin_qwen3.5_moe_w4a8` | `qwen3.5_moe_w4a8` | `0bfad837568c` |
 | #43739 + #36426，仅组合验证 | `junlin_qwen3.5_moe_w4a8_pr36426` | `qwen3.5_moe_w4a8_pr36426` | `9a4a1d2134ae` |
-| #32602 | `junlin_qwen3.5_moe_w4a4` | `qwen3.5_moe_w4a4` | `9c40660a609d` |
+| #32602 | `junlin_qwen3.5_moe_w4a4` | `qwen3.5_moe_w4a4` | `02342dab5039` |
 | #43740 | `junlin_a5_fia_mixed_split` | `a5_fia_mixed_split` | `4f38ae231f2b` |
 | #40419 | `junlin_npu_mamba_ssm_dtype` | `npu_mamba_ssm_dtype` | `756dac5a667b` |
 | #44363 | `junlin/pr-w4a8-shared-execution` | `pr_w4a8_shared_execution` | `4f998c97fd76` |
@@ -42,6 +42,17 @@ SGLang fork 的默认分支已按用户授权从旧 Diffusion 分支改为 `main
 | 只读上游快照 | `upstream-main` | `upstream-main` | `3d508d614f28`；不是最新 main，不自动移动 |
 
 #43739 当前完整 SHA：`0bfad837568c6617a2b1a70cfb8f901e2cd5c3d9`。组合 SHA：`9a4a1d2134aeee4ac5f27f7964ce6b5d1819ab72`。组合只增加 #36426 的 4 文件补丁（+97/-43），对应 head `9ea4881cc32b2c43afbfd10795183752e5d33f22`，patch-id `267e9d65d3e05fb0ae29bbb1fb5a64f73ae6d189`；正式 PR 不含该补丁。
+
+### #32602 rebase 恢复点
+
+2026-10-30 经用户明确授权重排并使用限定旧远端提交的 `--force-with-lease` 发布，本地与 origin 同步。保留 main `52604e1d46` 的同步结果；基线同步提交 `d1ef1f8f1a`、W4A4 净功能提交 `3abdc8dc08`、评审修复 `02342dab5039`。#43739 及其 #36426 组合分支未修改。
+
+先于强推发布的远端恢复 tag：
+
+| Tag | 保留版本 |
+| --- | --- |
+| `archive/pr32602-pre-rebase-20261030` | `745da0dccd`，本地已合并 main、尚未发布的版本 |
+| `archive/pr32602-published-20261030` | `9c40660a60`，rebase 前的 PR head |
 
 ## 子模块边界
 

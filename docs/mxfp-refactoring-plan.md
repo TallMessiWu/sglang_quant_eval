@@ -14,7 +14,7 @@
 | G2.1：Dense W4A8 公共执行 | #44363；ModelSlim gate/up 混精另列 #44364。原验收版本在线/离线功能通过 | 新发布 head 的真机结果与原验收版本分开记录；数值等价未测 |
 | G2.2：Diffusion MXFP8 公共执行 | #44365；原验收版本 I2V 输出正常 | 当前 PR 的 CI 失败归因与 review；新 head 真机未验收 |
 | G2.3：局部能力描述和提前拒绝 | #44366，依赖 #44365；原版本 I2V 功能通过 | Draft；17 条描述不等于全部硬件组合通过 |
-| G3：权重生命周期 | #43739 提供完成度 loader，#32602 已复用；用户回传 W4A4 指定版本加载 allocator 峰值下降约 65.83% | W4A8 配置独立内存证据、逐源缓冲 NPU 释放证据及整次启动/整卡 HBM 峰值仍未测；不从 W4A4 对照外推 |
+| G3：权重生命周期 | #43739 提供完成度 loader，#32602 已复用；W4A8 / W4A4 各自已有用户回传的指定版本加载 allocator 峰值对照 | 逐源缓冲 NPU 释放追踪及整次启动/整卡 HBM 峰值未测；加载窗口不等于完整推理验收 |
 | G4：代际差异归属 | Gemma 构建期 provider（kernel #638）与 SGLang #32745 已合入 | 部署核对 target wheel；仅跨组件表示契约按需进入 DeviceOperator |
 | G5：硬件与精度证据 | 已有下述用户功能反馈、GSM8K 对照和标准测试结果 | 静态、CPU/mock、NPU kernel、模型功能、精度、性能分别记录 |
 | G6：W4A8 serving 性能 | **归档、暂停；未来独立 PR，不阻塞 #43739 功能评审** | 用户恢复任务后再开展；没有稳定端到端收益，不继续扫参或要求重复整机测试 |
@@ -27,7 +27,7 @@
 
 | PR | 单一职责 | 当前阻塞 / 下一步 |
 | --- | --- | --- |
-| [#43739](https://github.com/sgl-project/sglang/pull/43739) | 在线 MoE W4A8、加载生命周期与权重策略 | 10-30 补齐本地 K 与 per-matmul 通用修复；48 项隔离 CPU/mock 通过、7 项跳过，组合分支同轮同步；缺 run-ci/审批及当前 head 真机证据 |
+| [#43739](https://github.com/sgl-project/sglang/pull/43739) | 在线 MoE W4A8、加载生命周期与权重策略 | 10-30 补齐本地 K 与 per-matmul 通用修复；48 项隔离 CPU/mock 通过、7 项跳过，组合分支同轮同步；用户回传当前 head 加载窗口/峰值对照；warmup、请求、准确率待验收 |
 | [#32602](https://github.com/sgl-project/sglang/pull/32602) | 在线 MoE W4A4 / 融合 GMM，依赖 #43739 | 10-30 rebase、评审修复及父分支通用修复的普通 merge 已发布；82 项隔离 CPU/mock 通过、7 项跳过；用户回传 ND/NZ 小算子及指定版本完整加载窗口/峰值对照；warmup、请求、准确率待验收 |
 | [#43740](https://github.com/sgl-project/sglang/pull/43740) | Ascend 950 FIA mixed split | Draft；77 项 attention、10 项 batch/TBO 隔离回归通过，缺当前 head 真机结果 |
 | [#40419](https://github.com/sgl-project/sglang/pull/40419) | speculative SSM/intermediate state BF16 | kernel #808 已合入；缺 run-ci，待 review |
@@ -55,7 +55,9 @@
 
 ### 在线 W4A8（G1/G3/G5）
 
-- 加载峰值入口 `llm/record_w4a8_load_memory.sh` 复用 W4A4 的采集器，显式使用 `mxfp_w4a8`，不改原有启动器或 SGLang。修改前取完成度 loader 引入前的历史提交，修改后取正式 PR head，不用 #36426 组合分支；版本见 [分支表](branches.md#43739-加载峰值对照基线)，命令见 [LLM 说明](../llm/README.md#w4a8-load-memory)。当前只验证启动参数、错误退出与采集控制流，W4A8 的 NPU 前后对照待用户回传。
+- 加载峰值入口 `llm/record_w4a8_load_memory.sh` 复用 W4A4 的采集器，显式使用 `mxfp_w4a8`，不改原有启动器或 SGLang。修改前取完成度 loader 引入前的历史提交，修改后取正式 PR head，不用 #36426 组合分支；版本见 [分支表](branches.md#43739-加载峰值对照基线)，命令见 [LLM 说明](../llm/README.md#w4a8-load-memory)。采集器已验证启动参数、错误退出与控制流，用户已回传下述 NPU 前后对照。
+- **用户加载内存对照**：`493372ce8fee` → `c0e0fab8e6a0`，两条 TP rank 0 / logical device 0 / target 记录均为 `ok`（完整 `load_model` 窗口）。peak allocated **65.964 → 20.603 GiB**，减少 **45.361 GiB（约 68.77%）**；peak reserved **66.129 → 20.869 GiB**，减少 **45.260 GiB（约 68.44%）**；end allocated **19.495 → 19.494 GiB**，end reserved **20.156 → 19.869 GiB**。按汇总显示精度计算，结束 allocated 基本不变。原始目录为 `w4a8_before-20261030-152508-0JfWaU` / `w4a8_after-20261030-154247-hrJEEq`；完整配置、软件及物理卡映射未在汇总中展示，保留 JSON/server.log 供复核。
+- 这是用户报告的加载阶段 allocator 数据，不是本机 NPU 执行；包含构造、权重加载和 post-load，不含后续 KV/graph/warmup 或整卡总 HBM。版本间还有主干同步、权重策略和其他修复，不能作 loader 单因素或逐源缓冲追踪结论，也不代表推理显存、精度或吞吐。W4A8/W4A4 的 A8/A4 不规定加载阶段峰值的大小顺序。
 - 10-30 将 #32602 中适用于 W4A8 的通用修复归入 #43739：按已绑定 TP group 检查本地 K；runner 初始化/执行都以 W13 判断融合；W4A8 kernel 新增 keyword-only `weight_prefix`，保留旧 `dynamic_quant_kwargs` 位置参数。在线、ModelSlim、compressed-tensors、DeepSeek FP4、FP8-config 的 FP4 专家入口均显式绑定前缀，W2 不创建融合组件。没有带入 W4A4 功能或修改权重/激活量化策略。
 - 正式与 #36426 组合分支各 **48 项隔离 CPU/mock 通过、7 项 CUDA 跳过**；本地 K、runner 决策、W2 组件、在线前缀 4 类故障注入被捕获。组合仍只多原 #36426 补丁。#32602 通过普通 merge 继承，未 rebase/强推。标准入口仍因本机缺 `orjson` 阻断；新 head 未做 NPU e2e 或性能验收。
 
@@ -63,7 +65,7 @@
 - 用户同日回传标准 pytest：**42 passed、7 skipped、17 warnings，14.90 s**（Python 3.11.10 / pytest 8.3.2）。完整导入与收集成功，CUDA 跳过和 pytest-asyncio/JIT/SWIG 告警未导致失败；未附执行 SHA。这是标准入口 CPU/mock 证据，不是实际 NPU 算子或启动峰值验收。
 - 用户报告 **BF16 / 在线 W4A8 GSM8K 均 96.13**。未附逐次 server SHA、原始报告及 shot/prompt/采样配置，不能继承为回退合并后新 head 的精度结果。
 - 权重采用 `round_mode="rint", scale_alg=2, dst_type_max=7.25`，不改激活策略、离线 packed 权重或 W4A4。此前用户 Ascend 950 权重 probe 的 40/40 样本重建误差改善、汇总 NMSE 相对下降约 5.69%；这不是整模型准确率提升。
-- 10-30 实时查询：[权重策略评审](https://github.com/sgl-project/sglang/pull/43739#discussion_r4410300363)与[加载评审](https://github.com/sgl-project/sglang/pull/43739#discussion_r4410300039)线程均已 resolved。**W4A8 配置的 NPU 源存储释放与启动峰值测量仍未完成**，线程状态不等于硬件验收；下述 W4A4 内存结果不代替 W4A8 验收。
+- 10-30 实时查询：[权重策略评审](https://github.com/sgl-project/sglang/pull/43739#discussion_r4410300363)与[加载评审](https://github.com/sgl-project/sglang/pull/43739#discussion_r4410300039)线程均已 resolved。W4A8 加载峰值表已补入 PR body，并在原显存线程[回复了结果位置与范围](https://github.com/sgl-project/sglang/pull/43739#discussion_r4421531975)；本轮未改变 resolved 状态。逐源缓冲释放仍未做 NPU 生命周期追踪，线程状态不等于完整硬件验收。
 
 ### 在线 W4A4 评审修复（2026-10-30）
 

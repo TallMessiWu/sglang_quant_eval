@@ -19,7 +19,11 @@ LLM_LAUNCHERS = sorted(LLM_DIR.glob("qwen*.sh")) + [
     LLM_DIR / "a5_fia_mixed_split_serve.sh"
 ]
 DIFFUSION_DIR = LLM_DIR.parent / "diffusion"
-DIFFUSION_LAUNCHERS = sorted(DIFFUSION_DIR.glob("*.sh"))
+I2V_PROFILER = DIFFUSION_DIR / "i2v_profile.sh"
+# Profiling has a mode argument and requires real trace output; test it separately.
+DIFFUSION_LAUNCHERS = sorted(
+    script for script in DIFFUSION_DIR.glob("*.sh") if script != I2V_PROFILER
+)
 LAUNCHERS = LLM_LAUNCHERS + DIFFUSION_LAUNCHERS
 HYBRID_LAUNCHERS = [
     script for script in LAUNCHERS
@@ -960,6 +964,106 @@ class NpuCleanerTests(unittest.TestCase):
         self.assertIn(f"--image-path {DIFFUSION_DIR}/gyro.jpg ", launch)
         self.assertIn(f"--output-path {self.root}/outputs_i2v_mxfp8_fa_check ", launch)
         self.assertTrue((self.root / "outputs_i2v_mxfp8_fa_check/run.log").exists())
+
+    def mock_i2v_profiler(self):
+        self.mock(
+            "sglang",
+            'printf "attention:%s\\ncache_dit:%s\\nvisible:%s\\ntrace_dir:%s\\n" '
+            '"$SGLANG_DIFFUSION_ENABLE_MXFP8_ATTENTION" "$SGLANG_CACHE_DIT_ENABLED" '
+            '"$ASCEND_RT_VISIBLE_DEVICES" "$SGLANG_DIFFUSION_TORCH_PROFILER_DIR" '
+            '> "$TEST_LAUNCH_LOG"\n'
+            'printf "arg:%s\\n" "$@" >> "$TEST_LAUNCH_LOG"\n'
+            'if [[ "${TEST_TRACE:-1}" == 1 ]]; then\n'
+            '    mkdir -p "$SGLANG_DIFFUSION_TORCH_PROFILER_DIR/rank0/ASCEND_PROFILER_OUTPUT"\n'
+            '    printf "{}" > "$SGLANG_DIFFUSION_TORCH_PROFILER_DIR/rank0/ASCEND_PROFILER_OUTPUT/trace_view.json"\n'
+            'fi\n'
+            'if [[ "$SGLANG_DIFFUSION_ENABLE_MXFP8_ATTENTION" == 1 && "${TEST_FA:-1}" == 1 ]]; then\n'
+            '    echo "Using MXFP8 quantized Ascend Flash Attention."\n'
+            'fi\n'
+            'exit "${TEST_GENERATE_STATUS:-0}"\n',
+        )
+
+    def test_i2v_profile_matched_parameters_and_separate_outputs(self):
+        self.mock_i2v_profiler()
+        launches = []
+        for mode, attention in (("bf16", "0"), ("mxfp8", "1")):
+            result = self.run_script(
+                I2V_PROFILER, (mode, "5", "3"),
+                {"TEST_SMI_ROWS": "", "SGLANG_CACHE_DIT_ENABLED": "1",
+                 "SGLANG_DIFFUSION_ENABLE_MXFP8_ATTENTION": str(1 - int(attention))},
+            )
+            self.assertEqual(result.returncode, 0, result.stdout)
+            launch = self.contents(self.launch_log)
+            launches.append(launch)
+            self.assertIn(f"attention:{attention}\ncache_dit:0\nvisible:5,3\n", launch)
+            self.assertIn("arg:--num-gpus\narg:2\n", launch)
+            self.assertIn("arg:--num-profiled-timesteps\narg:5\n", launch)
+            self.assertIn("arg:--num-inference-steps\narg:40\n", launch)
+            self.assertIn("arg:--warmup-mode\narg:request\narg:--warmup-steps\narg:2\n", launch)
+            self.assertNotIn("arg:--attention-backend\n", launch)
+            self.assertNotIn("arg:--quantization\n", launch)
+            self.assertNotIn("arg:--profile-all-stages\n", launch)
+            self.assertIn(f"arg:{DIFFUSION_DIR}/gyro.jpg\n", launch)
+            directories = list((self.root / "outputs_i2v_profile").glob(f"{mode}-*"))
+            self.assertEqual(len(directories), 1)
+            self.assertTrue((directories[0] / "run.log").is_file())
+            self.assertIn(f"trace_dir:{directories[0]}/traces\n", launch)
+        # With the same mock model, only the run's output directory differs in argv.
+        def without_output(launch):
+            return [line for line in launch.splitlines() if line.startswith("arg:")
+                    and not line.startswith(f"arg:{self.root}/outputs_i2v_profile/")]
+        self.assertEqual(without_output(launches[0]), without_output(launches[1]))
+        self.assertEqual(self.contents(self.kill_log), "")
+
+    def test_i2v_profile_full_window_and_no_overwrite(self):
+        self.mock_i2v_profiler()
+        model = self.root / "model with spaces"
+        model.mkdir()
+        for _ in range(2):
+            result = self.run_script(
+                I2V_PROFILER, ("bf16",),
+                {"MODEL_PATH": str(model), "PROFILE_STEPS": "-1"},
+            )
+            self.assertEqual(result.returncode, 0, result.stdout)
+            launch = self.contents(self.launch_log)
+            self.assertIn("arg:--num-profiled-timesteps\narg:-1\n", launch)
+            self.assertIn(f"arg:--model-path\narg:{model}\n", launch)
+        self.assertEqual(len(list((self.root / "outputs_i2v_profile").glob("bf16-*"))), 2)
+
+    def test_i2v_profile_rejects_fallback_missing_trace_and_generate_failure(self):
+        self.mock_i2v_profiler()
+        for overrides, status, message in (
+            ({"TEST_FA": "0"}, 1, "fallback"),
+            ({"TEST_TRACE": "0"}, 1, "trace_view.json"),
+            ({"TEST_GENERATE_STATUS": "42"}, 42, ""),
+        ):
+            with self.subTest(overrides=overrides):
+                result = self.run_script(I2V_PROFILER, ("mxfp8",), overrides)
+                self.assertEqual(result.returncode, status, result.stdout)
+                self.assertIn(message, result.stdout)
+                self.assertNotIn("采集结束", result.stdout)
+
+    def test_i2v_profile_bad_inputs_do_not_launch_or_clean(self):
+        cases = [(("oops",), {}), (("bf16",), {"MODEL_PATH": ""}),
+                 (("bf16",), {"MODEL_PATH": str(self.offline)}),
+                 (("mxfp8",), {"MODEL_PATH": str(self.root / "missing")})]
+        cases += [(("bf16",), {"PROFILE_STEPS": value})
+                  for value in ("0", "-2", "41", "abc")]
+        for args, overrides in cases:
+            with self.subTest(args=args, overrides=overrides):
+                result = self.run_script(I2V_PROFILER, args, overrides)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertEqual(self.contents(self.launch_log), "")
+                self.assertEqual(self.contents(self.query_log), "")
+                self.assertEqual(self.contents(self.kill_log), "")
+
+    def test_i2v_profile_help_and_shell_syntax(self):
+        result = self.run_script(I2V_PROFILER, ("--help",), {"MODEL_PATH": ""})
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("PROFILE_STEPS", result.stdout)
+        self.assertEqual(self.contents(self.device_log), "")
+        result = subprocess.run(["bash", "-n", str(I2V_PROFILER)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_i2v_mxfp8_attention_check_defaults(self):
         result = self.run_script(DIFFUSION_DIR / "i2v_offline_mxfp8.sh", args=())

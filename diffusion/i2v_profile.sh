@@ -5,11 +5,12 @@ usage() {
     printf '%s\n' \
         '用法: MODEL_PATH=/path/to/model bash ./i2v_profile.sh bf16|mxfp8 [-f|--force] [NPU_ID ... | all]' \
         'BF16 必须指定原始 Wan2.2-I2V-A14B-Diffusers 权重；MXFP8 默认使用现成 MXFP8-G2。' \
-        'PROFILE_STEPS=5: 请求采集前段短窗口；设为 -1 覆盖整个去噪过程（仍遵循原生 profiler warmup）。' \
-        '两组均使用 gyro.jpg、1024x720、81 帧、40 步、seed=42 和相同 CPU offload 设置。' \
-        '输出: 当前目录/outputs_i2v_profile/<模式>-<唯一运行目录>/{run.log,traces/,video.mp4}' \
-        '请先手动安装 #45550 分支；本脚本不切换分支、不修改 PYTHONPATH。' \
-        '短窗口不覆盖所有高/低噪声专家；profile 耗时不能当作无 profiler 的性能结果。'
+        'PROFILE_STEPS=2: 正式生成与采集的去噪步数，可设为 2..40；另有 2 步请求预热。' \
+        '采集全阶段，确保两个去噪步都被记录；生成退出后自动离线解析原始 NPU 数据。' \
+        '两组均使用 gyro.jpg、1024x720、81 帧、seed=42 和相同 CPU offload 设置。' \
+        '输出: 当前目录/outputs_i2v_profile/<模式>-<唯一运行目录>/{run.log,analysis.log,traces/,video.mp4}' \
+        '请先手动安装 junlin/diffusion-npu-profiler 分支；脚本不切分支、不修改 PYTHONPATH。' \
+        '2 步视频不用于画质验收，也不代表 40 步轨迹；profile 耗时不是无 profiler 的性能结果。'
 }
 
 case "${1:-}" in
@@ -19,9 +20,9 @@ case "${1:-}" in
 esac
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-profile_steps=${PROFILE_STEPS:-5}
-if [[ ! "$profile_steps" =~ ^(-1|[1-9]|[1-3][0-9]|40)$ ]]; then
-    echo '错误：PROFILE_STEPS 必须为 1..40 或 -1。' >&2
+profile_steps=${PROFILE_STEPS:-2}
+if [[ ! "$profile_steps" =~ ^([2-9]|[1-3][0-9]|40)$ ]]; then
+    echo '错误：PROFILE_STEPS 必须为 2..40，表示正式生成和采集的去噪步数。' >&2
     exit 2
 fi
 if [[ "$mode" == bf16 ]]; then
@@ -77,12 +78,12 @@ command=(sglang generate
     --image-path "$script_dir/gyro.jpg"
     --prompt 'A man slowly blinks, his hair and clothes move gently in the wind, raindrops fall, subtle natural motion, stable camera.'
     --height 720 --width 1024 --num-gpus "$NPU_TP_SIZE"
-    --num-frames 81 --num-inference-steps 40
+    --num-frames 81 --num-inference-steps "$profile_steps"
     --guidance-scale 5.0 --fps 24 --seed 42
     --dit-cpu-offload true --text-encoder-cpu-offload true
     --image-encoder-cpu-offload true --vae-cpu-offload false
     --warmup-mode request --warmup-steps 2
-    --profile --num-profiled-timesteps "$profile_steps"
+    --profile --profile-all-stages
     --output-path "$output_dir" --output-file-name video.mp4
 )
 {
@@ -93,15 +94,13 @@ command=(sglang generate
     "${command[@]}"
 } 2>&1 | tee "$output_dir/run.log"
 
+# SGLang workers may be daemonic: parse their saved raw captures here, not in workers.
+python3 "$script_dir/analyze_npu_profile.py" "$SGLANG_DIFFUSION_TORCH_PROFILER_DIR" \
+    2>&1 | tee "$output_dir/analysis.log"
+
 if [[ "$mode" == mxfp8 ]] && ! grep -Fq 'Using MXFP8 quantized Ascend Flash Attention.' "$output_dir/run.log"; then
     echo "错误：未看到运行时 MXFP8 Attention 生效日志；不能将 fallback 当作 #45550 采集成功。检查 $output_dir/run.log" >&2
     exit 1
 fi
-trace=$(find "$SGLANG_DIFFUSION_TORCH_PROFILER_DIR" -type f -name trace_view.json -size +0c -print -quit)
-if [[ -z "$trace" ]]; then
-    echo "错误：没有找到非空 NPU trace_view.json；检查 $output_dir/run.log 和 traces/ 下的 profiler 输出。" >&2
-    exit 1
-fi
-echo "采集结束：$output_dir"
-echo "NPU 时间线：$trace（多卡时保留整个 traces/ 目录）"
-echo '注意：短窗口和开启 profiler 的耗时不构成全模型性能或精度结论。'
+echo "采集结束：$output_dir（多卡时保留整个 traces/ 目录）"
+echo '注意：短步数视频不用于画质验收；开启 profiler 的耗时不构成性能结论。'

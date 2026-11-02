@@ -6,6 +6,7 @@ from pathlib import Path
 import pty
 import select
 import subprocess
+import sys
 import tempfile
 import termios
 import time
@@ -966,6 +967,33 @@ class NpuCleanerTests(unittest.TestCase):
         self.assertTrue((self.root / "outputs_i2v_mxfp8_fa_check/run.log").exists())
 
     def mock_i2v_profiler(self):
+        package = self.root / "mock_modules/torch_npu/profiler"
+        package.mkdir(parents=True)
+        (package.parent / "__init__.py").write_text("")
+        (package / "__init__.py").write_text("")
+        (package / "profiler.py").write_text(
+            'import os\nfrom pathlib import Path\n'
+            'def analyse(path, max_process_number, export_type):\n'
+            '    assert export_type == "text" and max_process_number == 1\n'
+            '    with open(os.environ["TEST_ANALYSIS_LOG"], "a") as log:\n'
+            '        log.write(path + "\\n")\n'
+            '    if os.getenv("TEST_TRACE") == "0": return\n'
+            '    output = Path(path) / "ASCEND_PROFILER_OUTPUT"\n'
+            '    output.mkdir(exist_ok=True)\n'
+            '    (output / "trace_view.json").write_text("{}")\n'
+        )
+        self.env.update(
+            TEST_MOCK_PACKAGE=str(package.parents[1]),
+            TEST_REAL_PYTHON=sys.executable,
+            TEST_ANALYSIS_LOG=str(self.root / "analysis.log"),
+        )
+        original_python = (self.bin_dir / "python3").read_text()
+        self.mock(
+            "python3",
+            'if [[ "$1" == */analyze_npu_profile.py ]]; then\n'
+            '    exec env PYTHONPATH="$TEST_MOCK_PACKAGE" "$TEST_REAL_PYTHON" "$@"\n'
+            'fi\n' + original_python,
+        )
         self.mock(
             "sglang",
             'printf "attention:%s\\ncache_dit:%s\\nvisible:%s\\ntrace_dir:%s\\n" '
@@ -973,9 +1001,9 @@ class NpuCleanerTests(unittest.TestCase):
             '"$ASCEND_RT_VISIBLE_DEVICES" "$SGLANG_DIFFUSION_TORCH_PROFILER_DIR" '
             '> "$TEST_LAUNCH_LOG"\n'
             'printf "arg:%s\\n" "$@" >> "$TEST_LAUNCH_LOG"\n'
-            'if [[ "${TEST_TRACE:-1}" == 1 ]]; then\n'
-            '    mkdir -p "$SGLANG_DIFFUSION_TORCH_PROFILER_DIR/rank0/ASCEND_PROFILER_OUTPUT"\n'
-            '    printf "{}" > "$SGLANG_DIFFUSION_TORCH_PROFILER_DIR/rank0/ASCEND_PROFILER_OUTPUT/trace_view.json"\n'
+            'if [[ "${TEST_RAW:-1}" == 1 ]]; then\n'
+            '    mkdir -p "$SGLANG_DIFFUSION_TORCH_PROFILER_DIR/rank0_ascend_pt"\n'
+            '    printf "raw" > "$SGLANG_DIFFUSION_TORCH_PROFILER_DIR/rank0_ascend_pt/raw.data"\n'
             'fi\n'
             'if [[ "$SGLANG_DIFFUSION_ENABLE_MXFP8_ATTENTION" == 1 && "${TEST_FA:-1}" == 1 ]]; then\n'
             '    echo "Using MXFP8 quantized Ascend Flash Attention."\n'
@@ -997,17 +1025,19 @@ class NpuCleanerTests(unittest.TestCase):
             launches.append(launch)
             self.assertIn(f"attention:{attention}\ncache_dit:0\nvisible:5,3\n", launch)
             self.assertIn("arg:--num-gpus\narg:2\n", launch)
-            self.assertIn("arg:--num-profiled-timesteps\narg:5\n", launch)
-            self.assertIn("arg:--num-inference-steps\narg:40\n", launch)
+            self.assertNotIn("arg:--num-profiled-timesteps\n", launch)
+            self.assertIn("arg:--num-inference-steps\narg:2\n", launch)
             self.assertIn("arg:--warmup-mode\narg:request\narg:--warmup-steps\narg:2\n", launch)
             self.assertNotIn("arg:--attention-backend\n", launch)
             self.assertNotIn("arg:--quantization\n", launch)
-            self.assertNotIn("arg:--profile-all-stages\n", launch)
+            self.assertIn("arg:--profile-all-stages\n", launch)
             self.assertIn(f"arg:{DIFFUSION_DIR}/gyro.jpg\n", launch)
             directories = list((self.root / "outputs_i2v_profile").glob(f"{mode}-*"))
             self.assertEqual(len(directories), 1)
             self.assertTrue((directories[0] / "run.log").is_file())
+            self.assertIn("NPU trace:", (directories[0] / "analysis.log").read_text())
             self.assertIn(f"trace_dir:{directories[0]}/traces\n", launch)
+            self.assertTrue((directories[0] / "traces/rank0_ascend_pt/raw.data").exists())
         # With the same mock model, only the run's output directory differs in argv.
         def without_output(launch):
             return [line for line in launch.splitlines() if line.startswith("arg:")
@@ -1015,18 +1045,18 @@ class NpuCleanerTests(unittest.TestCase):
         self.assertEqual(without_output(launches[0]), without_output(launches[1]))
         self.assertEqual(self.contents(self.kill_log), "")
 
-    def test_i2v_profile_full_window_and_no_overwrite(self):
+    def test_i2v_profile_custom_step_count_and_no_overwrite(self):
         self.mock_i2v_profiler()
         model = self.root / "model with spaces"
         model.mkdir()
         for _ in range(2):
             result = self.run_script(
                 I2V_PROFILER, ("bf16",),
-                {"MODEL_PATH": str(model), "PROFILE_STEPS": "-1"},
+                {"MODEL_PATH": str(model), "PROFILE_STEPS": "3"},
             )
             self.assertEqual(result.returncode, 0, result.stdout)
             launch = self.contents(self.launch_log)
-            self.assertIn("arg:--num-profiled-timesteps\narg:-1\n", launch)
+            self.assertIn("arg:--num-inference-steps\narg:3\n", launch)
             self.assertIn(f"arg:--model-path\narg:{model}\n", launch)
         self.assertEqual(len(list((self.root / "outputs_i2v_profile").glob("bf16-*"))), 2)
 
@@ -1035,6 +1065,7 @@ class NpuCleanerTests(unittest.TestCase):
         for overrides, status, message in (
             ({"TEST_FA": "0"}, 1, "fallback"),
             ({"TEST_TRACE": "0"}, 1, "trace_view.json"),
+            ({"TEST_RAW": "0"}, 1, "No raw"),
             ({"TEST_GENERATE_STATUS": "42"}, 42, ""),
         ):
             with self.subTest(overrides=overrides):
@@ -1043,12 +1074,33 @@ class NpuCleanerTests(unittest.TestCase):
                 self.assertIn(message, result.stdout)
                 self.assertNotIn("采集结束", result.stdout)
 
+    def test_i2v_profile_offline_analysis_recovers_all_ranks_without_generation(self):
+        self.mock_i2v_profiler()
+        traces = self.root / "saved traces"
+        for rank in (0, 1):
+            capture = traces / f"rank{rank}_ascend_pt"
+            capture.mkdir(parents=True)
+            (capture / "raw.data").write_text("saved")
+        script = DIFFUSION_DIR / "analyze_npu_profile.py"
+        for _ in range(2):
+            result = subprocess.run(
+                [str(self.bin_dir / "python3"), str(script), str(traces)],
+                env=self.env, cwd=self.root, capture_output=True, text=True, timeout=5,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(result.stdout.count("NPU trace:"), 2)
+        # A repeat invocation reuses existing parsed traces and does not regenerate.
+        self.assertEqual(len((self.root / "analysis.log").read_text().splitlines()), 2)
+        self.assertEqual(self.contents(self.launch_log), "")
+        self.assertEqual(self.contents(self.query_log), "")
+        self.assertTrue(all(path.read_text() == "saved" for path in traces.rglob("raw.data")))
+
     def test_i2v_profile_bad_inputs_do_not_launch_or_clean(self):
         cases = [(("oops",), {}), (("bf16",), {"MODEL_PATH": ""}),
                  (("bf16",), {"MODEL_PATH": str(self.offline)}),
                  (("mxfp8",), {"MODEL_PATH": str(self.root / "missing")})]
         cases += [(("bf16",), {"PROFILE_STEPS": value})
-                  for value in ("0", "-2", "41", "abc")]
+                  for value in ("0", "1", "-1", "-2", "41", "abc")]
         for args, overrides in cases:
             with self.subTest(args=args, overrides=overrides):
                 result = self.run_script(I2V_PROFILER, args, overrides)

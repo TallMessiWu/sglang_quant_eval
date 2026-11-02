@@ -1001,9 +1001,21 @@ class NpuCleanerTests(unittest.TestCase):
             '"$ASCEND_RT_VISIBLE_DEVICES" "$SGLANG_DIFFUSION_TORCH_PROFILER_DIR" '
             '> "$TEST_LAUNCH_LOG"\n'
             'printf "arg:%s\\n" "$@" >> "$TEST_LAUNCH_LOG"\n'
+            'args=("$@"); ranks=1\n'
+            'for i in "${!args[@]}"; do\n'
+            '    if [[ "${args[$i]}" == --num-gpus ]]; then ranks=${args[$((i + 1))]}; fi\n'
+            'done\n'
+            'ranks=${TEST_CAPTURE_RANKS:-$ranks}\n'
             'if [[ "${TEST_RAW:-1}" == 1 ]]; then\n'
-            '    mkdir -p "$SGLANG_DIFFUSION_TORCH_PROFILER_DIR/rank0_ascend_pt"\n'
-            '    printf "raw" > "$SGLANG_DIFFUSION_TORCH_PROFILER_DIR/rank0_ascend_pt/raw.data"\n'
+            '    for ((rank=0; rank<ranks; rank++)); do\n'
+            '        capture="$SGLANG_DIFFUSION_TORCH_PROFILER_DIR/rank${rank}_ascend_pt"\n'
+            '        mkdir -p "$capture"\n'
+            '        printf "raw" > "$capture/raw.data"\n'
+            '        if [[ "${TEST_TRACE:-1}" == 1 ]]; then\n'
+            '            mkdir -p "$capture/ASCEND_PROFILER_OUTPUT"\n'
+            '            printf "{}" > "$capture/ASCEND_PROFILER_OUTPUT/trace_view.json"\n'
+            '        fi\n'
+            '    done\n'
             'fi\n'
             'if [[ "$SGLANG_DIFFUSION_ENABLE_MXFP8_ATTENTION" == 1 && "${TEST_FA:-1}" == 1 ]]; then\n'
             '    echo "Using MXFP8 quantized Ascend Flash Attention."\n'
@@ -1035,7 +1047,9 @@ class NpuCleanerTests(unittest.TestCase):
             directories = list((self.root / "outputs_i2v_profile").glob(f"{mode}-*"))
             self.assertEqual(len(directories), 1)
             self.assertTrue((directories[0] / "run.log").is_file())
-            self.assertIn("NPU trace:", (directories[0] / "analysis.log").read_text())
+            self.assertIn("NPU trace:", result.stdout)
+            self.assertFalse((self.root / "analysis.log").exists())
+            self.assertFalse((directories[0] / "analysis.log").exists())
             self.assertIn(f"trace_dir:{directories[0]}/traces\n", launch)
             self.assertTrue((directories[0] / "traces/rank0_ascend_pt/raw.data").exists())
         # With the same mock model, only the run's output directory differs in argv.
@@ -1065,7 +1079,7 @@ class NpuCleanerTests(unittest.TestCase):
         for overrides, status, message in (
             ({"TEST_FA": "0"}, 1, "fallback"),
             ({"TEST_TRACE": "0"}, 1, "trace_view.json"),
-            ({"TEST_RAW": "0"}, 1, "No raw"),
+            ({"TEST_RAW": "0"}, 1, "未找到原始"),
             ({"TEST_GENERATE_STATUS": "42"}, 42, ""),
         ):
             with self.subTest(overrides=overrides):
@@ -1073,6 +1087,18 @@ class NpuCleanerTests(unittest.TestCase):
                 self.assertEqual(result.returncode, status, result.stdout)
                 self.assertIn(message, result.stdout)
                 self.assertNotIn("采集结束", result.stdout)
+                # A broken native export must not be masked by offline auto-repair.
+                self.assertFalse((self.root / "analysis.log").exists())
+
+    def test_i2v_profile_rejects_incomplete_rank_set(self):
+        self.mock_i2v_profiler()
+        result = self.run_script(
+            I2V_PROFILER, ("bf16", "0", "1"),
+            {"TEST_SMI_ROWS": "", "TEST_CAPTURE_RANKS": "1"},
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("期望 2 份", result.stdout)
+        self.assertFalse((self.root / "analysis.log").exists())
 
     def test_i2v_profile_offline_analysis_recovers_all_ranks_without_generation(self):
         self.mock_i2v_profiler()

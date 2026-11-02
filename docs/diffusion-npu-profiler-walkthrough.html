@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="沿请求调用链走读 SGLang Diffusion NPU profiler：后端选择、stop/finish、自动解析、进程组清理和错误传播。">
+  <title>Diffusion NPU Profiler · 代码走读</title>
+  <style>
+    :root{--paper:#fff;--ground:#f5f7fb;--rail:#edf2fa;--ink:#192b43;--muted:#52637a;--accent:#2851bd;--line:#cdd7e6;--capture:#805019;--capture-bg:#fff4df;--parse:#16624f;--parse-bg:#e9f5ef;--error:#a3332d;--code:#132238;--code-ink:#eaf0f8;--mono:Consolas,"SFMono-Regular","Liberation Mono",monospace;--sans:"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+    *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:28px}body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.85}::selection{background:#cbdcff;color:#102f70}:focus-visible{outline:3px solid var(--accent);outline-offset:4px}a{color:var(--accent);text-underline-offset:4px;text-decoration-thickness:1px}a:hover{text-decoration-thickness:2px}button,select{font:inherit}button{cursor:pointer}button:disabled{cursor:default;opacity:.48}code,kbd{font-family:var(--mono);font-size:.88em}p code,li code,td code,dd code{background:#edf2fa;padding:2px 5px;border-radius:4px;overflow-wrap:anywhere}p{margin:0 0 16px}ul,ol{padding-left:24px}li{margin:6px 0}h1,h2,h3{line-height:1.35;text-wrap:balance}h1{font-size:clamp(30px,3.2vw,44px);letter-spacing:-.025em;margin:0 0 20px;font-weight:750}h2{font-size:28px;margin:0 0 24px;letter-spacing:-.02em}h3{font-size:20px;margin:30px 0 12px}strong{font-weight:700}figure{margin:24px 0}figcaption{color:var(--muted);font-size:13px;line-height:1.6}table{width:100%;border-collapse:collapse;text-align:left;font-size:14px}th,td{padding:13px 15px;border-bottom:1px solid var(--line);vertical-align:top}th{font-weight:650;background:var(--ground)}td{line-height:1.7}tbody tr:last-child td{border-bottom:0}.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px;margin:22px 0;scrollbar-color:#9aacbf var(--ground)}.table-wrap table{min-width:510px}.skip-link{position:fixed;left:16px;top:-80px;background:var(--ink);color:white;padding:10px 18px;z-index:10}.skip-link:focus{top:12px}.layout{display:grid;grid-template-columns:258px minmax(0,1fr);max-width:1560px;margin:auto}.rail{position:sticky;top:0;height:100vh;padding:32px 24px 24px;background:var(--rail);border-right:1px solid var(--line);overflow:auto;scrollbar-color:#a4b4cc var(--rail)}.brand{display:block;font-size:17px;font-weight:750;color:var(--ink);text-decoration:none;margin-bottom:28px}.brand small{display:block;margin-top:4px;font-weight:400;font-size:12px;color:var(--muted)}.toc summary{font-weight:650;margin-bottom:12px;cursor:pointer}.toc nav{display:grid;gap:3px}.toc a{display:flex;gap:10px;padding:8px 10px;font-size:14px;line-height:1.55;color:#3d506c;text-decoration:none;border-radius:5px}.toc a span{font-variant-numeric:tabular-nums;color:#526987;width:20px;flex-shrink:0}.toc a:hover{background:#dfe8f7}.toc a[aria-current="location"]{background:#dbe6fb;color:#193e9c;font-weight:650}.rail-note{font-size:12px;line-height:1.8;color:var(--muted);margin-top:30px;padding-top:20px;border-top:1px solid var(--line)}.rail-note code{background:transparent;padding:0;font-size:12px}main{min-width:0;padding:48px clamp(24px,4vw,72px) 64px;max-width:1180px}.top-tools{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:28px;color:var(--muted);font-size:13px}.top-tools a{font-weight:600}.top-tools button{margin-left:auto}.button{border:1px solid #9aaecb;background:white;color:var(--ink);padding:7px 14px;border-radius:6px;font-size:13px;line-height:1.6}.button:hover:not(:disabled){background:#eaf0fc}.button.primary{background:var(--accent);border-color:var(--accent);color:white}.button.primary:hover:not(:disabled){background:#193e9c}.lead{font-size:19px;max-width:42em;line-height:1.85}.thesis{font-size:23px;line-height:1.6;padding:22px 0;margin:26px 0 12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.thesis code{font-size:1em;color:var(--accent);background:none;padding:0}.meta{color:var(--muted);font-size:13px}.prose{max-width:74ch}.section{padding-top:52px;margin-top:48px;border-top:1px solid var(--line);scroll-margin-top:24px}.section:first-of-type{border-top:0;padding-top:12px;margin-top:28px}.section-heading{display:flex;gap:16px;align-items:baseline}.section-heading .number{font-family:var(--mono);font-size:15px;font-weight:600;color:var(--accent);flex-shrink:0}.section-heading h2{margin-bottom:24px}.question{font-size:18px;font-weight:650;margin-bottom:16px}.note{background:var(--ground);padding:18px 22px;border:1px solid var(--line);border-radius:8px;margin:22px 0;font-size:14px}.note p:last-child{margin:0}.note.warn{background:var(--capture-bg);border-color:#e7cd9e;color:#604019}.note.boundary{background:#edf3ff;border-color:#c0d0ef}.note-label{display:block;font-weight:700;margin-bottom:6px}.file-ref{display:block;font-family:var(--mono);font-size:12px;color:var(--muted);overflow-wrap:anywhere;margin:0 0 18px}.codebox{margin:20px 0 24px;border-radius:8px;overflow:hidden;background:var(--code);color:var(--code-ink)}.codebox figcaption{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:12px 18px;background:#1c304c;color:#cfdaec;font-family:var(--mono);font-size:12px}.codebox figcaption a{color:#b6cfff}.codebox .copy{margin-left:auto;background:#2b4264;border:1px solid #526987;color:#eaf0f8;border-radius:4px;padding:3px 10px;font-size:12px}.copy:hover{background:#3a557a}.codebox pre{margin:0;padding:20px 22px;overflow-x:auto;scrollbar-color:#617d9e var(--code);font-size:13px;line-height:1.75;tab-size:4}.codebox pre code{font-size:inherit;white-space:pre}.kw{color:#a9caff}.str{color:#a7dfc6}.comment{color:#a9b9d0}.hot{background:#2a4264;color:#fff}.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,.65fr);gap:28px;align-items:start}.split .codebox{margin-top:0}.side-explain{font-size:14px;padding-top:4px}.side-explain h3{font-size:16px;margin:0 0 10px}.side-explain p{margin-bottom:15px}.swimlane{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:24px 0}.process{border:1px solid var(--line);border-radius:8px;overflow:hidden;min-width:0}.process h3{font-size:16px;margin:0;padding:14px 18px;background:var(--capture-bg);color:var(--capture)}.process.parser h3{background:var(--parse-bg);color:var(--parse)}.process h3 small{display:block;font-family:var(--mono);font-size:12px;font-weight:400;margin-top:4px}.process ol{list-style:none;margin:0;padding:8px 18px 16px;counter-reset:process-step}.process li{padding:10px 0 10px 30px;position:relative;border-bottom:1px solid var(--line);font-size:14px}.process li:last-child{border:0}.process li:before{counter-increment:process-step;content:counter(process-step);font-family:var(--mono);position:absolute;left:0;color:var(--muted)}.process li small{display:block;color:var(--muted);line-height:1.7}.bridge{font-size:14px;text-align:center;color:var(--accent);padding:10px 0;border-bottom:1px solid var(--line)}.reading-route{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:14px;margin:20px 0}.reading-route a{white-space:nowrap}.failure-pair{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin:22px 0}.failure-pair>div{padding-top:16px;border-top:2px solid var(--line);min-width:0}.failure-pair h3{margin:0 0 12px}.failure-pair code{font-size:12px;overflow-wrap:anywhere}.error-text{color:var(--error);font-family:var(--mono);font-size:13px;line-height:1.7}.mini-flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:20px 0;font-size:14px}.mini-flow .node{padding:9px 13px;background:var(--ground);border:1px solid var(--line);border-radius:5px}.mini-flow .connector{width:22px;height:16px;flex-shrink:0;color:var(--muted)}.flow-caption{color:var(--muted);font-size:13px}.lab{margin:28px 0;border:1px solid #afc1df;border-radius:10px;overflow:hidden}.lab-head{padding:20px 24px;background:#eaf0fc}.lab-head h3{margin:0 0 6px;font-size:19px}.lab-head p{margin:0;color:#425a7e;font-size:13px}.lab-controls{display:none;gap:12px;flex-wrap:wrap;align-items:center;padding:16px 24px;border-bottom:1px solid var(--line);font-size:13px}.js .lab-controls{display:flex}.lab-controls select{max-width:100%;padding:7px 10px;border:1px solid #93a9cb;background:white;color:var(--ink);border-radius:5px;font-size:14px}.lab-body{padding:24px}.step-meta{font-size:13px;font-family:var(--mono);color:var(--accent);font-variant-numeric:tabular-nums;margin-bottom:9px}.lab-body h4{font-size:18px;margin:0 0 8px;line-height:1.6}.lab-body p{font-size:14px;max-width:70ch}.state-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:6px;overflow:hidden;margin:20px 0}.state-grid>div{background:white;padding:12px 14px;min-width:0}.state-grid dt{font-family:var(--mono);font-size:12px;color:var(--muted);overflow-wrap:anywhere;line-height:1.5}.state-grid dd{margin:7px 0 0;font-family:var(--mono);font-size:13px;font-weight:600;overflow-wrap:anywhere}.lab-footer{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;padding:14px 24px;background:var(--ground);font-size:13px}.lab-footer .step-buttons{display:none;gap:8px}.js .lab-footer .step-buttons{display:flex}.js-only{display:none}.js .js-only{display:inline-flex}.callout-line{padding:16px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:17px;margin:24px 0}.ownership{margin:24px 0;padding:22px;background:var(--ground);border-radius:8px;font-family:var(--mono);font-size:13px;line-height:2;overflow-x:auto;white-space:pre}.terms{display:grid;grid-template-columns:minmax(150px,.7fr) 1.7fr;gap:0 24px;font-size:14px;margin:22px 0}.terms dt{padding:13px 0;border-bottom:1px solid var(--line);font-weight:650}.terms dd{margin:0;padding:13px 0;border-bottom:1px solid var(--line)}.quiz details{border-bottom:1px solid var(--line);padding:18px 0}.quiz summary{cursor:pointer;font-size:16px;font-weight:650;line-height:1.6;padding-right:16px}.quiz details p{font-size:14px;color:#415571;margin:14px 0 0;padding-left:20px}.source-list{list-style:none;padding:0;margin:20px 0}.source-list li{padding:14px 0;border-bottom:1px solid var(--line)}.source-list a{font-family:var(--mono);font-size:13px;overflow-wrap:anywhere}.source-list small{display:block;color:var(--muted);font-size:13px;margin-top:5px}footer{margin-top:56px;padding-top:24px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.no-js-note{font-size:13px;color:var(--muted)}.js .no-js-note{display:none}
+    @media(min-width:981px){.toc summary{cursor:default;list-style:none}.toc summary::-webkit-details-marker{display:none}}
+    @media(max-width:1180px){.split{grid-template-columns:1fr}.side-explain{padding:0}.layout{grid-template-columns:235px minmax(0,1fr)}.rail{padding:28px 18px}main{padding:38px 32px 52px}}
+    @media(max-width:980px){.layout{display:block}.rail{position:relative;height:auto;overflow:visible;padding:18px 24px;border-right:0;border-bottom:1px solid var(--line)}.brand{margin:0 0 12px;font-size:15px}.brand small{display:inline;margin-left:12px}.rail-note{display:none}.toc summary{margin-bottom:0;font-size:14px}.toc[open] summary{margin-bottom:12px}.toc nav{grid-template-columns:1fr 1fr}.toc a{font-size:13px}main{padding:30px 26px 48px;max-width:960px;margin:auto}.section{padding-top:40px;margin-top:36px}.top-tools{margin-bottom:22px}.thesis{font-size:21px}.swimlane{gap:12px}}
+    @media(max-width:600px){body{font-size:15px}.rail{padding:16px 20px}main{padding:26px 20px 40px}h2{font-size:24px}h3{font-size:18px}.lead{font-size:17px}.thesis{font-size:19px}.top-tools{gap:8px 12px;font-size:12px}.top-tools button{margin-left:0}.swimlane,.failure-pair{grid-template-columns:1fr}.process h3{padding:12px 16px}.section-heading{gap:10px}.section-heading .number{font-size:13px}.codebox pre{padding:16px;font-size:12px}.codebox figcaption{padding:11px 14px;font-size:12px}.codebox .copy{font-size:12px}.note{padding:16px;font-size:13px}.lab-head,.lab-controls,.lab-body{padding:18px}.lab-footer{padding:14px 18px}.state-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.state-grid>div{padding:11px}.terms{grid-template-columns:1fr;gap:0}.terms dt{border:0;padding-bottom:0}.terms dd{padding-top:4px}.ownership{padding:16px;font-size:12px}.table-wrap table{min-width:490px}.quiz summary{font-size:15px}.quiz details p{padding-left:0}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+    @media print{html{scroll-behavior:auto}body{font-size:11pt;color:black;background:white}.layout{display:block;max-width:none}.rail,.top-tools button,.copy,.lab-controls,.step-buttons{display:none!important}main{max-width:none;padding:0}.section{margin-top:22pt;padding-top:20pt}h1{font-size:26pt}h2{font-size:19pt}.codebox{break-inside:avoid;background:#f3f4f6;color:#111}.codebox figcaption{background:#e4e8ef;color:#111}.codebox figcaption a{color:#111}.codebox pre{white-space:pre-wrap;overflow:visible;font-size:8pt}.codebox pre code{white-space:pre-wrap;overflow-wrap:anywhere}.kw,.str,.comment{color:inherit}.hot{background:#dbe5f6;color:black}.table-wrap{overflow:visible}.table-wrap table{min-width:0}a{color:inherit}.lab{break-inside:avoid}.swimlane{grid-template-columns:1fr 1fr}.note{break-inside:avoid}footer{margin-top:20pt}}
+  </style>
+</head>
+<body>
+<a class="skip-link" href="#main-content">跳到正文</a>
+<div class="layout">
+  <aside class="rail" aria-label="走读导航">
+    <a class="brand" href="#top">SGLang 代码学习<small>Diffusion · Ascend NPU</small></a>
+    <details class="toc" id="toc" open>
+      <summary>阅读目录</summary>
+      <nav aria-label="章节">
+        <a href="#overview"><span>00</span>先建立整体模型</a>
+        <a href="#failures"><span>01</span>两个报错，不是同一个问题</a>
+        <a href="#entry"><span>02</span>请求入口与异常边界</a>
+        <a href="#backend"><span>03</span>选择正确的 profiler</a>
+        <a href="#lifecycle"><span>04</span>理解 stop 与 finish</a>
+        <a href="#analysis"><span>05</span>自动解析如何发生</a>
+        <a href="#cleanup"><span>06</span>解析进程由谁回收</a>
+        <a href="#ranks"><span>07</span>多 rank 的错误怎样汇总</a>
+        <a href="#evidence"><span>08</span>测试证明了什么</a>
+        <a href="#self-check"><span>09</span>自测与源码索引</a>
+      </nav>
+    </details>
+    <p class="rail-note">建议按目录顺序读一遍，再用交互状态表复述成功与失败路径。<br><br>这是固定版本的学习文档，不是 PR / CI 状态看板。所有交互都只在浏览器内演示，不会启动模型或 NPU 任务。</p>
+  </aside>
+  <main id="main-content">
+    <header id="top">
+      <h1>Diffusion NPU Profiler<br>代码走读</h1>
+      <div class="top-tools">
+        <a href="https://github.com/sgl-project/sglang/pull/47856" target="_blank" rel="noopener noreferrer">PR #47856 · 联网查看</a>
+        <span>源码版本 <code>14bcb8e3d4</code></span>
+        <span>中文学习版 · 离线可读</span>
+        <button class="button js-only" id="print-button" type="button">打印</button>
+      </div>
+      <p class="lead">沿一次 profiling 请求，理解如何在<strong>不修改 worker 的 <code>daemon=True</code></strong> 的前提下，选对 NPU profiler，并让采集结果自动变成可查看的 trace。</p>
+      <p class="thesis"><code>stop()</code> 结束采集。<br><code>finish()</code> 完成本次请求的 profiling 收尾。</p>
+      <p class="meta">读完应该能解释：为什么需要两个方法、为什么解析要换进程、为什么“没有抛异常”不等于成功。</p>
+    </header>
+
+    <section id="overview" class="section">
+      <div class="section-heading"><span class="number">00</span><h2>先建立整体模型</h2></div>
+      <p class="prose">这次没有修改模型 forward、量化算子或 worker 启动策略。改动围绕一个完整约定：<strong>正式请求正常完成时，profiling 不应只留下 raw 数据，还应自动生成解析产物。</strong></p>
+      <figure aria-labelledby="process-caption">
+        <div class="swimlane">
+          <div class="process">
+            <h3>推理 worker<small>multiprocessing daemon = True · 保持原样</small></h3>
+            <ol>
+              <li><code>profile_execution()</code><small>决定是否采集；跳过 warmup 请求。</small></li>
+              <li><code>profile → pipeline → stop()</code><small>短窗口可以先停采集，pipeline 继续执行。</small></li>
+              <li><code>finish()</code><small>正常请求收尾，启动并等待解析，汇总 rank 错误。</small></li>
+            </ol>
+          </div>
+          <div class="process parser">
+            <h3>独立解析进程<small>新的 Python 解释器 · 独立进程组</small></h3>
+            <ol>
+              <li><code>_arm_parent_death()</code><small>先建立生命周期保护，再加载解析库。</small></li>
+              <li><code>torch_npu.analyse()</code><small>解析器可以创建自己的 multiprocessing 进程池。</small></li>
+              <li><code>_trace_path()</code><small>检查本次目录下的非空 trace，返回结果。</small></li>
+            </ol>
+          </div>
+        </div>
+        <div class="bridge">连接方式：worker 以 <code>subprocess.Popen</code> 启动新解释器，并等待它结束；不是把解析交给用户。</div>
+        <figcaption id="process-caption">结构示意，不是实际采样时间线。每个 rank 处理自己的 capture；原始数据与解析日志留在采集目录内。</figcaption>
+      </figure>
+      <div class="table-wrap" tabindex="0" role="region" aria-label="三个生产文件的职责">
+        <table>
+          <thead><tr><th scope="col">文件</th><th scope="col">它负责回答的问题</th></tr></thead>
+          <tbody>
+            <tr><td><code>pipeline_executor.py</code></td><td>请求何时算完成？推理抛异常时应如何收尾？</td></tr>
+            <tr><td><code>profiler.py</code></td><td>用哪个后端？何时停止采集？何时解析并汇总错误？</td></tr>
+            <tr><td><code>npu_profile_analysis.py</code></td><td>怎样在合适的进程环境中解析，并管理解析进程的生命周期？</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="meta">源码根目录：<code>python/sglang/multimodal_gen/</code>。后文文件路径都相对于这里；完整源码链接固定到上述提交，不随 main 漂移。</p>
+    </section>
+
+    <section id="failures" class="section">
+      <div class="section-heading"><span class="number">01</span><h2>两个报错，不是同一个问题</h2></div>
+      <div class="failure-pair">
+        <div>
+          <h3>对象和回调属于不同后端</h3>
+          <p class="error-text">'profile' object has no attribute 'prof_if'</p>
+          <p>原逻辑先尝试全局 patch，再从 <code>torch.profiler</code> 创建对象。新版兼容路径不一定应用指定替换，可能把普通 PyTorch profiler 交给需要 <code>prof_if</code> 的 NPU handler。</p>
+          <p><strong>修复方向：</strong>明确选择原生 NPU 构造器，不再“希望全局替换已经生效”。</p>
+        </div>
+        <div>
+          <h3>解析器不允许在 daemon 中建进程池</h3>
+          <p class="error-text">The profiling data cannot be parsed during the daemon process</p>
+          <p>即使采集对象正确，Diffusion worker 仍是 daemon。NPU 解析器需要 multiprocessing 进程池，会拒绝这个执行环境。生成可以完成，却没有解析产物。</p>
+          <p><strong>修复方向：</strong>保留 worker 策略，自动把解析放到新的普通 Python 进程。</p>
+        </div>
+      </div>
+      <div class="note boundary"><span class="note-label">不要混淆两条运行时</span><p>SRT serving 与 Diffusion 的 worker 进程模型不同。不能从 Diffusion 的报错推断所有 SGLang NPU 用户都必须手动解析。这份走读只讨论本提交的 Diffusion 路径。</p></div>
+      <h3>四个词先对齐</h3>
+      <dl class="terms">
+        <dt>daemon</dt><dd>Python multiprocessing 的进程属性，不是 Linux 后台服务，也不是性能开关。</dd>
+        <dt>raw capture</dt><dd>NPU profiler 保存的原始采集数据。存在 raw 不代表已经有可视化 trace。</dd>
+        <dt>parsed trace</dt><dd>原生分析器生成的结果。本实现检查 <code>ASCEND_PROFILER_OUTPUT/trace_view.json</code>。</dd>
+        <dt>process group</dt><dd>本实现给解析器单独建立的进程组，用来清理解析器及其池进程，不改变推理 worker 的进程组。</dd>
+      </dl>
+    </section>
+
+    <section id="entry" class="section">
+      <div class="section-heading"><span class="number">02</span><h2>从请求边界开始</h2></div>
+      <span class="file-ref">runtime/pipelines_core/executors/pipeline_executor.py:329–362</span>
+      <p class="question">谁决定“现在该解析了”？</p>
+      <p class="prose">不是 CLI 脚本，也不是每个去噪 step。是围绕 pipeline 的 <code>profile_execution()</code> context。单请求、分组请求及顺序分组执行入口都使用这层 context。</p>
+      <figure class="codebox" id="code-entry">
+        <figcaption><span>profile_execution() · 教学简写，省略构造参数</span><a href="https://github.com/TallMessiWu/sglang/blob/14bcb8e3d4/python/sglang/multimodal_gen/runtime/pipelines_core/executors/pipeline_executor.py#L329-L362" target="_blank" rel="noopener noreferrer">对照完整源码</a><button class="copy js-only" type="button" aria-label="复制请求边界代码">复制</button></figcaption>
+        <pre tabindex="0" aria-label="请求边界代码"><code>do_profile = batch.profile and not batch.is_warmup
+if not do_profile:
+    yield
+    return
+
+profiler = SGLDiffusionProfiler(...)  # 省略参数
+try:
+    yield                           # 模型 pipeline 在这里执行
+except BaseException:
+    try:
+        profiler.stop(dump_rank=dump_rank)
+    except Exception:
+        logger.exception(...)
+    raise                           # 重新抛出原来的推理错误
+else:
+    profiler.finish(dump_rank=dump_rank)</code></pre>
+      </figure>
+      <div class="split">
+        <div><h3>成功路径调用 finish()</h3><p><code>yield</code> 正常返回后，进入 <code>else</code>。解析完成前，不能离开这层正常请求收尾逻辑。<code>finish()</code> 抛出的解析异常不会被前面的 <code>except</code> 吞掉。</p></div>
+        <div><h3>异常路径只调用 stop()</h3><p>推理失败、中断或生成器关闭时，停止采集但不启动解析。即使清理又失败，也只记录清理错误，最后用裸 <code>raise</code> 保留原始错误。</p></div>
+      </div>
+      <div class="note"><span class="note-label">为什么捕获 BaseException？</span><p>除了普通异常，还需要在 <code>KeyboardInterrupt</code> 等退出情形下做清理。这里不是吞掉中断：清理之后立即重新抛出。也不在异常退出时进入解析阶段的集体通信。</p></div>
+    </section>
+
+    <section id="backend" class="section">
+      <div class="section-heading"><span class="number">03</span><h2>选择正确的 profiler</h2></div>
+      <span class="file-ref">runtime/utils/profiler.py:85–126</span>
+      <p class="prose">先把后端身份绑定清楚，再决定谁负责解析。<code>profile</code>、<code>schedule</code> 和 NPU handler 应来自相容的后端，不能依赖一个可能没有生效的全局 monkey patch。</p>
+      <figure class="codebox" id="code-backend">
+        <figcaption><span>后端与解析职责 · 源码摘录</span><a href="https://github.com/TallMessiWu/sglang/blob/14bcb8e3d4/python/sglang/multimodal_gen/runtime/utils/profiler.py#L85-L126" target="_blank" rel="noopener noreferrer">查看上下文</a><button class="copy js-only" type="button" aria-label="复制后端选择代码">复制</button></figcaption>
+        <pre tabindex="0" aria-label="后端选择代码"><code>profiler_module = (
+    torch_npu.profiler if current_platform.is_npu() else torch.profiler
+)
+self._needs_npu_analysis = (
+    current_platform.is_npu() and multiprocessing.current_process().daemon
+)
+self._analysis_finished = False
+
+# NPU handler 的构造参数（其余参数省略）
+profiler_module.tensorboard_trace_handler(
+    self.log_dir, analyse_flag=not self._needs_npu_analysis
+)
+
+# full-profile 分支
+self.profiler = profiler_module.profile(**common_torch_profiler_args)</code></pre>
+      </figure>
+      <div class="table-wrap" tabindex="0" role="region" aria-label="不同执行环境下的 profiler 分工">
+        <table>
+          <thead><tr><th scope="col">执行环境</th><th scope="col">_needs_npu_analysis</th><th scope="col">谁解析？</th></tr></thead>
+          <tbody>
+            <tr><td>非 NPU</td><td><code>False</code></td><td>保留 PyTorch 的导出路径。</td></tr>
+            <tr><td>NPU，非 daemon</td><td><code>False</code></td><td>原生 NPU handler，<code>analyse_flag=True</code>。</td></tr>
+            <tr><td>NPU，daemon</td><td><code>True</code></td><td>handler 先保留 raw；请求结束时由 <code>finish()</code> 自动安排解析。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="callout-line"><code>analyse_flag=False</code> 不是放弃解析，而是把解析的责任交给后面的 <code>finish()</code>。</p>
+      <p class="meta">这里省略了 activity 列表和其他构造参数。NPU-only import 本身受 <code>sglang.srt.utils.is_npu()</code> 保护，普通 CPU/CUDA 环境不要求安装 torch_npu。</p>
+    </section>
+
+    <section id="lifecycle" class="section">
+      <div class="section-heading"><span class="number">04</span><h2>理解 stop 与 finish</h2></div>
+      <p class="question">采集结束，不等于本次 profiling 请求已经收尾。</p>
+      <div class="split">
+        <div>
+          <h3>stop()：停止录制</h3>
+          <span class="file-ref">runtime/utils/profiler.py:167–185</span>
+          <p>用 <code>has_stopped</code> 防止重复停止，先同步设备，再调用原生 <code>self.profiler.stop()</code>。NPU 不走 PyTorch 的 Chrome trace 导出函数，因为它的 raw 数据由原生 profiler 落盘。</p>
+          <p>最后始终清除 <code>SGLDiffusionProfiler._instance</code>，避免错误后留下一个仍被认为在采集的全局引用。</p>
+        </div>
+        <div>
+          <h3>finish()：完成收尾</h3>
+          <span class="file-ref">runtime/utils/profiler.py:187–219</span>
+          <p>先确保 <code>stop()</code> 已完成，再解析当前 rank 的实际 capture。短窗口如果已经停止，这次 <code>stop()</code> 会直接返回，不会再次采集或再次落盘。</p>
+          <p>全局 <code>_instance</code> 被清除不代表对象销毁：请求 context 仍持有局部变量 <code>profiler</code>，所以后续还能调用 <code>finish()</code>。</p>
+        </div>
+      </div>
+      <figure class="codebox" id="code-finish">
+        <figcaption><span>finish() · 本地解析部分，后续错误汇总见第 7 节</span><a href="https://github.com/TallMessiWu/sglang/blob/14bcb8e3d4/python/sglang/multimodal_gen/runtime/utils/profiler.py#L187-L219" target="_blank" rel="noopener noreferrer">查看完整方法</a><button class="copy js-only" type="button" aria-label="复制 finish 方法摘录">复制</button></figcaption>
+        <pre tabindex="0" aria-label="finish 方法摘录"><code>if not self._needs_npu_analysis or self._analysis_finished:
+    self.stop(dump_rank=dump_rank)
+    return
+self._analysis_finished = True
+error = None
+try:
+    self.stop(dump_rank=dump_rank)
+    trace = analyze_npu_profile(self.profiler.prof_if.prof_path)
+    logger.info("Saved NPU profiler trace to: %s", trace)
+except Exception as exc:
+    error = f"rank {self.rank}: {exc}"
+    logger.error("NPU profiler analysis failed: %s", error)</code></pre>
+      </figure>
+      <div class="note warn"><span class="note-label">两个标志都不是成功证明</span><p><code>has_stopped</code> 在停止尝试开始时设置；<code>_analysis_finished</code> 在解析尝试开始前设置。它们用于防重入，不等于“停止成功”或“解析成功”。解析是否成功，要看产物检查和错误传播；当前实现不会自动重试失败的收尾。</p></div>
+
+      <div class="lab" id="state-lab">
+        <div class="lab-head"><h3>沿着一条路径，看状态怎么变</h3><p>教学状态演示，不是真实 trace，不运行 Python，也不会使用 NPU。每一步都是执行到对应位置后的状态快照。</p></div>
+        <div class="lab-controls">
+          <label for="scenario">选择路径</label>
+          <select id="scenario">
+            <option value="full">两步全阶段采集：成功</option>
+            <option value="short">短窗口先停，pipeline 继续</option>
+            <option value="inference-error">模型推理抛异常</option>
+            <option value="parse-error">原生解析返回，但没有产物</option>
+          </select>
+        </div>
+        <div class="lab-body">
+          <div class="step-meta" id="step-counter">步骤 1 / 6</div>
+          <div id="step-description" aria-live="polite" aria-atomic="true">
+            <h4 id="step-title">正式请求进入 context</h4>
+            <p id="step-text">profile=True 且不是 warmup。创建原生 NPU profiler，当前 worker 仍为 daemon。</p>
+          </div>
+          <dl class="state-grid">
+            <div><dt>has_stopped</dt><dd id="state-stopped">False</dd></div>
+            <div><dt>_analysis_finished</dt><dd id="state-finished">False</dd></div>
+            <div><dt>_instance</dt><dd id="state-instance">当前 profiler</dd></div>
+            <div><dt>raw capture</dt><dd id="state-raw">尚未完成</dd></div>
+            <div><dt>parsed trace</dt><dd id="state-trace">未生成</dd></div>
+            <div><dt>当前活动位置</dt><dd id="state-process">推理 worker</dd></div>
+          </dl>
+          <p class="no-js-note">启用 JavaScript 可切换路径与步骤；其余所有代码和讲解不依赖 JavaScript。</p>
+        </div>
+        <div class="lab-footer"><a id="step-source" href="#entry">回看这一步的代码</a><div class="step-buttons"><button class="button" id="step-prev" type="button" disabled>上一步</button><button class="button primary" id="step-next" type="button">下一步</button></div></div>
+      </div>
+      <p class="meta">短窗口的 schedule 计数沿用原实现。本 PR 没有重新定义 <code>num_profiled_timesteps</code> 的边界；两步学习示例使用 <code>profile_all_stages</code>，不把正式采集的第一步交给 schedule warmup。</p>
+    </section>
+
+    <section id="analysis" class="section">
+      <div class="section-heading"><span class="number">05</span><h2>自动解析如何发生</h2></div>
+      <span class="file-ref">runtime/utils/npu_profile_analysis.py:31–74</span>
+      <p class="prose"><code>analyze_npu_profile()</code> 只接收<strong>本次实际采集目录</strong>。路径来自原生对象的 <code>prof_if.prof_path</code>，不是扫描一个共享日志根目录；这避免误解析其他 rank 或历史请求。</p>
+      <figure class="codebox" id="code-launch">
+        <figcaption><span>解析进程的命令与等待 · 源码摘录</span><a href="https://github.com/TallMessiWu/sglang/blob/14bcb8e3d4/python/sglang/multimodal_gen/runtime/utils/npu_profile_analysis.py#L39-L74" target="_blank" rel="noopener noreferrer">查看异常分支</a><button class="copy js-only" type="button" aria-label="复制解析进程启动代码">复制</button></figcaption>
+        <pre tabindex="0" aria-label="解析进程启动代码"><code>command = [
+    sys.executable,
+    "-c",
+    # run_path avoids putting utils/ on sys.path (it contains argparse.py).
+    "import runpy, sys; sys.argv = sys.argv[1:]; "
+    "runpy.run_path(sys.argv[0], run_name='__main__')",
+    str(Path(__file__).resolve()),
+    "--parent-pid",
+    str(os.getpid()),
+    str(directory),
+]
+with log_path.open("w") as log:
+    with subprocess.Popen(
+        command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True
+    ) as process:
+        try:
+            process.wait(timeout=timeout)
+            if process.returncode:
+                raise RuntimeError(
+                    f"parser exited with status {process.returncode}"
+                )
+            return _trace_path(directory)
+        # 此处省略异常清理分支，见下一节</code></pre>
+      </figure>
+      <dl class="terms">
+        <dt><code>sys.executable</code></dt><dd>沿用当前 SGLang 环境的 Python，避免调用到 PATH 中另一套解释器。</dd>
+        <dt>参数数组</dt><dd>路径作为参数传递，不插入 shell 命令。带空格的采集目录也不需要自己做 shell 转义。</dd>
+        <dt><code>runpy.run_path()</code></dt><dd>按文件执行小型解析入口，不启动整个 SGLang 包。还避免直接执行 <code>utils/</code> 下脚本时，同目录 <code>argparse.py</code> 遮蔽标准库的问题。</dd>
+        <dt><code>start_new_session=True</code></dt><dd>给解析器创建独立 session / process group，为后面的整组清理建立边界。</dd>
+        <dt><code>process.wait()</code></dt><dd>同步等待解析结束，默认上限 600 秒。不是启动一个后台任务就宣布请求完成。</dd>
+      </dl>
+      <h3>子进程里，仍然调用原生 analyse()</h3>
+      <figure class="codebox" id="code-native-analysis">
+        <figcaption><span>main() 的解析主体 · L103–115</span><a href="https://github.com/TallMessiWu/sglang/blob/14bcb8e3d4/python/sglang/multimodal_gen/runtime/utils/npu_profile_analysis.py#L98-L115" target="_blank" rel="noopener noreferrer">完整入口</a><button class="copy js-only" type="button" aria-label="复制子进程解析代码">复制</button></figcaption>
+        <pre tabindex="0" aria-label="子进程解析代码"><code>_arm_parent_death(args.parent_pid)
+try:
+    from torch_npu.profiler.profiler import analyse
+
+    analyse(str(args.directory), max_process_number=1)
+    _trace_path(args.directory)
+except BaseException:
+    traceback.print_exc()
+    sys.stderr.flush()
+    _terminate_parser_group()</code></pre>
+      </figure>
+      <p class="prose">这不是新的解析算法。它和手动运行 <code>analyse()</code> 使用同一个原生接口，区别在于现在由 SGLang 管理调用、等待、产物检查和清理。<strong><code>max_process_number=1</code> 只限制顶层解析池并行度，不代表完全不创建子进程。</strong></p>
+      <div class="note boundary"><span class="note-label">成功判据：不能只看退出码</span><p>原生解析器可能打印错误后正常返回。因此子进程和父进程都会检查 <code>ASCEND_PROFILER_OUTPUT/trace_view.json</code> 是否存在且非空。这是最低产物条件，不证明 JSON 的完整语义、NPU 事件覆盖率或采样质量。</p></div>
+      <div class="ownership" role="img" aria-label="本次 capture 的原始数据、解析日志与 trace 文件">本次 rank 的 capture/
+  原始 profiling 数据             保留，不因解析失败删除
+  sglang_analysis.log              解析器 stdout / stderr
+  ASCEND_PROFILER_OUTPUT/
+    trace_view.json                检查存在且非空</div>
+    </section>
+
+    <section id="cleanup" class="section">
+      <div class="section-heading"><span class="number">06</span><h2>解析进程由谁回收</h2></div>
+      <p class="prose">一个解析任务不是只有一个 PID：它可能再启动进程池。这里的责任边界是<strong>本次解析的独立进程组</strong>，不是整个 SGLang 服务，也不是单独一个解析器 PID。</p>
+      <div class="table-wrap" tabindex="0" role="region" aria-label="退出场景与清理责任">
+        <table>
+          <thead><tr><th scope="col">场景</th><th scope="col">谁处理</th><th scope="col">具体行为</th></tr></thead>
+          <tbody>
+            <tr><td>正常完成</td><td>worker 的等待逻辑</td><td>等待进程退出，检查退出码和 trace。</td></tr>
+            <tr><td>超时 / 中断 / 解析失败</td><td><code>analyze_npu_profile()</code></td><td><code>killpg(process.pid, SIGKILL)</code>，然后 <code>wait()</code> 回收直接子进程。保留 raw 和日志。</td></tr>
+            <tr><td>worker 被 SIGKILL</td><td>解析进程的父进程死亡保护</td><td>收到内核发来的 SIGTERM，由处理函数终止自己的解析进程组。</td></tr>
+            <tr><td>保护建立前父进程已退出</td><td>父 PID 比较</td><td>发现 <code>getppid()</code> 与传入的 PID 不同，主动终止解析组。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figure class="codebox" id="code-guard">
+        <figcaption><span>_arm_parent_death() · L81–95</span><a href="https://github.com/TallMessiWu/sglang/blob/14bcb8e3d4/python/sglang/multimodal_gen/runtime/utils/npu_profile_analysis.py#L77-L95" target="_blank" rel="noopener noreferrer">查看清理函数</a><button class="copy js-only" type="button" aria-label="复制父进程死亡保护代码">复制</button></figcaption>
+        <pre tabindex="0" aria-label="父进程死亡保护代码"><code>if os.getpgrp() != os.getpid():
+    raise RuntimeError("The NPU parser must run in its own process group")
+signal.signal(signal.SIGTERM, _terminate_parser_group)
+signal.signal(signal.SIGINT, _terminate_parser_group)
+
+libc = ctypes.CDLL("libc.so.6", use_errno=True)
+if libc.prctl(1, signal.SIGTERM) != 0:  # PR_SET_PDEATHSIG
+    error = ctypes.get_errno()
+    raise OSError(error, os.strerror(error))
+
+if os.getppid() != parent_pid:
+    _terminate_parser_group()</code></pre>
+      </figure>
+      <p class="prose"><code>_terminate_parser_group()</code> 调用 <code>os.killpg(os.getpgrp(), signal.SIGKILL)</code>。先检查解析器确实是自己进程组的组长，是为了防止把这套清理逻辑误用到服务所在的进程组。</p>
+      <div class="note warn"><span class="note-label">为什么不能只依赖 finally？</span><p>worker 收到 SIGKILL 时不会执行 Python 的 <code>finally</code>。因此父进程死亡保护必须在解析器这一侧提前建立。这里保持了推理 worker 的 daemon 策略，新增的是仅在 profiling 期间存在的解析任务生命周期。</p></div>
+      <p class="meta">信号处理与进程组回收已有 Linux 进程测试，但不等价于所有真实 CANN/torch_npu 软件栈上的强杀行为均已验收。HTTP 取消、Python 中断与进程 SIGKILL 也不是同一种事件。</p>
+    </section>
+
+    <section id="ranks" class="section">
+      <div class="section-heading"><span class="number">07</span><h2>多 rank 的错误怎样汇总</h2></div>
+      <span class="file-ref">runtime/utils/profiler.py:204–219</span>
+      <p class="prose">每个 rank 可以各自解析成功或失败。如果只看 driver，可能出现“rank 0 成功，rank 1 没有 trace，但请求整体被当作成功”。因此本地解析之后还有一次 replica 内错误汇总。</p>
+      <figure class="codebox" id="code-ranks">
+        <figcaption><span>finish() 的错误汇总 · 源码摘录</span><a href="https://github.com/TallMessiWu/sglang/blob/14bcb8e3d4/python/sglang/multimodal_gen/runtime/utils/profiler.py#L204-L219" target="_blank" rel="noopener noreferrer">查看上下文</a><button class="copy js-only" type="button" aria-label="复制 rank 错误汇总代码">复制</button></figcaption>
+        <pre tabindex="0" aria-label="rank 错误汇总代码"><code>errors = [error]
+if model_parallel_is_initialized():
+    group = get_replica_group()
+    if group.world_size &gt; 1:
+        errors = [None] * group.world_size
+        torch.distributed.all_gather_object(
+            errors, error, group=group.cpu_group
+        )
+if any(errors):
+    raise RuntimeError(
+        "NPU profiler analysis failed: " + "; ".join(e for e in errors if e)
+    )</code></pre>
+      </figure>
+      <div class="table-wrap" tabindex="0" role="region" aria-label="错误汇总示例">
+        <table><thead><tr><th scope="col">rank 0 本地结果</th><th scope="col">rank 1 本地结果</th><th scope="col">汇总后</th></tr></thead><tbody>
+          <tr><td><code>None</code></td><td><code>None</code></td><td>没有解析错误，正常完成。</td></tr>
+          <tr><td><code>None</code></td><td><code>"rank 1: parser failed"</code></td><td>参与收尾的 rank 都收到失败信息，不让 driver 静默成功。</td></tr>
+        </tbody></table>
+      </div>
+      <div class="note boundary"><span class="note-label">这里有一个前提</span><p>这是<strong>正常到达请求收尾阶段</strong>的 rank 之间的解析错误同步，不是通用的 worker 故障恢复机制。不能把它解释成“某个 worker 死亡后，其他 rank 也一定不会等待”。分布式硬故障仍涉及框架自己的故障处理。</p></div>
+    </section>
+
+    <section id="evidence" class="section">
+      <div class="section-heading"><span class="number">08</span><h2>测试证明了什么</h2></div>
+      <p class="prose">本版本记录了 21 项隔离回归。要把<strong>真实执行的机制</strong>与<strong>替身模拟的接口</strong>分开看，尤其不要把进程测试当成 NPU 算子或分布式性能验收。</p>
+      <div class="table-wrap" tabindex="0" role="region" aria-label="测试范围与证据边界">
+        <table><thead><tr><th scope="col">测试文件</th><th scope="col">覆盖内容</th><th scope="col">证据边界</th></tr></thead><tbody>
+          <tr><td><code>test_diffusion_profiler.py</code></td><td>后端归属、短窗口、两步全阶段采集、finish 防重复、错误汇总。</td><td>实际 CPU PyTorch profiler / schedule；NPU 接口与 replica 通信使用 mock。</td></tr>
+          <tr><td><code>test_diffusion_profiler_context.py</code></td><td>成功必须调用 finish；推理错误或中断只停止采集；清理错误不替换原错误。</td><td>本地隔离运行实际 context 方法体，不等价于完整 serving API e2e。</td></tr>
+          <tr><td><code>test_npu_profile_analysis.py</code></td><td>真实 daemon → 新解释器 → 子进程池，目录带空格、产物缺失、超时、中断、worker SIGKILL。</td><td>真实 Linux 进程机制；解析器是假的 torch_npu 模块，不是真正的 CANN 数据解析。</td></tr>
+        </tbody></table>
+      </div>
+      <ul class="prose">
+        <li>用户确认了更新后的 profiling 流程可用，可记作对应场景的用户功能反馈。</li>
+        <li>确认消息未逐项附上模型、rank、软件版本和独立 trace，不能扩展为所有配置通过。</li>
+        <li>记录测试时，标准 SGLang 包导入曾被本机缺少 <code>psutil</code> 阻断；隔离测试通过不等于标准环境完整收集通过。</li>
+        <li>非空文件检查不证明 trace 内容完整；profiling 耗时不代表无 profiler 的推理性能。</li>
+      </ul>
+      <div class="note"><span class="note-label">这不是实时状态表</span><p>这里解释固定提交的实现与当时的证据范围。后续 CI、review、分支和验收进展请查看仓内 <a href="mxfp-refactoring-plan.md">目标与验收记录</a>、<a href="branches.md">分支表</a>，或联网打开 PR；不要从本页推断最新合入状态。</p></div>
+    </section>
+
+    <section id="self-check" class="section">
+      <div class="section-heading"><span class="number">09</span><h2>合上代码，试着回答</h2></div>
+      <p class="prose">先在脑中回答，再展开。能沿着调用链解释这些问题，就理解了这个补丁的核心，而不只是记住几个函数名。</p>
+      <div class="quiz">
+        <details><summary>短窗口已经调用 stop()，请求结束时为什么还能解析？</summary><p><code>stop()</code> 清除的是全局活动引用，不是 context 持有的局部对象。raw 数据已经由原生 profiler 落盘；context 正常结束时再调用同一个对象的 <code>finish()</code>。幂等的 stop 不会重复执行，解析也不会插入剩余去噪步骤。</p></details>
+        <details><summary>为什么 analyse_flag=False 现在不等于放弃解析？</summary><p>只有 NPU daemon 路径会关闭 handler 内解析，后面还有原生 SGLang 请求收尾调用的 <code>finish()</code>。如果只改这个开关、没有接通 finish，那仍然只是保留 raw 的临时方案。</p></details>
+        <details><summary>新解释器和手动 python analyse() 有什么本质区别？</summary><p>解析算法没有变。区别在生命周期与用户接口：SGLang 自动安排、等待、验证产物和回收进程，用户不必另执行命令。这是自动化编排和兼容性修复，不是一种新的解析算法。</p></details>
+        <details><summary>为什么 max_process_number=1 不能直接解决 daemon 限制？</summary><p>它限制的是原生解析池的并行数量，不是取消进程池。只要仍要创建 multiprocessing 子进程，daemon 执行环境的限制就存在。</p></details>
+        <details><summary>子进程退出码为 0，就能宣布 profiling 成功吗？</summary><p>不能。原生库可能只打印错误而不抛异常。还要检查当前 capture 下的非空 <code>trace_view.json</code>。这个检查仍是最低门槛，不是完整内容校验。</p></details>
+        <details><summary>为什么不直接把 worker 改成 daemon=False？</summary><p>那会影响全部推理 worker 的退出语义，尤其是半初始化失败、父进程退出和清理遗漏的场景。本方案保留主进程设计，把新增生命周期责任限制在 profiling 的解析任务上。</p></details>
+        <details><summary>_analysis_finished=True 是否表示解析成功？</summary><p>不是。当前实现先设置这个标志以防重复触发，再尝试停止与解析；失败通过错误路径传播，不自动重试。更准确地说，它代表已经尝试过这一轮收尾。</p></details>
+        <details><summary>多 rank all_gather_object 是不是一个通用防死锁方案？</summary><p>不是。它在各 rank 正常到达收尾时汇总解析错误，避免 driver 忽略其他 rank 的失败。worker 硬故障或某个 rank 根本未到达收尾，需要框架自身的故障处理，不能由这个补丁包办。</p></details>
+      </div>
+      <h3>带着问题回到源码</h3>
+      <p class="meta">下面是固定提交的完整源码链接，点击时需要联网。页面本身和所有学习内容不依赖网络。</p>
+      <ul class="source-list">
+        <li><a href="https://github.com/TallMessiWu/sglang/blob/14bcb8e3d4/python/sglang/multimodal_gen/runtime/pipelines_core/executors/pipeline_executor.py#L329-L362" target="_blank" rel="noopener noreferrer">runtime/pipelines_core/executors/pipeline_executor.py:329</a><small>从 profile_execution() 的 try / except / else 开始，确认请求成功和失败两条路径。</small></li>
+        <li><a href="https://github.com/TallMessiWu/sglang/blob/14bcb8e3d4/python/sglang/multimodal_gen/runtime/utils/profiler.py#L63-L219" target="_blank" rel="noopener noreferrer">runtime/utils/profiler.py:63</a><small>先看后端和 _needs_npu_analysis，再看 stop()、finish()；注意全局引用与局部对象不是一回事。</small></li>
+        <li><a href="https://github.com/TallMessiWu/sglang/blob/14bcb8e3d4/python/sglang/multimodal_gen/runtime/utils/npu_profile_analysis.py" target="_blank" rel="noopener noreferrer">runtime/utils/npu_profile_analysis.py</a><small>分清父 worker 调用的 analyze_npu_profile() 与新解释器执行的 main()。</small></li>
+        <li><a href="https://github.com/TallMessiWu/sglang/tree/14bcb8e3d4/python/sglang/multimodal_gen/test/unit" target="_blank" rel="noopener noreferrer">test/unit/ · 三份 profiler 回归测试</a><small>按“状态与后端 → 请求边界 → 真实进程生命周期”的顺序阅读测试。</small></li>
+      </ul>
+      <p class="callout-line">最终复述：<strong>请求入口决定边界，profiler 管采集与收尾，独立解析器管理解析进程。</strong></p>
+    </section>
+    <footer><p>学习文档基于提交 <code>14bcb8e3d4</code>。教学简写已在代码块标题中标注；完整源码以固定版本链接为准。本页不执行命令、不请求外部资源、不收集阅读数据。</p><a href="#top">返回开头</a></footer>
+  </main>
+</div>
+<div id="copy-status" class="sr-only" role="status" aria-live="polite"></div>
+<script>
+(() => {
+  'use strict';
+  document.documentElement.classList.add('js');
+  const toc = document.getElementById('toc');
+  const wide = window.matchMedia('(min-width: 981px)');
+  const setToc = () => { toc.open = wide.matches; };
+  setToc();
+  if (wide.addEventListener) wide.addEventListener('change', setToc);
+  else if (wide.addListener) wide.addListener(setToc);
+  document.getElementById('print-button').addEventListener('click', () => window.print());
+
+  const navLinks = [...document.querySelectorAll('.toc nav a')];
+  if ('IntersectionObserver' in window) {
+    const observer = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        navLinks.forEach(link => {
+          if (link.getAttribute('href') === '#' + entry.target.id) link.setAttribute('aria-current', 'location');
+          else link.removeAttribute('aria-current');
+        });
+      }
+    }, { rootMargin: '-8% 0px -72% 0px' });
+    document.querySelectorAll('main .section').forEach(section => observer.observe(section));
+  }
+
+  async function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      try { await navigator.clipboard.writeText(text); return; } catch (_) { /* file:// may deny clipboard */ }
+    }
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('aria-label', '待复制的代码');
+    area.style.cssText = 'position:fixed;left:-10000px;top:0';
+    document.body.appendChild(area);
+    try {
+      area.select();
+      if (!document.execCommand('copy')) throw new Error('Clipboard unavailable');
+    } finally { area.remove(); }
+  }
+  document.querySelectorAll('.copy').forEach(button => {
+    button.addEventListener('click', async () => {
+      const text = button.closest('.codebox').querySelector('pre code').textContent;
+      try {
+        await copyText(text);
+        button.textContent = '已复制';
+        document.getElementById('copy-status').textContent = '代码已复制。';
+      } catch (_) {
+        button.textContent = '请手动选择';
+        document.getElementById('copy-status').textContent = '无法访问剪贴板，请手动选择代码复制。';
+      } finally {
+        button.focus({preventScroll: true});
+        window.setTimeout(() => { button.textContent = '复制'; }, 2200);
+      }
+    });
+  });
+
+  const step = (title, text, stopped, finished, instance, raw, trace, process, source) =>
+    ({title, text, stopped, finished, instance, raw, trace, process, source});
+  const scenarios = {
+    full: [
+      step('正式请求进入 context', 'profile=True 且不是 warmup。创建原生 NPU profiler，当前 worker 仍为 daemon。', 'False', 'False', '当前 profiler', '尚未完成', '未生成', '推理 worker', 'entry'),
+      step('pipeline 执行两个正式去噪步', '全阶段采集没有 schedule warmup，两个正式去噪步都处于采集范围内；编码与解码阶段也会被记录。', 'False', 'False', '当前 profiler', '采集中', '未生成', '推理 worker', 'backend'),
+      step('正常收尾：finish() 确保 stop()', 'finish 先标记本轮已尝试收尾，再调用 stop。原生采集停止并落盘，全局活动引用清空，但 context 仍持有 profiler 对象。', 'True', 'True', 'None', '已落盘', '未生成', '推理 worker', 'code-finish'),
+      step('启动独立解析进程并等待', '新的普通 Python 解释器执行 analyse，可以创建原生解析进程池。worker 保持 daemon=True，等待本次解析结果。', 'True', 'True', 'None', '保留', '解析中', '解析器及其进程池', 'analysis'),
+      step('产物通过最低检查', '解析进程退出，trace_view.json 存在且非空。注意：这不是完整内容或算子覆盖率校验。', 'True', 'True', 'None', '保留', '非空 trace', '推理 worker', 'code-native-analysis'),
+      step('汇总 rank 错误，离开 context', '正常抵达收尾的 rank 汇总解析错误；没有错误时，profiling context 正常结束。', 'True', 'True', 'None', '保留', '本 rank 产物通过', '请求收尾', 'ranks')
+    ],
+    short: [
+      step('创建带 schedule 的 profiler', '沿用原有短窗口 schedule；这里演示生命周期节点，不把节点数量当作实际采样步数。', 'False', 'False', '当前 profiler', '采集中', '未生成', '推理 worker', 'backend'),
+      step('原生 schedule 到达导出点', 'daemon 路径的 handler 不做在线解析。原生 profiler 已完成本轮窗口的 raw 落盘；包装器的停止标志还可能尚未设置。', 'False', 'False', '当前 profiler', '窗口已落盘', '未生成', '推理 worker', 'lifecycle'),
+      step('step_denoising_step() 触发 stop()', '包装器在短窗口结束后停止采集并清除全局引用。此时不启动解析进程。', 'True', 'False', 'None', '已落盘', '未生成', '推理 worker', 'lifecycle'),
+      step('继续执行剩余 pipeline', '没有继续录制，也没有在剩余去噪步骤中插入原生解析任务。局部 profiler 对象仍然存在。', 'True', 'False', 'None', '保留', '未生成', '推理 worker', 'entry'),
+      step('请求完成后调用 finish()', 'stop 已执行，所以重复调用直接返回；finish 只为这次 capture 安排一次自动解析。', 'True', 'True', 'None', '保留', '解析中', '解析器及其进程池', 'code-finish'),
+      step('校验产物并汇总结果', '当前 rank 的文件通过最低检查，随后汇总 replica 内错误。成功后请求的 profiling 收尾才完成。', 'True', 'True', 'None', '保留', '本 rank 产物通过', '请求收尾', 'ranks')
+    ],
+    'inference-error': [
+      step('正常开始采集', '本次正式请求已进入 profiling context。', 'False', 'False', '当前 profiler', '采集中', '未生成', '推理 worker', 'entry'),
+      step('pipeline 抛出推理异常', '例如模型执行失败或请求执行中断。错误从 yield 所包围的执行体向外传播。', 'False', 'False', '当前 profiler', '可能不完整', '未生成', '推理 worker', 'entry'),
+      step('异常分支只调用 stop()', '做采集清理，不调用 finish，不启动解析，也不进入解析错误汇总的集体通信。', 'True', 'False', 'None', '保留，可能不完整', '未生成', '推理 worker', 'code-entry'),
+      step('重新抛出原始错误', '如果 stop 清理本身又报错，只记录它；对调用方继续抛出原来的推理异常，不用解析或清理错误覆盖主因。', 'True', 'False', 'None', '保留，可能不完整', '未解析', '原请求错误路径', 'code-entry')
+    ],
+    'parse-error': [
+      step('pipeline 正常完成', '本例中模型没有失败，进入正常 profiling 收尾。', 'False', 'False', '当前 profiler', '采集中', '未生成', '推理 worker', 'entry'),
+      step('finish 停止采集并启动解析', '_analysis_finished 已设为 True，它只是防止重复尝试，不是成功状态。', 'True', 'True', 'None', '已落盘', '解析中', '解析器', 'code-finish'),
+      step('原生 analyse 返回，但没有 trace', '原生库可能只输出错误日志而正常返回。这时不能因为函数返回了就认为解析成功。', 'True', 'True', 'None', '保留', '缺少产物', '解析器', 'code-native-analysis'),
+      step('子进程产物检查失败', '_trace_path 抛出错误，解析入口将 traceback 写入日志并终止解析进程组。父 worker 观察到失败，而不是成功结果。', 'True', 'True', 'None', '保留', '解析失败', '解析器清理 / worker 等待', 'cleanup'),
+      step('汇总并上报解析失败', 'finish 保存本地错误并参加 replica 汇总，随后抛出 RuntimeError。raw 和 sglang_analysis.log 留给诊断，不会被宣布为成功 trace。', 'True', 'True', 'None', '保留', '失败，不报成功', '请求错误路径', 'ranks')
+    ]
+  };
+  let selected = 'full';
+  let index = 0;
+  const keys = ['stopped', 'finished', 'instance', 'raw', 'trace', 'process'];
+  const previous = document.getElementById('step-prev');
+  const next = document.getElementById('step-next');
+  function renderStep() {
+    const steps = scenarios[selected];
+    const current = steps[index];
+    document.getElementById('step-counter').textContent = `步骤 ${index + 1} / ${steps.length}`;
+    document.getElementById('step-title').textContent = current.title;
+    document.getElementById('step-text').textContent = current.text;
+    keys.forEach(key => { document.getElementById('state-' + key).textContent = current[key]; });
+    document.getElementById('step-source').setAttribute('href', '#' + current.source);
+    previous.disabled = index === 0;
+    next.disabled = index === steps.length - 1;
+  }
+  document.getElementById('scenario').addEventListener('change', event => { selected = event.target.value; index = 0; renderStep(); });
+  previous.addEventListener('click', () => { if (index > 0) { index -= 1; renderStep(); } });
+  next.addEventListener('click', () => { if (index < scenarios[selected].length - 1) { index += 1; renderStep(); } });
+  renderStep();
+})();
+</script>
+</body>
+</html>

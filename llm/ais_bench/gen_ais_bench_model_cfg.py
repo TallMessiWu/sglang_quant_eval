@@ -35,6 +35,7 @@ SAMPLING_FIELDS = (
 DATASET_MAX_OUT_LEN = {
     "gpqa_gen_0_shot_cot_chat_prompt": 32768,
     "gsm8k_gen_0_shot_cot_chat_prompt": 4096,
+    "mmmu_gen": 32768,
 }
 
 
@@ -115,7 +116,7 @@ def main() -> None:
     parser.add_argument("--host-port", type=int)
     parser.add_argument("--url")
     parser.add_argument("--model-name")
-    parser.add_argument("--dataset", help="GPQA 默认 32768，GSM8K 默认 4096，其余保留模板长度")
+    parser.add_argument("--dataset", help="GPQA/MMMU 默认 32768，GSM8K 默认 4096，其余保留模板长度")
     parser.add_argument("--sampling-preset", choices=SAMPLING_PRESETS, default="thinking")
     parser.add_argument("--max-out-len", type=int)
     for field in SAMPLING_FIELDS:

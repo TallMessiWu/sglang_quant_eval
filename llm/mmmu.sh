@@ -11,7 +11,7 @@ set -euo pipefail
 #   VLLM_URL        完整 URL，给了它就忽略 VLLM_IP / VLLM_PORT
 #   MODEL_NAME      模型名，不给则由服务的 /v1/models 自行探测
 #   AIS_MODEL_CFG   ais_bench 自带的模型配置模板，默认 vllm_api_general_chat
-#   AIS_MAX_OUT_LEN 默认保留模板值，可覆盖
+#   AIS_MAX_OUT_LEN 默认 32768，可覆盖
 #   AIS_SAMPLING_PRESET 默认 thinking（通用任务思考参数）
 #   AIS_TEMPERATURE / AIS_TOP_P / AIS_TOP_K / AIS_MIN_P /
 #   AIS_PRESENCE_PENALTY / AIS_REPETITION_PENALTY 可逐项覆盖预设。

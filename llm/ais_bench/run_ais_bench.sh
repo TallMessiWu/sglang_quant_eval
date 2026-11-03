@@ -20,7 +20,7 @@ set -euo pipefail
 # 397B 非思考用 non-thinking；预设不负责开关服务端 thinking。
 #
 # 单项覆盖（优先于预设/数据集默认）：
-#   AIS_MAX_OUT_LEN           GPQA 默认 32768，GSM8K 默认 4096，其余保留模板
+#   AIS_MAX_OUT_LEN           GPQA/MMMU 默认 32768，GSM8K 默认 4096，其余保留模板
 #   AIS_TEMPERATURE / AIS_TOP_P / AIS_TOP_K / AIS_MIN_P
 #   AIS_PRESENCE_PENALTY / AIS_REPETITION_PENALTY
 #

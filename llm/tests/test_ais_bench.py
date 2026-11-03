@@ -127,7 +127,7 @@ class AISBenchTests(unittest.TestCase):
             for name, dataset, length in (
                 ("gpqa", "gpqa_gen_0_shot_cot_chat_prompt", 32768),
                 ("gsm8k", "gsm8k_gen_0_shot_cot_chat_prompt", 4096),
-                ("mmmu", "mmmu_gen", 8192),
+                ("mmmu", "mmmu_gen", 32768),
             ):
                 with self.subTest(modern=modern, dataset=dataset):
                     self.run_script(name, {"TEST_MODERN": modern})
@@ -145,6 +145,11 @@ class AISBenchTests(unittest.TestCase):
                     self.assertEqual(model["batch_size"], 200)
                     self.assertFalse(model["stream"])
         self.assertEqual(self.template.read_text(), TEMPLATE)
+
+    def test_mmmu_output_length_can_be_overridden(self):
+        self.run_script("mmmu", {"AIS_MAX_OUT_LEN": "4096"})
+        model, _, _ = self.generated()
+        self.assertEqual(model["max_out_len"], 4096)
 
     def test_all_sampling_presets(self):
         for preset, temperature, top_p, presence_penalty in (
@@ -215,7 +220,10 @@ class AISBenchTests(unittest.TestCase):
         ):
             with self.subTest(text=text):
                 custom.write_text(text)
-                self.run_script("mmmu", {"AIS_MODEL_CFG": "custom.py"})
+                self.run_script(
+                    "ais_bench/run_ais_bench", {"AIS_MODEL_CFG": "custom.py"},
+                    args=("custom_gen",),
+                )
                 model, _, _ = self.generated()
                 self.assertEqual(model["max_out_len"], 777)
                 self.assertEqual(model["generation_kwargs"]["min_p"], 0.0)

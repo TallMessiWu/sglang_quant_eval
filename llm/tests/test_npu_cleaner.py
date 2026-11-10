@@ -990,7 +990,7 @@ class NpuCleanerTests(unittest.TestCase):
         original_python = (self.bin_dir / "python3").read_text()
         self.mock(
             "python3",
-            'if [[ "$1" == */analyze_npu_profile.py ]]; then\n'
+            'if [[ "$1" == */analyze_npu_profile.py || "$1" == */wait_npu_profile.py ]]; then\n'
             '    exec env PYTHONPATH="$TEST_MOCK_PACKAGE" "$TEST_REAL_PYTHON" "$@"\n'
             'fi\n' + original_python,
         )
@@ -1011,9 +1011,24 @@ class NpuCleanerTests(unittest.TestCase):
             '        capture="$SGLANG_DIFFUSION_TORCH_PROFILER_DIR/rank${rank}_ascend_pt"\n'
             '        mkdir -p "$capture"\n'
             '        printf "raw" > "$capture/raw.data"\n'
-            '        if [[ "${TEST_TRACE:-1}" == 1 ]]; then\n'
+            '        if [[ "${TEST_ASYNC:-0}" == 1 ]]; then\n'
+            '            printf \'{"state":"running"}\' > "$capture/sglang_analysis.json"\n'
+            '            (\n'
+            '                /bin/sleep 0.2\n'
+            '                if [[ "${TEST_ASYNC_FAIL:-0}" == 1 && "$rank" == 1 ]]; then\n'
+            '                    printf \'{"state":"failed","error":"rank1 parser failed"}\' > "$capture/status.tmp"\n'
+            '                else\n'
+            '                    mkdir -p "$capture/ASCEND_PROFILER_OUTPUT"\n'
+            '                    printf "{}" > "$capture/ASCEND_PROFILER_OUTPUT/trace_view.json"\n'
+            '                    printf \'{"state":"succeeded"}\' > "$capture/status.tmp"\n'
+            '                fi\n'
+            '                mv "$capture/status.tmp" "$capture/sglang_analysis.json"\n'
+            '            ) > "$capture/test-parser.log" 2>&1 < /dev/null &\n'
+            '        elif [[ "${TEST_TRACE:-1}" == 1 ]]; then\n'
             '            mkdir -p "$capture/ASCEND_PROFILER_OUTPUT"\n'
             '            printf "{}" > "$capture/ASCEND_PROFILER_OUTPUT/trace_view.json"\n'
+            '        else\n'
+            '            printf \'{"state":"failed","error":"no nonempty trace_view.json"}\' > "$capture/sglang_analysis.json"\n'
             '        fi\n'
             '    done\n'
             'fi\n'
@@ -1089,6 +1104,31 @@ class NpuCleanerTests(unittest.TestCase):
                 self.assertNotIn("采集结束", result.stdout)
                 # A broken native export must not be masked by offline auto-repair.
                 self.assertFalse((self.root / "analysis.log").exists())
+
+    def test_i2v_profile_waits_for_async_analysis_on_all_ranks(self):
+        self.mock_i2v_profiler()
+        result = self.run_script(
+            I2V_PROFILER, ("bf16", "0", "1"),
+            {"TEST_SMI_ROWS": "", "TEST_ASYNC": "1"},
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("生成命令成功", result.stdout)
+        self.assertIn("开始等待自动解析结果", result.stdout)
+        self.assertEqual(result.stdout.count("NPU trace:"), 2)
+        self.assertFalse((self.root / "analysis.log").exists())
+
+    def test_i2v_profile_separates_generation_and_async_parser_failure(self):
+        self.mock_i2v_profiler()
+        result = self.run_script(
+            I2V_PROFILER, ("bf16", "0", "1"),
+            {"TEST_SMI_ROWS": "", "TEST_ASYNC": "1", "TEST_ASYNC_FAIL": "1"},
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("生成命令成功", result.stdout)
+        self.assertIn("生成成功，但 profiling 验证失败", result.stdout)
+        self.assertIn("rank1 parser failed", result.stdout)
+        self.assertNotIn("采集结束", result.stdout)
+        self.assertFalse((self.root / "analysis.log").exists())
 
     def test_i2v_profile_rejects_incomplete_rank_set(self):
         self.mock_i2v_profiler()

@@ -6,11 +6,11 @@ usage() {
         '用法: MODEL_PATH=/path/to/model bash ./i2v_profile.sh bf16|mxfp8 [-f|--force] [NPU_ID ... | all]' \
         'BF16 必须指定原始 Wan2.2-I2V-A14B-Diffusers 权重；MXFP8 默认使用现成 MXFP8-G2。' \
         'PROFILE_STEPS=2: 正式生成与采集的去噪步数，可设为 2..40；另有 2 步请求预热。' \
-        '采集全阶段，确保两个去噪步都被记录；由 SGLang 在请求结束前自动解析。' \
+        '采集全阶段，确保两个去噪步都被记录；SGLang 后台解析，生成成功后脚本单独等待结果。' \
         '两组均使用 gyro.jpg、1024x720、81 帧、seed=42 和相同 CPU offload 设置。' \
         '输出: 当前目录/outputs_i2v_profile/<模式>-<唯一运行目录>/{run.log,traces/,video.mp4}' \
         '需安装完整的 NPU profiler 修复；#45550 验证还需同时包含自动 FA 增量。' \
-        '脚本不切分支、不修改 PYTHONPATH；不再用外部解析掩盖运行时导出失败。' \
+        '脚本不切分支、不修改 PYTHONPATH，不启动外部补解析；Ctrl-C 可停止等待而不终止后台解析。' \
         '2 步视频不用于画质验收，也不代表 40 步轨迹；profile 耗时不是无 profiler 的性能结果。'
 }
 
@@ -95,25 +95,10 @@ command=(sglang generate
     "${command[@]}"
 } 2>&1 | tee "$output_dir/run.log"
 
-# Require SGLang's automatic analysis; do not repair missing traces in this launcher.
-captures=0
-while IFS= read -r -d '' capture; do
-    trace="$capture/ASCEND_PROFILER_OUTPUT/trace_view.json"
-    if [[ ! -s "$trace" ]]; then
-        echo "错误：SGLang 未自动生成非空 trace_view.json：$capture；检查 run.log 和 sglang_analysis.log。" >&2
-        exit 1
-    fi
-    captures=$((captures + 1))
-    echo "NPU trace: $trace"
-done < <(find "$SGLANG_DIFFUSION_TORCH_PROFILER_DIR" -type d -name '*_ascend_pt' -print0)
-if [[ "$captures" -eq 0 ]]; then
-    echo "错误：未找到原始 NPU 采集目录；检查 $output_dir/run.log。" >&2
-    exit 1
-fi
-if [[ "$captures" -ne "$NPU_TP_SIZE" ]]; then
-    echo "错误：期望 $NPU_TP_SIZE 份 rank 采集结果，实际只有 $captures 份；检查 $output_dir/run.log。" >&2
-    exit 1
-fi
+echo "生成命令成功，开始等待自动解析结果：$output_dir"
+# Wait only: never repair traces, retry analysis, or kill the detached parser.
+python3 "$script_dir/wait_npu_profile.py" "$SGLANG_DIFFUSION_TORCH_PROFILER_DIR" \
+    --expected-ranks "$NPU_TP_SIZE"
 
 if [[ "$mode" == mxfp8 ]] && ! grep -Fq 'Using MXFP8 quantized Ascend Flash Attention.' "$output_dir/run.log"; then
     echo "错误：未看到运行时 MXFP8 Attention 生效日志；不能将 fallback 当作 #45550 采集成功。检查 $output_dir/run.log" >&2

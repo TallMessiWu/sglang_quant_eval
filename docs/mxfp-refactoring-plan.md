@@ -1,6 +1,6 @@
 # Ascend MXFP 目标与验收
 
-更新：2026-10-30（本轮刷新 #43739/#32602；其他 PR 保留 10-29 快照）。本文件只维护目标、PR 状态、关键证据与未测范围；分支/HEAD 在 [branches.md](branches.md)，格式契约在 [量化概览](quantization-overview.md)，故障机制在 [已知陷阱](known-pitfalls.md)。历史过程由 Git 追溯，不另存流水表。
+更新：2026-11-11（#47856 用户 MXFP8 单 rank 后台解析通过，评审候选已普通快进同步 PR；其他 PR 沿用原记录日期）。本文件只维护目标、PR 状态、关键证据与未测范围；分支/HEAD 在 [branches.md](branches.md)，格式契约在 [量化概览](quantization-overview.md)，故障机制在 [已知陷阱](known-pitfalls.md)。历史过程由 Git 追溯，不另存流水表。
 
 范围：SGLang Ascend 的 SRT Dense/MoE 与 Diffusion，在线 BF16/FP16 量化及离线 ModelSlim。相同执行契约复用 kernel；加载、量化准备与推理分开。Dense 双级 FP4 与 MoE/ModelSlim 单级格式不强行合并，模型名不成为复制量化实现的理由。
 
@@ -23,7 +23,7 @@
 
 ## 活跃 PR
 
-2026-10-29 实时核对：以下 9 个 PR 均 Open、base 为 main、需要 review；#43740/#44366 为 Draft。GitHub 合并检查不是验收结论，操作前仍需刷新。
+原 9 项的整体核对结论为 2026-10-29 快照；后续刷新和新增以各行日期为准。11-11 更新 #47856，其余 PR 保留原记录。GitHub 合并检查不是验收结论，操作前仍需刷新。
 
 | PR | 单一职责 | 当前阻塞 / 下一步 |
 | --- | --- | --- |
@@ -36,6 +36,7 @@
 | [#44365](https://github.com/sgl-project/sglang/pull/44365) | Diffusion MXFP8 委托公共 kernel | 有 run-ci，存在实际 CI 失败；本地落后远端 1 个维护者提交，未自动同步 |
 | [#44366](https://github.com/sgl-project/sglang/pull/44366) | MXFP 能力描述与 preflight | Draft、缺 run-ci；15 项能力及 3 项 adapter CPU/mock 通过，等待 #44365 |
 | [#45550](https://github.com/sgl-project/sglang/pull/45550) | Diffusion MXFP8 自动选择 FA | 10 项隔离 CPU 回归通过；缺 run-ci，自动 FA + I2V 真机待验收；本次 mergeability 为 UNKNOWN |
+| [#47856](https://github.com/sgl-project/sglang/pull/47856) | NPU profiler patch 兼容与共享后台解析 | 11-11 用户回传 review 分支 MXFP8 单 rank I2V：视频保存、worker 退出后后台解析完成，状态 succeeded，trace 约 1.6 GB；旧脚本立即检查造成误报，主仓 `632ab4a` 已提供独立等待。候选已普通快进同步 PR，保留 review 分支；本轮相关回归 42 项 / 41 子测试通过（NPU capture/parser 为替身）。trace 事件完整性、多卡 NPU、LLM 真机、精度和性能未验收；CI/review 待新 head 的结果 |
 
 **#43739 / #32602 的 NPU CI**：10-30 当前 head 的 gate 日志均明确报 `Missing required label 'run-ci'`，且 `PR Draft: false`；NPU suites 被跳过，不是已执行的 kernel 测试失败。证据：[W4A8 gate](https://github.com/sgl-project/sglang/actions/runs/40997985727/job/123875580008)、[W4A4 gate](https://github.com/sgl-project/sglang/actions/runs/40998260885/job/123876442842)。本地隔离回归不能替代 CI 或真机验收。
 
@@ -48,6 +49,7 @@
 - 未合入的线性依赖：**#44365 → #44366**、**#43739 → #32602**。10-30 用户批准 W4A4 重新基于 W4A8，以复用完成度 loader，其他入口不因此增加依赖。
 - 已合入前置：SGLang #32745，kernel #638/#808/#824。源码合入不代表部署 wheel 已包含修复。
 - #45550 延续已关闭 #32041 的自动路由增量；核心 MXFP8 attention 已由 #39438 合入，不重复实现。
+- #47856 直接基于 main，仅修复 profiler，无未合入功能依赖；11-11 将已测 review 候选普通快进同步原 PR，继承 11-09 合入的 main（含已合入的自动 FA）。初次 NPU CI 的缺 `run-ci` 记录不等于新 head 测试通过，等待新一轮 CI/review。
 - #36426 只放独立组合验证分支，不混入正式功能栈。基础分支更新时同轮同步组合分支。
 - 后续更新用普通 merge/追加提交；10-30 的 #32602 rebase/限定 lease 强推为当次明确授权，不构成其他历史改写许可。先查实际 diff，去掉已合入重复代码；新 PR 只在用户点名后创建。
 
@@ -98,6 +100,11 @@
 - Diffusion 在 `diffusion/` 执行：`bash ./i2v_offline_mxfp8.sh 0`。现成权重 `/mnt/share/weight/Wan2.2-I2V-A14B-Diffusers-MXFP8-G2`，无需重新下载/repack。
 - 当前 I2V 脚本面向 #45550 自动 FA 验证，设置 MXFP8 attention 开关，不强制 backend；请求 1024×720、81 帧、40 步。必须看到 `Using MXFP8 quantized Ascend Flash Attention.` 并生成视频；fallback 成功不能算自动 MXFP8 FA 通过，旧 G2 结果不覆盖此配置。
 - 服务器分支/安装由用户手动选择，脚本不切分支或改 PYTHONPATH。普通运行不追加性能或数值验收框架。
+
+### Diffusion NPU profiling（#47856）
+
+- **11-11 用户真机反馈与误报定位**：用户报告在 `junlin/diffusion-npu-profiler-review` 测试，回传 `mxfp8-20261111-161942-spS92f` 的生成日志及状态/解析日志；服务器未另附实际 HEAD、torch_npu/CANN 版本，本地发布候选定位见分支表。MXFP8、单 rank、1024×720 / 81 帧、2 步预热 + 2 步正式生成、全阶段采集，日志出现 `Using MXFP8 quantized Ascend Flash Attention.`。16:24:28 提交解析，16:24:29 保存视频，16:24:30 worker 退出；独立解析日志于 16:26:09 完成，`sglang_analysis.json` 为 `succeeded`、`error: null`，对应 `localhost.localdomain_209805_20261111162246645_ascend_pt/ASCEND_PROFILER_OUTPUT/trace_view.json` 的用户 `ls` 输出约 1.6 GB。结论仅为该场景生成完成及后台自动解析跨 worker 退出产出非空 trace，不是本机 NPU 执行；`RECORD` 警告仍存在，事件覆盖/完整性、多卡 NPU、LLM 真机、精度与性能未验收。
+- **11-11 发布与本地回归**：旧版主仓脚本在生成返回时立即检查 trace，本地用已有异步两 rank fixture 复现与用户完全相同的报错；主仓 `632ab4a` 已提交推送 `wait_npu_profile.py`，只读等待状态，不重启解析，现有采集无需重跑。确认真机结果后，在原 PR worktree 普通快进并推送评审候选，保留 review 分支。相关 6 份 SGLang 测试本轮合计 **42 passed / 41 subtests passed**：39 项及子测试在沙箱内通过，3 项真实两 rank Gloo 最初在初始化时因回环地址解析失败，沙箱外绑定 `GLOO_SOCKET_IFNAME=lo` 后 **3 passed**；NPU capture/parser 仍为替身。另有等待脚本/进程生命周期 **10 passed / 2 subtests passed**。日志在主仓 `.cache/pr47856-review/publish-20261111-*.log`；不将历史 CUDA/NPU 验证扩写为本轮执行。
 
 <a id="g6-performance-archive"></a>
 

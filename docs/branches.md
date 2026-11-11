@@ -1,6 +1,6 @@
 # 分支与版本定位
 
-更新：2026-10-30，本轮实时刷新 #43739、其 #36426 组合分支及 #32602；其余版本记录仍为 10-29 快照。PR 状态/依赖/验收只在 [目标计划](mxfp-refactoring-plan.md) 维护；本文记录版本和恢复入口，不记录逐次操作流水。
+更新：2026-11-11，#47856 评审候选已普通快进同步 PR 分支；其他分支沿用原记录日期，操作前刷新。PR 状态/依赖/验收只在 [目标计划](mxfp-refactoring-plan.md) 维护；本文记录版本和恢复入口，不记录逐次操作流水。
 
 ## 仓库关系
 
@@ -22,7 +22,7 @@ SGLang fork 的默认分支已按用户授权从旧 Diffusion 分支改为 `main
 
 ## 当前 SGLang worktree
 
-以下路径均相对 `sglang/`。清理后共 **14 个**，工作区均干净；除特别注明外，本地与 origin 同步。表中短 SHA 是本轮定位快照，操作前重新查询。
+以下路径均相对 `sglang/`。当前共 **16 个**；工作区及远端同步情况沿用各项记录日期，除特别注明外当时均干净且与 origin 同步。表中短 SHA 是各项定位快照，操作前重新查询。
 
 | 用途 | 分支 | worktree | 本地 HEAD / 差异 |
 | --- | --- | --- | --- |
@@ -36,6 +36,8 @@ SGLang fork 的默认分支已按用户授权从旧 Diffusion 分支改为 `main
 | #44365 | `junlin/pr-diffusion-mxfp8-shared-execution` | `pr_diffusion_mxfp8_shared_execution` | `4cfdf3d543df`；远端 `06f27b4dda`，本地落后 1 个提交 |
 | #44366 | `junlin/pr-ascend-mxfp-capabilities` | `pr_ascend_mxfp_capabilities` | `9f9aa272543e` |
 | #45550 | `junlin/diffusion-mxfp8-fa-auto-selection` | `diffusion_mxfp8_fa_auto_selection` | `ceace1a8d392` |
+| #47856，共享 NPU profiler 修复 | `junlin/diffusion-npu-profiler` | `diffusion_npu_profiler` | `4e5e6ec113`；11-11 从评审候选普通快进并推送；含 11-09 main 基线 `7b917c0eca`、共享导出 `f92c1a263f` 与 11-10 后台解析；原 `5e48ff2baf` 保留在历史中 |
+| #47856 评审候选，暂无独立 PR | `junlin/diffusion-npu-profiler-review` | `diffusion_npu_profiler_review` | `4e5e6ec113`；11-11 已同步至原 PR 分支，保留本分支/worktree；两分支均已普通推送 origin |
 | MoE LoRA，尚无 PR | `junlin-ascend-moe-lora` | `ascend_moe_lora` | `bc9a4d0753f5` |
 | Wan repack 工具 | `junlin/wan-repack-rotation-keys` | `wan_repack_rotation_keys` | `1916bc208baa` |
 | 已合入 #32745 的主 clone | `junlin_qwen3.5_dense_w8a8` | `qwen3.5_dense_w8a8` | `c89095b6e50f`；保留共享 git 元数据 |

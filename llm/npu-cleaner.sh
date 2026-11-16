@@ -99,7 +99,7 @@ try_reassign_devices() {
 
 wait_for_devices() {
     local started=$SECONDS next_check=$SECONDS elapsed remaining key status reassign_status=""
-    printf '\n自动等待 %s 张空闲卡，每 10 秒检查一次；Esc 取消。\n' "${#targets[@]}" >&3
+    printf '\n自动等待 %s 张空闲卡，每 15 秒检查一次；Esc 取消。\n' "${#targets[@]}" >&3
     while true; do
         elapsed=$((SECONDS - started))
         if ((SECONDS >= next_check)); then
@@ -111,7 +111,7 @@ wait_for_devices() {
                     "$((elapsed / 3600))" "$((elapsed / 60 % 60))" "$((elapsed % 60))" "${targets[*]}" >&3
                 return 0
             fi
-            next_check=$((SECONDS + 10))
+            next_check=$((SECONDS + 15))
         fi
         elapsed=$((SECONDS - started))
         remaining=$((next_check - SECONDS))

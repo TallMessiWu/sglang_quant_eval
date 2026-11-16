@@ -684,7 +684,7 @@ class NpuCleanerTests(unittest.TestCase):
                 self.assertIn("visible:3,2,4\n", launch)
                 self.assert_parallel_size(script, launch, 3)
 
-    def test_wait_rechecks_every_ten_seconds_until_enough_cards_are_free(self):
+    def test_wait_rechecks_every_fifteen_seconds_until_enough_cards_are_free(self):
         poll_times = self.root / "poll-times.log"
         self.mock(
             "npu-smi",
@@ -697,20 +697,20 @@ class NpuCleanerTests(unittest.TestCase):
         )
         script = LLM_DIR / "qwen3.5_dense_bf16.sh"
         code, output = self.run_interactive(
-            b"w", script, args=("0", "2", "1"), timeout=30,
+            b"w", script, args=("0", "2", "1"), timeout=45,
             overrides={"TEST_NPU_COUNT": "4", "TEST_POLL_TIMES": str(poll_times)},
         )
         self.assertEqual(code, 0, output)
         self.assertIn("空闲 2/3", output)
         self.assertIn("已等待 00:00:01", output)
-        self.assertIn("已等待 00:00:10", output)
+        self.assertIn("已等待 00:00:15", output)
         self.assertIn("秒后检查", output)
         waiting_output = output.split("已等待", 1)[1].split("等待结束", 1)[0]
         self.assertNotIn("\n", waiting_output, "轮询应覆盖同一行，不能追加换行")
         times = [int(value) for value in poll_times.read_text().splitlines()]
         self.assertEqual(len(times), 4, output)
-        self.assertGreaterEqual(times[2] - times[1], 9)
-        self.assertGreaterEqual(times[3] - times[2], 9)
+        self.assertGreaterEqual(times[2] - times[1], 14)
+        self.assertGreaterEqual(times[3] - times[2], 14)
         self.assertEqual(self.contents(self.kill_log), "")
         self.assertIn("visible:3,2,1\n", self.contents(self.launch_log))
         self.assert_parallel_size(script, self.contents(self.launch_log), 3)

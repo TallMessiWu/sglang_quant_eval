@@ -35,24 +35,29 @@ process_rows() {
 }
 
 try_reassign_devices() {
-    local count snapshot id pid next=0
+    local count snapshot id pid next=0 quiet=false
     local -a free_devices=() candidates=() replacement=()
     local -A busy=() selected=()
+    if [[ ${1:-} == --quiet ]]; then quiet=true; fi
+    reassign_status=""
     if ! count=$(env -u ASCEND_RT_VISIBLE_DEVICES python3 -c 'import torch_npu; print(torch_npu.npu.device_count())') \
         || [[ ! "$count" =~ ^[1-9][0-9]*$ ]]; then
-        echo "无法换卡：无法获取当前可访问的 NPU 数量。" >&3
+        reassign_status="NPU 数量查询失败"
+        if ! "$quiet"; then echo "无法换卡：无法获取当前可访问的 NPU 数量。" >&3; fi
         return 1
     fi
     for id in "${targets[@]}"; do
         if ((id >= count)); then
-            echo "无法换卡：卡号 $id 不在当前可访问范围 0-$((count - 1))。" >&3
+            reassign_status="卡号 $id 不可用"
+            if ! "$quiet"; then echo "无法换卡：卡号 $id 不在当前可访问范围 0-$((count - 1))。" >&3; fi
             return 1
         fi
         selected[$id]=1
     done
     # 按键后重新查询，不使用等待用户输入之前的占用快照。
     if ! snapshot=$(npu-smi info); then
-        echo "无法换卡：无法查询 NPU 进程。" >&3
+        reassign_status="无法查询 NPU 进程"
+        if ! "$quiet"; then echo "无法换卡：无法查询 NPU 进程。" >&3; fi
         return 1
     fi
     while read -r id pid; do
@@ -65,8 +70,11 @@ try_reassign_devices() {
         fi
     done
     if [[ ${#free_devices[@]} -lt ${#targets[@]} ]]; then
-        printf '无法换卡：需要 %s 张卡，当前仅 %s 张空闲（空闲卡：%s）。未改变卡号或终止进程。\n' \
-            "${#targets[@]}" "${#free_devices[@]}" "${free_devices[*]:-无}" >&3
+        reassign_status="空闲 ${#free_devices[@]}/${#targets[@]}"
+        if ! "$quiet"; then
+            printf '无法换卡：需要 %s 张卡，当前仅 %s 张空闲（空闲卡：%s）。未改变卡号或终止进程。\n' \
+                "${#targets[@]}" "${#free_devices[@]}" "${free_devices[*]:-无}" >&3
+        fi
         return 1
     fi
     # 先预留原选卡中的空闲卡，再按升序候选替换占用位置，保持卡数和顺序。
@@ -78,35 +86,37 @@ try_reassign_devices() {
             replacement+=("$id")
         fi
     done
-    if [[ "${replacement[*]}" == "${targets[*]}" ]]; then
-        echo "原选卡当前均已空闲，继续启动，未终止任何进程。" >&3
-    else
-        printf '已换卡：%s -> %s；卡数不变，未终止任何进程。\n' \
-            "${targets[*]}" "${replacement[*]}" >&3
+    if ! "$quiet"; then
+        if [[ "${replacement[*]}" == "${targets[*]}" ]]; then
+            echo "原选卡当前均已空闲，继续启动，未终止任何进程。" >&3
+        else
+            printf '已换卡：%s -> %s；卡数不变，未终止任何进程。\n' \
+                "${targets[*]}" "${replacement[*]}" >&3
+        fi
     fi
     targets=("${replacement[@]}")
 }
 
 wait_for_devices() {
-    local started=$SECONDS next_check=$SECONDS elapsed remaining key status
+    local started=$SECONDS next_check=$SECONDS elapsed remaining key status reassign_status=""
     printf '\n自动等待 %s 张空闲卡，每 10 秒检查一次；Esc 取消。\n' "${#targets[@]}" >&3
     while true; do
         elapsed=$((SECONDS - started))
         if ((SECONDS >= next_check)); then
-            printf '\r\033[K已等待 %02d:%02d:%02d，正在检查空闲 NPU...\n' \
+            printf '\r\033[K已等待 %02d:%02d:%02d，正在检查空闲 NPU...' \
                 "$((elapsed / 3600))" "$((elapsed / 60 % 60))" "$((elapsed % 60))" >&3
-            if try_reassign_devices; then
+            if try_reassign_devices --quiet; then
                 elapsed=$((SECONDS - started))
-                printf '等待结束，共等待 %02d:%02d:%02d，继续启动。\n' \
-                    "$((elapsed / 3600))" "$((elapsed / 60 % 60))" "$((elapsed % 60))" >&3
+                printf '\r\033[K等待结束，共等待 %02d:%02d:%02d，使用 NPU (%s)，继续启动。\n' \
+                    "$((elapsed / 3600))" "$((elapsed / 60 % 60))" "$((elapsed % 60))" "${targets[*]}" >&3
                 return 0
             fi
             next_check=$((SECONDS + 10))
         fi
         elapsed=$((SECONDS - started))
         remaining=$((next_check - SECONDS))
-        printf '\r\033[K已等待 %02d:%02d:%02d，下次检查还有 %2d 秒；Esc 取消。' \
-            "$((elapsed / 3600))" "$((elapsed / 60 % 60))" "$((elapsed % 60))" "$remaining" >&3
+        printf '\r\033[K已等待 %02d:%02d:%02d | %s | %2d 秒后检查；Esc 取消' \
+            "$((elapsed / 3600))" "$((elapsed / 60 % 60))" "$((elapsed % 60))" "$reassign_status" "$remaining" >&3
         # 使用实际时间安排重查；其他按键不会缩短间隔或授权清理。
         if IFS= read -r -s -n 1 -t 1 -u 3 key; then
             if [[ "$key" == $'\e' ]]; then

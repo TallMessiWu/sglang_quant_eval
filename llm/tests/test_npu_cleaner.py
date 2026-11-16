@@ -701,10 +701,12 @@ class NpuCleanerTests(unittest.TestCase):
             overrides={"TEST_NPU_COUNT": "4", "TEST_POLL_TIMES": str(poll_times)},
         )
         self.assertEqual(code, 0, output)
-        self.assertIn("需要 3 张卡，当前仅 2 张空闲", output)
+        self.assertIn("空闲 2/3", output)
         self.assertIn("已等待 00:00:01", output)
         self.assertIn("已等待 00:00:10", output)
-        self.assertIn("下次检查还有", output)
+        self.assertIn("秒后检查", output)
+        waiting_output = output.split("已等待", 1)[1].split("等待结束", 1)[0]
+        self.assertNotIn("\n", waiting_output, "轮询应覆盖同一行，不能追加换行")
         times = [int(value) for value in poll_times.read_text().splitlines()]
         self.assertEqual(len(times), 4, output)
         self.assertGreaterEqual(times[2] - times[1], 9)
@@ -723,7 +725,7 @@ class NpuCleanerTests(unittest.TestCase):
                     on_output=lambda output: next(responses, None) if "已等待 00:00:01" in output else None,
                 )
                 self.assertNotEqual(code, 0, output)
-                self.assertIn("需要 1 张卡，当前仅 0 张空闲", output)
+                self.assertIn("空闲 0/1", output)
                 self.assertEqual(self.contents(self.query_log), "query\nquery\n")
                 self.assertEqual(self.contents(self.kill_log), "")
                 self.assertEqual(self.contents(self.launch_log), "")

@@ -216,7 +216,8 @@ class NpuCleanerTests(unittest.TestCase):
             timeout=5,
         )
 
-    def run_interactive(self, key, script=CLEANER, overrides=None, args=("0",), before_key=None):
+    def run_interactive(self, key, script=CLEANER, overrides=None, args=("0",), before_key=None,
+                        on_output=None, timeout=5):
         self.clear_logs()
         master, slave = pty.openpty()
 
@@ -236,7 +237,7 @@ class NpuCleanerTests(unittest.TestCase):
         os.close(slave)
         output = b""
         sent = False
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + timeout
         try:
             while time.monotonic() < deadline:
                 if select.select([master], [], [], 0.05)[0]:
@@ -247,6 +248,10 @@ class NpuCleanerTests(unittest.TestCase):
                     if not chunk:
                         break
                     output += chunk
+                    if sent and on_output is not None:
+                        response = on_output(output.decode(errors="replace"))
+                        if response:
+                            os.write(master, response)
                 if not sent and "Esc 取消：".encode() in output:
                     self.assertEqual(self.contents(self.kill_log), "")
                     self.assertEqual(self.contents(self.launch_log), "")
@@ -663,6 +668,77 @@ class NpuCleanerTests(unittest.TestCase):
         self.assertEqual(self.contents(self.kill_log), "")
         self.assertEqual(self.contents(self.launch_log), "")
 
+    def test_wait_immediately_uses_free_cards_and_preserves_parallel_size(self):
+        for script, key in (
+            (LLM_DIR / "qwen3.5_dense_bf16.sh", b"w"),
+            (DIFFUSION_LAUNCHERS[0], b"W"),
+        ):
+            with self.subTest(script=script.name, key=key):
+                code, output = self.run_interactive(key, script, args=("0", "2", "1"))
+                self.assertEqual(code, 0, output)
+                self.assertIn("W 自动等待空闲卡", output)
+                self.assertIn("等待结束，共等待", output)
+                self.assertEqual(self.contents(self.query_log), "query\nquery\n")
+                self.assertEqual(self.contents(self.kill_log), "")
+                launch = self.contents(self.launch_log)
+                self.assertIn("visible:3,2,4\n", launch)
+                self.assert_parallel_size(script, launch, 3)
+
+    def test_wait_rechecks_every_ten_seconds_until_enough_cards_are_free(self):
+        poll_times = self.root / "poll-times.log"
+        self.mock(
+            "npu-smi",
+            'printf "query\\n" >> "$TEST_QUERY_LOG"\n'
+            'date +%s >> "$TEST_POLL_TIMES"\n'
+            'if [[ $(wc -l < "$TEST_QUERY_LOG") -lt 4 ]]; then\n'
+            '    printf "%s" "$TEST_SMI_ROWS"\n'
+            'else\n'
+            f'    printf "| 0 | {OWN_PID} | python |\\n"\nfi\n',
+        )
+        script = LLM_DIR / "qwen3.5_dense_bf16.sh"
+        code, output = self.run_interactive(
+            b"w", script, args=("0", "2", "1"), timeout=30,
+            overrides={"TEST_NPU_COUNT": "4", "TEST_POLL_TIMES": str(poll_times)},
+        )
+        self.assertEqual(code, 0, output)
+        self.assertIn("需要 3 张卡，当前仅 2 张空闲", output)
+        self.assertIn("已等待 00:00:01", output)
+        self.assertIn("已等待 00:00:10", output)
+        self.assertIn("下次检查还有", output)
+        times = [int(value) for value in poll_times.read_text().splitlines()]
+        self.assertEqual(len(times), 4, output)
+        self.assertGreaterEqual(times[2] - times[1], 9)
+        self.assertGreaterEqual(times[3] - times[2], 9)
+        self.assertEqual(self.contents(self.kill_log), "")
+        self.assertIn("visible:3,2,1\n", self.contents(self.launch_log))
+        self.assert_parallel_size(script, self.contents(self.launch_log), 3)
+
+    def test_wait_cancellation_and_other_keys_never_kill_or_launch(self):
+        for cancel in (b"\x1b", b"\x03"):
+            with self.subTest(cancel=cancel):
+                responses = iter([cancel])
+                code, output = self.run_interactive(
+                    b"w\npR", LLM_DIR / "qwen3.5_dense_bf16.sh",
+                    overrides={"TEST_NPU_COUNT": "2"},
+                    on_output=lambda output: next(responses, None) if "已等待 00:00:01" in output else None,
+                )
+                self.assertNotEqual(code, 0, output)
+                self.assertIn("需要 1 张卡，当前仅 0 张空闲", output)
+                self.assertEqual(self.contents(self.query_log), "query\nquery\n")
+                self.assertEqual(self.contents(self.kill_log), "")
+                self.assertEqual(self.contents(self.launch_log), "")
+
+    def test_wait_query_failure_keeps_waiting_without_launching(self):
+        code, output = self.run_interactive(
+            b"w\x1b", LLM_DIR / "qwen3.5_dense_bf16.sh",
+            overrides={"TEST_SMI_STATUS_AFTER": "1"},
+        )
+        self.assertEqual(code, 130, output)
+        self.assertIn("无法查询 NPU 进程", output)
+        self.assertIn("取消等待", output)
+        self.assertEqual(self.contents(self.kill_log), "")
+        self.assertEqual(self.contents(self.launch_log), "")
+
     def test_reassign_query_failures_do_not_launch_or_authorize_cleanup(self):
         for overrides in (
             {"TEST_DEVICE_STATUS": "1"},
@@ -694,9 +770,10 @@ class NpuCleanerTests(unittest.TestCase):
                 self.assertEqual(self.contents(self.launch_log), "")
 
     def test_standalone_cleaner_does_not_offer_launch_only_reassignment(self):
-        code, output = self.run_interactive(b"r\x1b")
+        code, output = self.run_interactive(b"rw\x1b")
         self.assertEqual(code, 130, output)
         self.assertNotIn("R 换到空闲卡", output)
+        self.assertNotIn("W 自动等待空闲卡", output)
         self.assertEqual(self.contents(self.kill_log), "")
         self.assertEqual(self.contents(self.device_log), "")
 

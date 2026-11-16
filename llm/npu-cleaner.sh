@@ -87,6 +87,43 @@ try_reassign_devices() {
     targets=("${replacement[@]}")
 }
 
+wait_for_devices() {
+    local started=$SECONDS next_check=$SECONDS elapsed remaining key status
+    printf '\n自动等待 %s 张空闲卡，每 10 秒检查一次；Esc 取消。\n' "${#targets[@]}" >&3
+    while true; do
+        elapsed=$((SECONDS - started))
+        if ((SECONDS >= next_check)); then
+            printf '\r\033[K已等待 %02d:%02d:%02d，正在检查空闲 NPU...\n' \
+                "$((elapsed / 3600))" "$((elapsed / 60 % 60))" "$((elapsed % 60))" >&3
+            if try_reassign_devices; then
+                elapsed=$((SECONDS - started))
+                printf '等待结束，共等待 %02d:%02d:%02d，继续启动。\n' \
+                    "$((elapsed / 3600))" "$((elapsed / 60 % 60))" "$((elapsed % 60))" >&3
+                return 0
+            fi
+            next_check=$((SECONDS + 10))
+        fi
+        elapsed=$((SECONDS - started))
+        remaining=$((next_check - SECONDS))
+        printf '\r\033[K已等待 %02d:%02d:%02d，下次检查还有 %2d 秒；Esc 取消。' \
+            "$((elapsed / 3600))" "$((elapsed / 60 % 60))" "$((elapsed % 60))" "$remaining" >&3
+        # 使用实际时间安排重查；其他按键不会缩短间隔或授权清理。
+        if IFS= read -r -s -n 1 -t 1 -u 3 key; then
+            if [[ "$key" == $'\e' ]]; then
+                printf '\n取消等待，未终止任何进程。\n' >&3
+                exit 130
+            fi
+        else
+            status=$?
+            # read 超时返回大于 128；终端关闭或读取失败则取消启动。
+            if ((status <= 128)); then
+                printf '\n终端读取失败，取消等待。\n' >&2
+                exit 130
+            fi
+        fi
+    done
+}
+
 force=false
 targets=()
 for arg in "$@"; do
@@ -185,7 +222,7 @@ else
         exit 1
     fi
     swap_option=""
-    if "$select_devices"; then swap_option="R 换到空闲卡，"; fi
+    if "$select_devices"; then swap_option="R 换到空闲卡，W 自动等待空闲卡，"; fi
     printf 'NPU (%s) 上有运行进程。Enter 确认强制终止，P 保留进程并继续，%sEsc 取消：' "$TARGETS" "$swap_option" >&3
     while true; do
         if ! IFS= read -r -s -n 1 -u 3 key; then
@@ -208,6 +245,15 @@ else
                         exec 3>&-
                         exit 0
                     fi
+                fi
+                printf '\n请按 Enter 确认强制终止，P 保留进程并继续，%s或 Esc 取消：' "$swap_option" >&3
+                ;;
+            w|W)
+                if "$select_devices"; then
+                    wait_for_devices
+                    report_devices
+                    exec 3>&-
+                    exit 0
                 fi
                 printf '\n请按 Enter 确认强制终止，P 保留进程并继续，%s或 Esc 取消：' "$swap_option" >&3
                 ;;

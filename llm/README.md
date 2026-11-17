@@ -140,6 +140,25 @@ python3 diagnostics/npu_profile_serving.py --help
 python3 diagnostics/summarize_npu_profile.py artifacts/npu-profile/实际目录
 ```
 
+## LLM profiling 功能验证
+
+服务端安装待验证的 SGLang 分支后，沿用普通服务启动脚本。当前上游的 `/start_profile` 和 `/stop_profile` 是管理接口：启动服务前设置 `SGLANG_ADMIN_API_KEY`，采集终端也设置同一个值。以下两个客户端终端都以 `llm/` 为 cwd，默认服务端口 6969，使用同机文件系统。
+
+先在采集终端运行；此命令等待推理产生足够的 forward steps：
+
+```bash
+python3 -m sglang.profiler --url http://127.0.0.1:6969 \
+  --output-dir ./artifacts/npu-profile --num-steps 5
+```
+
+看到等待采集的提示后，在另一个终端用已有脚本发送请求，菜单选择当前服务对应的 tokenizer：
+
+```bash
+NUM_PROMPTS=8 MAX_CONCURRENCY=1 bash ./bench_serving.sh
+```
+
+常规非 daemon SRT 使用原生解析，trace 位于采集命令打印目录下的 `*_ascend_pt/ASCEND_PROFILER_OUTPUT/trace_view.json`，不会生成 SGLang 后台解析状态文件。两个 SRT profiler 入口共享 NPU helper；若要覆盖 V2，在启动服务前设置 `SGLANG_PROFILE_V2=1`，并给采集命令加 `--profile-by-stage`。profile 数据只用于功能和事件检查，不用于吞吐验收。
+
 ## 测试与专题
 
 本仓保留的全部 CPU/mock 回归（不启动模型、不调用真实 kill）：

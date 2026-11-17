@@ -22,6 +22,24 @@ bash ./i2v_offline_mxfp8.sh 0
 
 I2V 脚本将视频、日志和缓存写入执行目录的 `outputs_i2v_mxfp8_fa_check/`，当前请求 1024×720、81 帧、40 步。默认开启 `SGLANG_DIFFUSION_ENABLE_MXFP8_ATTENTION=1`，不强制后端；需要看到运行时 `Using MXFP8 quantized Ascend Flash Attention.`，fallback 生成成功不算 MXFP8 FA 验收。换图片后检查缩放后的 token 对齐。
 
+## I2V profiling
+
+安装包含 [#47856](https://github.com/sgl-project/sglang/pull/47856) 的 SGLang 后，在本目录使用已有采集脚本。默认权重为 `/mnt/share/weight/Wan2.2-I2V-A14B-Diffusers-MXFP8-G2`，可用 `MODEL_PATH` 覆盖；卡号按机器选择。
+
+```bash
+bash ./i2v_profile.sh mxfp8 0
+```
+
+默认 2 步请求预热 + 2 步正式生成，1024×720、81 帧、全阶段采集。脚本会等 SGLang 的后台解析完成，输出位于 `outputs_i2v_profile/mxfp8-*/`，包括 `run.log`、视频和各 rank 的 `traces/`。生成结束与解析完成是两个时点；以各 capture 的 `sglang_analysis.json` 为 `succeeded` 且 `trace_view.json` 非空确认解析完成，不以视频已保存代替。
+
+若只中断了等待，使用已有输出目录继续只读等待，无需重跑生成或启动补解析：
+
+```bash
+python3 ./wait_npu_profile.py ./outputs_i2v_profile/实际运行目录/traces --expected-ranks 1
+```
+
+多卡采集时向 `i2v_profile.sh` 传入多个卡号，并将等待工具的 `--expected-ranks` 改成实际卡数。短步数视频不用于画质验收，开启 profiling 的耗时不作为性能结论。
+
 普通脚本的 `--warmup` 和实际输出以命令为准；运行成功、视频观感、数值与性能不是同一结论。原 G2 已报告场景及新 head 未测范围见 [验收计划](../docs/mxfp-refactoring-plan.md)。本轮将 TI2V BF16 改为原生 `sglang generate` 并删除重复 Python 包装器；只做 CPU/mock 参数回归，尚无此入口迁移后的 NPU 生成结果。
 
 旧的未导出 Cache-DiT shell 赋值已移除，不自动启用缓存；需要时由用户显式配置环境。旧 PR 草稿和 Python `DiffGenerator` 包装器已删除，历史从 Git 取回，不作为部署前置。`diffusion_quant_descriptions/` 只是格式样例，不能代替 checkpoint 自己的完整描述。

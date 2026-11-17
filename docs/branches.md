@@ -36,8 +36,8 @@ SGLang fork 的默认分支已按用户授权从旧 Diffusion 分支改为 `main
 | #44365 | `junlin/pr-diffusion-mxfp8-shared-execution` | `pr_diffusion_mxfp8_shared_execution` | `4cfdf3d543df`；远端 `06f27b4dda`，本地落后 1 个提交 |
 | #44366 | `junlin/pr-ascend-mxfp-capabilities` | `pr_ascend_mxfp_capabilities` | `9f9aa272543e` |
 | #45550 | `junlin/diffusion-mxfp8-fa-auto-selection` | `diffusion_mxfp8_fa_auto_selection` | `ceace1a8d392` |
-| #47856，共享 NPU profiler 修复 | `junlin/diffusion-npu-profiler` | `diffusion_npu_profiler` | `4e5e6ec113`；11-11 从评审候选普通快进并推送；含 11-09 main 基线 `7b917c0eca`、共享导出 `f92c1a263f` 与 11-10 后台解析；原 `5e48ff2baf` 保留在历史中 |
-| #47856 评审候选，暂无独立 PR | `junlin/diffusion-npu-profiler-review` | `diffusion_npu_profiler_review` | `4e5e6ec113`；11-11 已同步至原 PR 分支，保留本分支/worktree；两分支均已普通推送 origin |
+| #47856，共享 NPU profiler 修复 | `junlin/diffusion-npu-profiler` | `diffusion_npu_profiler` | `04e587ef78`；11-17 按评审集中 patch、callback 与完整 NPU stop 流程，已普通推送；继承 main 同步点 `8623ce6edb`，旧评审候选保留在历史中 |
+| #47856 历史评审候选，暂无独立 PR | `junlin/diffusion-npu-profiler-review` | `diffusion_npu_profiler_review` | `4e5e6ec113`；保留 11-11 的分支/worktree 恢复点，未同步 11-17 重构；本次测试使用上行正式 PR 分支 |
 | MoE LoRA，尚无 PR | `junlin-ascend-moe-lora` | `ascend_moe_lora` | `bc9a4d0753f5` |
 | Wan repack 工具 | `junlin/wan-repack-rotation-keys` | `wan_repack_rotation_keys` | `1916bc208baa` |
 | 已合入 #32745 的主 clone | `junlin_qwen3.5_dense_w8a8` | `qwen3.5_dense_w8a8` | `c89095b6e50f`；保留共享 git 元数据 |
